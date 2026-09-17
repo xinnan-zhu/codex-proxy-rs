@@ -4454,18 +4454,16 @@ async fn account_turn_state_override_should_force_value_over_client_echo_and_sav
         vec![b"forced-turn-state".to_vec()]
     );
     let body = captured_request_body(&request);
-    assert_eq!(
-        body.get("turnState"),
-        Some(&json!("forced-turn-state")),
-        "forced value must replace the client echo in the upstream body"
-    );
-    assert!(
-        body.get("turn_state").is_none() && body.get("x-codex-turn-state").is_none(),
-        "forced body write must also drop the alias keys"
-    );
+    for key in ["turnState", "turn_state", "x-codex-turn-state"] {
+        assert!(
+            body.get(key).is_none(),
+            "upstream body must not carry top-level {key}: HTTP 上游会按未知参数拒绝"
+        );
+    }
     assert_eq!(
         body.pointer("/client_metadata/x-codex-turn-state"),
-        Some(&json!("forced-turn-state"))
+        Some(&json!("forced-turn-state")),
+        "client_metadata 是 body 里唯一的 turn state 通道"
     );
 }
 
