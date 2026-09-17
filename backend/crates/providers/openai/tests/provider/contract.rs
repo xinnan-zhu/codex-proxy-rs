@@ -685,6 +685,9 @@ fn contract_account_scope() -> Arc<FrozenAccountScope> {
         "acct_success_exhausted",
         "acct_thread_spawn_affinity",
         "acct_truncated_stream",
+        "acct_turn_state_forced",
+        "acct_turn_state_passthrough",
+        "acct_turn_state_stripped",
         "acct_usage_limit_request_path",
         "acct_websocket_close",
         "acct_websocket_fast_path",
@@ -4379,6 +4382,189 @@ async fn new_or_unidentified_turn_should_not_restore_previous_turn_state() {
         .await;
         assert!(captured_header_values(&request, "x-codex-turn-state").is_empty());
     }
+}
+
+#[tokio::test]
+async fn account_turn_state_override_should_force_value_over_client_echo_and_saved_state() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let account_id = "acct_turn_state_forced";
+    create_account(&store, account_id).await;
+    store.set_turn_state_override(account_id, Some("forced-turn-state".to_owned()));
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(CAPTURE_COMPLETED_SSE),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // 同 turn id 的会话恢复与客户端显式回显都会先于覆盖发生，强制值必须压过两者。
+    let session_state = Map::from_iter([
+        ("account_id".to_owned(), json!(account_id)),
+        ("conversation_id".to_owned(), json!("conversation")),
+        ("turn_state".to_owned(), json!("previous-turn-state")),
+        ("client_turn_id".to_owned(), json!("turn-same")),
+        ("continuation_scope".to_owned(), json!("persisted")),
+    ]);
+    let operation = Operation::Generate(
+        GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object(
+                "openai",
+                Map::from_iter([
+                    ("model".to_owned(), json!("gpt-5.4")),
+                    ("input".to_owned(), json!("current input")),
+                    ("turnState".to_owned(), json!("client-turn-state")),
+                    ("turn_state".to_owned(), json!("client-turn-state")),
+                    ("x-codex-turn-state".to_owned(), json!("client-turn-state")),
+                ]),
+            )
+            .expect("OpenAI payload")
+            .with_context(Map::from_iter([
+                ("use_websocket".to_owned(), json!(false)),
+                ("turn_id".to_owned(), json!("turn-same")),
+                ("turn_state".to_owned(), json!("client-turn-state")),
+            ])),
+        )
+        .with_provider_session_state(
+            ProviderSessionState::new("openai", session_state).expect("provider session state"),
+        ),
+    );
+    let mut stream = provider_with_base_url(&store, server.uri())
+        .execute(
+            planned_request("openai", operation),
+            context("req_turn_state_forced", CancellationToken::new()),
+        )
+        .await
+        .expect("prepare forced turn-state stream");
+    while let Some(event) = stream.next().await {
+        event.expect("forced turn-state response");
+    }
+    let mut requests = server
+        .received_requests()
+        .await
+        .expect("captured forced turn-state request");
+    assert_eq!(requests.len(), 1);
+    let request = requests.pop().expect("single forced turn-state request");
+
+    assert_eq!(
+        captured_header_values(&request, "x-codex-turn-state"),
+        vec![b"forced-turn-state".to_vec()]
+    );
+    let body = captured_request_body(&request);
+    assert_eq!(
+        body.get("turnState"),
+        Some(&json!("forced-turn-state")),
+        "forced value must replace the client echo in the upstream body"
+    );
+    assert!(
+        body.get("turn_state").is_none() && body.get("x-codex-turn-state").is_none(),
+        "forced body write must also drop the alias keys"
+    );
+    assert_eq!(
+        body.pointer("/client_metadata/x-codex-turn-state"),
+        Some(&json!("forced-turn-state"))
+    );
+}
+
+#[tokio::test]
+async fn empty_account_turn_state_override_should_strip_all_turn_state_carriers() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let account_id = "acct_turn_state_stripped";
+    create_account(&store, account_id).await;
+    store.set_turn_state_override(account_id, Some(String::new()));
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(CAPTURE_COMPLETED_SSE),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    // 客户端经管理协议头、正文与 passthrough 副本三处携带 turn state；
+    // 同账号 scope 下这些值本可透传，空串覆盖必须把四个载体全部清掉。
+    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object(
+            "openai",
+            Map::from_iter([
+                ("model".to_owned(), json!("gpt-5.4")),
+                ("input".to_owned(), json!("hello")),
+                ("turnState".to_owned(), json!("client-turn-state")),
+                ("turn_state".to_owned(), json!("client-turn-state")),
+                ("x-codex-turn-state".to_owned(), json!("client-turn-state")),
+                (
+                    "client_metadata".to_owned(),
+                    json!({"x-codex-turn-state": "client-turn-state"}),
+                ),
+            ]),
+        )
+        .expect("OpenAI payload")
+        .with_context(Map::from_iter([
+            ("use_websocket".to_owned(), json!(false)),
+            ("turn_state".to_owned(), json!("client-turn-state")),
+            (
+                "opaque_request_headers".to_owned(),
+                json!([["x-codex-turn-state", STANDARD.encode(b"client-turn-state")]]),
+            ),
+        ])),
+    ));
+    let mut stream = provider_with_base_url(&store, server.uri())
+        .execute(
+            planned_request("openai", operation),
+            context_with_state_owner("req_turn_state_stripped", account_id),
+        )
+        .await
+        .expect("prepare stripped turn-state stream");
+    while let Some(event) = stream.next().await {
+        event.expect("stripped turn-state response");
+    }
+    let mut requests = server
+        .received_requests()
+        .await
+        .expect("captured stripped turn-state request");
+    assert_eq!(requests.len(), 1);
+    let request = requests.pop().expect("single stripped turn-state request");
+
+    assert!(captured_header_values(&request, "x-codex-turn-state").is_empty());
+    let body = captured_request_body(&request);
+    for key in ["turnState", "turn_state", "x-codex-turn-state"] {
+        assert!(body.get(key).is_none(), "body must not carry {key}");
+    }
+    assert!(
+        body.pointer("/client_metadata/x-codex-turn-state")
+            .is_none(),
+        "client_metadata must not carry the turn-state key"
+    );
+}
+
+#[tokio::test]
+async fn account_without_turn_state_override_should_pass_through_client_turn_state() {
+    let protocol_context = Map::from_iter([
+        ("use_websocket".to_owned(), json!(false)),
+        ("turn_state".to_owned(), json!("client-turn-state")),
+    ]);
+    let body = json!({"model": "gpt-5.4", "input": "hello"})
+        .as_object()
+        .expect("request object")
+        .clone();
+    let captured = capture_scoped_http_request(
+        "req_turn_state_passthrough",
+        "acct_turn_state_passthrough",
+        "acct_turn_state_passthrough",
+        body,
+        protocol_context,
+    )
+    .await;
+
+    assert_eq!(
+        captured_header_values(&captured, "x-codex-turn-state"),
+        vec![b"client-turn-state".to_vec()]
+    );
 }
 
 #[tokio::test]

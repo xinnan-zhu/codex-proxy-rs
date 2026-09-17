@@ -8,6 +8,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
+import { turnStateOverrideFromMode, turnStateOverrideInputError, turnStateOverrideModeOf } from '../utils/turnStateOverride'
 import { apiKeyAccountError, emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
 
 type AccountRow = Awaited<ReturnType<typeof getAccounts>>['items'][number]
@@ -26,6 +27,8 @@ export function useAccountEditor(options: {
   const modelAccess = ref<AccountModelAccess | undefined>()
   const proxyMode = shallowRef('preserve')
   const proxyId = shallowRef('')
+  const turnStateOverrideMode = shallowRef('inherit')
+  const turnStateOverrideValue = shallowRef('')
   const selectedGroupIds = ref<string[]>([])
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
@@ -68,6 +71,8 @@ export function useAccountEditor(options: {
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
+    turnStateOverrideMode.value = turnStateOverrideModeOf(account.turnStateOverride)
+    turnStateOverrideValue.value = account.turnStateOverride ?? ''
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
@@ -105,6 +110,11 @@ export function useAccountEditor(options: {
       toast.warning('请选择已通过测试的代理')
       return
     }
+    const turnStateError = turnStateOverrideInputError(turnStateOverrideMode.value, turnStateOverrideValue.value)
+    if (turnStateError) {
+      toast.warning(turnStateError)
+      return
+    }
     if (!scheduling.valid) {
       toast.warning(scheduling.message)
       return
@@ -114,6 +124,7 @@ export function useAccountEditor(options: {
       const settings = {
         accountId,
         notes: notes.value,
+        turnStateOverride: turnStateOverrideFromMode(turnStateOverrideMode.value, turnStateOverrideValue.value),
         outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
@@ -149,6 +160,8 @@ export function useAccountEditor(options: {
     notes.value = ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
+    turnStateOverrideMode.value = 'inherit'
+    turnStateOverrideValue.value = ''
     schedulingEnabled.value = true
     concurrencyLimit.value = ''
     weight.value = '1'
@@ -169,6 +182,8 @@ export function useAccountEditor(options: {
     modelAccess,
     proxyMode,
     proxyId,
+    turnStateOverrideMode,
+    turnStateOverrideValue,
     selectedGroupIds,
     saving,
     open,

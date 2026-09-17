@@ -3,6 +3,7 @@ import type { AccountGroup, AccountModelAccess } from '@/api'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import BaseFormItem from '@/components/base/BaseForm/FormItem.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
+import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseSwitch from '@/components/base/BaseSwitch.vue'
 import AccountModelAccessField from './AccountModelAccessField.vue'
 import AccountProxyField from './AccountProxyField.vue'
@@ -16,7 +17,8 @@ withDefaults(defineProps<{
   preserveProxy?: boolean
   preserveModelAccess?: boolean
   proxyError?: string
-}>(), { preserveProxy: true })
+  showTurnStateOverride?: boolean
+}>(), { preserveProxy: true, showTurnStateOverride: false })
 
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
@@ -25,6 +27,15 @@ const weight = defineModel<string>('weight', { required: true })
 const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
+// 批量编辑暂不支持该字段，未绑定时随 showTurnStateOverride 一并隐藏。
+const turnStateOverrideMode = defineModel<string>('turnStateOverrideMode', { default: 'inherit' })
+const turnStateOverrideValue = defineModel<string>('turnStateOverrideValue', { default: '' })
+
+const turnStateOverrideOptions = [
+  { label: '不覆盖', value: 'inherit', description: '保持客户端原值与会话恢复值透传' },
+  { label: '强制指定值', value: 'force', description: '无论客户端携带什么，一律改写为该值后发给上游' },
+  { label: '剥离发送', value: 'strip', description: '发送前彻底移除 Turn State' },
+]
 </script>
 
 <template>
@@ -73,5 +84,25 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
       />
     </BaseFormItem>
     <AccountProxyField v-model:mode="proxyMode" v-model:proxy-id="proxyId" :preserve="preserveProxy" :error="proxyError" :endpoint="endpoint" :account-id="accountId" :disabled="disabled" />
+    <template v-if="showTurnStateOverride">
+      <BaseFormItem label="Turn State 覆盖">
+        <BaseSelect
+          v-model="turnStateOverrideMode"
+          class="w-full"
+          :options="turnStateOverrideOptions"
+          :disabled="disabled"
+          aria-label="Turn State 覆盖"
+        />
+      </BaseFormItem>
+      <BaseFormItem v-if="turnStateOverrideMode === 'force'" label="覆盖值">
+        <BaseInput
+          v-model="turnStateOverrideValue"
+          aria-label="Turn State 覆盖值"
+          maxlength="2048"
+          placeholder="要强制发送给上游的 Turn State 值"
+          :disabled="disabled"
+        />
+      </BaseFormItem>
+    </template>
   </div>
 </template>

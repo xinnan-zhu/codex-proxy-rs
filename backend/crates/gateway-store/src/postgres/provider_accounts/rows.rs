@@ -126,6 +126,7 @@ pub struct ProviderAccountSummary {
     pub provider_kind: String,
     pub name: String,
     pub notes: Option<String>,
+    pub turn_state_override: Option<String>,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
     pub upstream_account_id: Option<String>,
@@ -190,6 +191,7 @@ pub struct NewProviderAccount {
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
     pub credential_state: CredentialState,
     pub credential_observed_at: DateTime<Utc>,
+    pub turn_state_override: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +325,8 @@ pub struct BatchUpdateProviderAccountsAdmin {
     pub outbound_proxy: Option<gateway_admin::model::proxies::AccountProxySelection>,
     pub account_ids: Vec<String>,
     pub notes: Option<String>,
+    /// 三态：None 不触碰；Some(None) 清除列恢复透传；Some(Some(v)) 写入 v（空串为剥离）。
+    pub turn_state_override: Option<Option<String>>,
     pub enabled: Option<bool>,
     pub concurrency_limit: Option<Option<AccountConcurrencyLimit>>,
     pub weight: Option<AccountWeight>,
@@ -389,7 +393,7 @@ impl ProviderAccountStateUpdate {
     }
 }
 
-pub(crate) const ACCOUNT_SELECT: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const ACCOUNT_SELECT: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, turn_state_override, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -400,7 +404,7 @@ pub(crate) const ACCOUNT_SELECT: &str = "select location_country, location_regio
        on outbound_proxy_id = location_proxy_id
      where id = $1";
 
-pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, turn_state_override, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -412,7 +416,7 @@ pub(crate) const ACCOUNT_SELECT_BY_IDS: &str = "select location_country, locatio
      where id = any($1::text[]) and provider_kind = $2
      order by id";
 
-pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+pub(crate) const REFRESH_CANDIDATES_SELECT: &str = "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, turn_state_override, email, upstream_user_id,
             upstream_account_id, plan_type, authentication_kind, provider_credentials_json, credential_revision,
             has_refresh_token, access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
             provider_quota_json, quota_access_state, quota_evidence, quota_access_observed_at, quota_reset_at,
@@ -492,6 +496,7 @@ pub(crate) fn core_account_from_summary(
     .with_model_access(summary.model_access)
     .with_outbound_proxy(summary.outbound_proxy)
     .with_request_location(summary.request_location)
+    .with_turn_state_override(summary.turn_state_override)
     .with_refresh_schedule(
         summary.has_refresh_token,
         summary.next_refresh_at.map(Into::into),
@@ -561,6 +566,7 @@ pub(crate) fn account_summary_from_row(
         provider_kind: get(&row, "provider_kind")?,
         name: get(&row, "name")?,
         notes: get(&row, "notes")?,
+        turn_state_override: get(&row, "turn_state_override")?,
         email: get(&row, "email")?,
         upstream_user_id: get(&row, "upstream_user_id")?,
         upstream_account_id: get(&row, "upstream_account_id")?,

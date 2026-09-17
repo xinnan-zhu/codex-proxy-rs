@@ -14,6 +14,28 @@ fn validate_account_notes(notes: Option<&str>) -> Result<(), WireValidationError
     Ok(())
 }
 
+fn validate_turn_state_override(value: Option<&str>) -> Result<(), WireValidationError> {
+    // turn state 是单行长 token，任何控制字符都不允许（比 notes 更严格）。
+    if value.is_some_and(|value| {
+        value.chars().count() > 2048 || value.chars().any(|ch| ch.is_control())
+    }) {
+        return Err(WireValidationError::new("turnStateOverride"));
+    }
+    Ok(())
+}
+
+/// 三态字段反序列化：配合 `#[serde(default)]`，缺省→`None`（不修改）、
+/// 显式 `null`→`Some(None)`（清除覆盖恢复透传）、字符串→`Some(Some(值))`。
+/// serde_json 对裸 `Option<Option<_>>` 会把显式 null 折叠成外层 None，必须显式包一层。
+pub(super) fn deserialize_turn_state_override<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AccountProvider {
     OpenAi,
@@ -35,6 +57,9 @@ impl AccountProvider {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountImportSettingsRequest {
     pub notes: Option<String>,
+    /// 缺省不携带；提供时与编辑接口同规则校验，随导入应用到账号。
+    #[serde(default)]
+    pub turn_state_override: Option<String>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub concurrency_limit: Option<u64>,
@@ -46,6 +71,7 @@ pub struct AccountImportSettingsRequest {
 impl AccountImportSettingsRequest {
     fn validate(&self) -> Result<(), WireValidationError> {
         validate_account_notes(self.notes.as_deref())?;
+        validate_turn_state_override(self.turn_state_override.as_deref())?;
         parse_concurrency_limit(self.concurrency_limit)?;
         parse_account_weight(self.weight)?;
         validate_wire_group_ids(&self.group_ids)?;
@@ -57,6 +83,7 @@ impl AccountImportSettingsRequest {
     ) -> Result<gateway_admin::model::accounts::AccountImportSettings, WireValidationError> {
         Ok(gateway_admin::model::accounts::AccountImportSettings {
             notes: self.notes,
+            turn_state_override: self.turn_state_override,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,
             weight: parse_account_weight(self.weight)?,
@@ -218,6 +245,9 @@ pub struct UpdateAccountRequest {
     pub outbound_proxy_url: Option<super::wire::AccountProxyUpdate>,
     pub account_id: String,
     pub notes: Option<String>,
+    /// 三态：缺省不修改；显式 `null` 清除覆盖恢复透传；空串剥离；其他值强制。
+    #[serde(default, deserialize_with = "deserialize_turn_state_override")]
+    pub turn_state_override: Option<Option<String>>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub concurrency_limit: Option<u64>,
@@ -230,6 +260,11 @@ impl UpdateAccountRequest {
     pub fn validate(&self) -> Result<(), WireValidationError> {
         require_account_id(&self.account_id, "accountId")?;
         validate_account_notes(self.notes.as_deref())?;
+        validate_turn_state_override(
+            self.turn_state_override
+                .as_ref()
+                .and_then(|value| value.as_deref()),
+        )?;
         parse_concurrency_limit(self.concurrency_limit)?;
         parse_account_weight(self.weight)?;
         validate_wire_group_ids(&self.group_ids)?;
@@ -245,6 +280,7 @@ impl UpdateAccountRequest {
             )?,
             account_id: self.account_id,
             notes: self.notes,
+            turn_state_override: self.turn_state_override,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,
             weight: parse_account_weight(self.weight)?,
