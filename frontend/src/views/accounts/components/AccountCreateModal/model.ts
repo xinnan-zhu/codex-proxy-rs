@@ -2,6 +2,7 @@ import type { ApiKeyAccountForm } from '../../utils/upstreamApiKey'
 import type { AccountModelAccess } from '@/api'
 import { accountModelAccessError } from '../../utils/modelAccess'
 import { parseAccountSchedulingForm } from '../../utils/schedulingForm'
+import { turnStateOverrideFromMode, turnStateOverrideInputError } from '../../utils/turnStateOverride'
 import { emptyApiKeyAccountForm } from '../../utils/upstreamApiKey'
 
 export type AccountCreateProvider = 'batch' | 'openai' | 'xai'
@@ -25,6 +26,8 @@ export interface AccountCreateForm {
   oauthCallback: string
   proxyMode: string
   proxyId: string
+  turnStateOverrideMode: string
+  turnStateOverrideValue: string
 }
 
 export function emptyAccountCreateForm(): AccountCreateForm {
@@ -44,6 +47,8 @@ export function emptyAccountCreateForm(): AccountCreateForm {
     oauthCallback: '',
     proxyMode: 'direct',
     proxyId: '',
+    turnStateOverrideMode: 'inherit',
+    turnStateOverrideValue: '',
   }
 }
 
@@ -62,11 +67,17 @@ export function accountImportSettings(form: AccountCreateForm) {
   const modelError = accountModelAccessError(form.modelAccess)
   if (modelError)
     throw new Error(modelError)
+  const turnStateError = turnStateOverrideInputError(form.turnStateOverrideMode, form.turnStateOverrideValue)
+  if (turnStateError)
+    throw new Error(turnStateError)
+  const turnStateOverride = turnStateOverrideFromMode(form.turnStateOverrideMode, form.turnStateOverrideValue)
   return {
     modelAccess: form.modelAccess,
     enabled: form.enabled,
     ...scheduling.values,
     groupIds: [...new Set(form.groupIds)],
     notes: form.notes.trim() || undefined,
+    // 缺省（不覆盖）不携带该字段，保持与 notes 一致的“缺省省略”惯例。
+    ...(turnStateOverride === null ? {} : { turnStateOverride }),
   }
 }

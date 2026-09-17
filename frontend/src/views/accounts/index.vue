@@ -177,6 +177,8 @@ const {
   modelAccess: editingModelAccess,
   proxyMode: editingProxyMode,
   proxyId: editingProxyId,
+  turnStateOverrideMode: editingTurnStateOverrideMode,
+  turnStateOverrideValue: editingTurnStateOverrideValue,
   selectedGroupIds: editingGroupIds,
   saving: savingAccountEdit,
   open: openAccountEdit,
@@ -412,6 +414,8 @@ const {
       v-model:model-access="editingModelAccess"
       v-model:proxy-mode="editingProxyMode"
       v-model:proxy-id="editingProxyId"
+      v-model:turn-state-override-mode="editingTurnStateOverrideMode"
+      v-model:turn-state-override-value="editingTurnStateOverrideValue"
       v-model:selected-group-ids="editingGroupIds"
       :configuration-loading="configurationLoading"
       :configuration-ready="configurationReady"

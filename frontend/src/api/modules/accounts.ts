@@ -123,6 +123,8 @@ export interface Account {
   id: string
   name: string
   notes: string | null
+  // 三态：null 不覆盖（透传）、'' 剥离发送、非空字符串强制为该值。
+  turnStateOverride: string | null
   provider: string
   resourceRef: string
   email: string | null
@@ -377,6 +379,8 @@ interface AccountUpdateParam {
   outboundProxyId?: string
   accountId: string
   notes?: string
+  // 缺省不修改该字段；null 恢复透传、'' 剥离发送、非空字符串强制为该值。
+  turnStateOverride?: string | null
   enabled: boolean
   concurrencyLimit: number | null
   weight: number
@@ -402,6 +406,8 @@ interface AccountDeleteParams {
 
 interface AccountImportSettings {
   notes?: string
+  // 缺省不设置（新账号透传）；'' 剥离发送、非空字符串强制为该值。
+  turnStateOverride?: string | null
   enabled: boolean
   concurrencyLimit: number | null
   weight: number

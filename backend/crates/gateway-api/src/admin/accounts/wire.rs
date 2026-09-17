@@ -270,6 +270,7 @@ pub struct AccountView {
     pub id: String,
     pub name: String,
     pub notes: Option<String>,
+    pub turn_state_override: Option<String>,
     pub provider: String,
     pub groups: Vec<AccountGroupRefView>,
     pub resource_ref: String,

@@ -709,11 +709,15 @@ impl AccountStore for PgAdminAccountStore {
         if command.notes.is_some() {
             changed_fields.push("notes".to_owned());
         }
+        if command.turn_state_override.is_some() {
+            changed_fields.push("turn_state_override".to_owned());
+        }
         let config_revision = self
             .accounts
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: vec![command.account_id.clone()],
                 notes: command.notes,
+                turn_state_override: command.turn_state_override,
                 enabled: Some(command.enabled),
                 concurrency_limit: Some(command.concurrency_limit),
                 weight: Some(command.weight),
@@ -880,6 +884,7 @@ impl AccountStore for PgAdminAccountStore {
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: command.account_ids,
                 notes: None,
+                turn_state_override: None,
                 enabled: command.enabled,
                 concurrency_limit: command.concurrency_limit,
                 weight: command.weight,

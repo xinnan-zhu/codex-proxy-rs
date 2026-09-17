@@ -35,6 +35,8 @@ const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', {
 const weight = defineModel<string>('weight', { required: true })
 const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
+const turnStateOverrideMode = defineModel<string>('turnStateOverrideMode', { required: true })
+const turnStateOverrideValue = defineModel<string>('turnStateOverrideValue', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
 </script>
 
@@ -84,6 +86,9 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         v-model:selected-group-ids="selectedGroupIds"
         v-model:proxy-mode="proxyMode"
         v-model:proxy-id="proxyId"
+        v-model:turn-state-override-mode="turnStateOverrideMode"
+        v-model:turn-state-override-value="turnStateOverrideValue"
+        show-turn-state-override
         :groups="groups"
         :groups-loading="groupsLoading"
         :disabled="saving"
