@@ -176,6 +176,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
     clientIp: options.clientIp,
     userAgent: options.userAgent,
     clientTurnStateBytes: null,
+    clientKeyName: options.accountEmail.split('@')[0] ?? null,
   }
 }
 

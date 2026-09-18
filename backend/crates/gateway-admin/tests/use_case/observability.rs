@@ -899,6 +899,7 @@ fn total_record(
         client_ip: None,
         user_agent: None,
         client_turn_state_bytes: None,
+        client_key_name: None,
         reasoning_effort: None,
         reasoning_preset: None,
         subagent_kind: None,

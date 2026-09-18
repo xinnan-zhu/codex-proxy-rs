@@ -102,6 +102,8 @@ pub struct UsageListRecordView {
     pub client_ip: Option<String>,
     pub user_agent: Option<String>,
     pub client_turn_state_bytes: Option<i64>,
+    /// 发起请求的 Client Key 名称；Key 已删除时为 `null`。
+    pub client_key_name: Option<String>,
 }
 
 /// 单条逻辑请求详情展示。

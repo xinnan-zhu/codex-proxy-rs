@@ -16,6 +16,7 @@ import {
   usageBilling,
   usageBillingText,
   usageClientIp,
+  usageClientKeyName,
   usageClientTurnStateBytes,
   usageLatencyDetails,
   usageModelDisplay,
@@ -51,7 +52,7 @@ const latencyDetails = computed(() => props.record ? usageLatencyDetails(props.r
 const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
 const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
 
-const keyDisplay = computed(() => props.record?.clientKeyName || props.record?.clientApiKeyId || '—')
+const keyDisplay = computed(() => (props.record ? usageClientKeyName(props.record) : '—'))
 // turn state 字节数放在标题上一眼可见；未携带该头的请求保持原标题。
 const detailTitle = computed(() => {
   const record = props.record
