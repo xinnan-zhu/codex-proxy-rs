@@ -62,6 +62,8 @@ export interface UsageViewModel {
   userAgent: string | null
   /** 客户端请求头 x-codex-turn-state 的字节数；未携带该头为 null。 */
   clientTurnStateBytes: number | null
+  /** 发起请求的 Client Key 名称；Key 已删除时回退 clientApiKeyId。 */
+  clientKeyName: string | null
   reasoningEffort: string | null
   reasoningPreset: string | null
   compact: boolean
@@ -131,6 +133,7 @@ export function normalizeUsageRecord(record: UsageRecordDetail): UsageViewModel 
     clientIp: record.clientIp,
     userAgent: record.userAgent,
     clientTurnStateBytes: record.clientTurnStateBytes,
+    clientKeyName: record.clientKeyName,
     reasoningEffort: record.reasoningEffort,
     reasoningPreset: record.reasoningPreset,
     compact: record.compact === true,
@@ -197,8 +200,8 @@ export function usageClientTurnStateBytes(record: { clientTurnStateBytes?: numbe
   if (bytes === null || bytes === undefined)
     return '—'
   if (bytes < 1024)
-    return `${bytes} B`
-  return `${(bytes / 1024).toFixed(1)} KB`
+    return `${bytes}B`
+  return `${(bytes / 1024).toFixed(1)}KB`
 }
 
 export function usageReasoningEffort(record: UsageCommonRecord) {

@@ -593,6 +593,8 @@ pub struct UsageRecord {
     pub user_agent: Option<String>,
     /// 客户端请求头 `x-codex-turn-state` 值的字节数；缺头为 `NULL`。
     pub client_turn_state_bytes: Option<i64>,
+    /// 发起请求的 Client Key 名称；Key 已删除或未关联时为 `NULL`。
+    pub client_key_name: Option<String>,
     pub reasoning_effort: Option<String>,
     pub reasoning_preset: Option<String>,
     pub request_kind: Option<String>,

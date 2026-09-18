@@ -169,8 +169,10 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             host(mr.client_ip) as client_ip,
             mr.user_agent, mr.client_turn_state_bytes, mr.reasoning_effort, mr.reasoning_preset, mr.request_kind,
             mr.subagent_kind, mr.compact, mr.image_generation_requested,
-            mr.image_generation_succeeded, mr.started_at, mr.deadline_at, mr.completed_at
-     from model_requests mr";
+            mr.image_generation_succeeded, mr.started_at, mr.deadline_at, mr.completed_at,
+            k.name as client_key_name
+     from model_requests mr
+     left join client_api_keys k on k.id = mr.client_api_key_id";
 
 pub(crate) async fn list_usage_records(
     pool: &PgPool,

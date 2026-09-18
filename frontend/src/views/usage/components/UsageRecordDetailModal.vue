@@ -13,7 +13,6 @@ import { useChartPalette } from '@/composables/useChartPalette'
 import { displayValue, fieldLabelClass, fieldValueBaseClass, fieldValueClass } from '../utils/detail'
 import { formatDuration } from '../utils/format'
 import {
-  usageAccountText,
   usageBilling,
   usageBillingText,
   usageClientIp,
@@ -52,7 +51,14 @@ const latencyDetails = computed(() => props.record ? usageLatencyDetails(props.r
 const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
 const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
 
-const accountDisplay = computed(() => props.record ? usageAccountText(props.record) : '—')
+const keyDisplay = computed(() => props.record?.clientKeyName || props.record?.clientApiKeyId || '—')
+// turn state 字节数放在标题上一眼可见；未携带该头的请求保持原标题。
+const detailTitle = computed(() => {
+  const record = props.record
+  if (!record || record.clientTurnStateBytes === null || record.clientTurnStateBytes === undefined)
+    return '使用记录详情'
+  return `使用记录详情 · Turn State ${usageClientTurnStateBytes(record)}`
+})
 const finalAttemptIndex = computed(() => {
   const attempts = props.record?.attempts ?? []
   const last = attempts[attempts.length - 1]
@@ -280,7 +286,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 <template>
   <BaseModal
     v-model="open"
-    title="使用记录详情"
+    :title="detailTitle"
     description="单次请求的完整链路信息"
     tone="info"
     size="xl"
@@ -292,13 +298,13 @@ const tokenDonutOption = computed<EChartsOption>(() => {
         >
           <div class="col-span-2 min-w-0 lg:col-span-1">
             <dt :class="fieldLabelClass">
-              账号
+              密钥
             </dt>
             <dd
-              class="mt-1.5 mb-0 min-w-0 break-all font-mono text-cp-sm leading-snug font-heavy text-cp-text"
-              :title="displayValue(accountDisplay)"
+              class="mt-1.5 mb-0 min-w-0 truncate font-mono text-cp-sm leading-snug font-heavy text-cp-text"
+              :title="displayValue(keyDisplay)"
             >
-              {{ displayValue(accountDisplay) }}
+              {{ displayValue(keyDisplay) }}
             </dd>
           </div>
 
