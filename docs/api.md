@@ -873,6 +873,7 @@ Client Key 绑定的任一分组开启此限制（包括已禁用分组）时，
 | `POST` | `/api/admin/client-keys/update` | 更新字段 | 原子更新名称、分组范围和限额 |
 | `POST` | `/api/admin/client-keys/enable` | `{ id }` | 启用 |
 | `POST` | `/api/admin/client-keys/disable` | `{ id }` | 禁用 |
+| `POST` | `/api/admin/client-keys/reset-budget` | `{ id }` | 手动清零该 Key 的日/周已用额度，并把滚动窗口锚点重置到当前时刻 |
 | `POST` | `/api/admin/client-keys/delete` | `{ id }` | 删除 |
 
 创建字段为 `name`、可选 `label`、`groupIds`、`maxConcurrency`、`requestsPerMinute`、可选
