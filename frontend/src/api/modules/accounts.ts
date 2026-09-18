@@ -123,8 +123,6 @@ export interface Account {
   id: string
   name: string
   notes: string | null
-  // 三态：null 不覆盖（透传）、'' 剥离发送、非空字符串强制为该值。
-  turnStateOverride: string | null
   // 开启后仅 Codex 官方客户端可调度到该账号；管理端诊断不受限制。
   codexOnly: boolean
   provider: string
@@ -381,8 +379,6 @@ interface AccountUpdateParam {
   outboundProxyId?: string
   accountId: string
   notes?: string
-  // 缺省不修改该字段；null 恢复透传、'' 剥离发送、非空字符串强制为该值。
-  turnStateOverride?: string | null
   // 缺省不修改；true 时仅 Codex 官方客户端可使用此账号。
   codexOnly?: boolean
   enabled: boolean
@@ -412,8 +408,6 @@ interface AccountDeleteParams {
 
 interface AccountImportSettings {
   notes?: string
-  // 缺省不设置（新账号透传）；'' 剥离发送、非空字符串强制为该值。
-  turnStateOverride?: string | null
   // 缺省不设置；提供时把本次导入账号的 Codex 客户端限制统一设为该值。
   codexOnly?: boolean
   enabled: boolean

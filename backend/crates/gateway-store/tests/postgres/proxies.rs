@@ -170,7 +170,6 @@ fn success() -> ProxyTestResult {
 fn update(account_id: &str, selection: AccountProxySelection) -> UpdateAccount {
     UpdateAccount {
         notes: None,
-        turn_state_override: None,
         codex_only: None,
         model_access: Default::default(),
         account_id: account_id.to_owned(),

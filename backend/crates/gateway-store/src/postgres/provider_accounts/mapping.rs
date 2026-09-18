@@ -18,7 +18,6 @@ pub(crate) fn admin_account_record(
         groups: Vec::new(),
         name: summary.name,
         notes: summary.notes,
-        turn_state_override: summary.turn_state_override,
         codex_only: summary.codex_only,
         email: summary.email,
         upstream_user_id: summary.upstream_user_id,
@@ -66,7 +65,6 @@ pub(crate) fn prepared_account(
         model_access: credential.model_access,
         credential_state: credential.credential_state,
         credential_observed_at: credential.credential_observed_at,
-        turn_state_override: None,
         codex_only: None,
     })
 }

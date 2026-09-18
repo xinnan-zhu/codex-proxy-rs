@@ -709,9 +709,6 @@ impl AccountStore for PgAdminAccountStore {
         if command.notes.is_some() {
             changed_fields.push("notes".to_owned());
         }
-        if command.turn_state_override.is_some() {
-            changed_fields.push("turn_state_override".to_owned());
-        }
         if command.codex_only.is_some() {
             changed_fields.push("codex_only".to_owned());
         }
@@ -720,7 +717,6 @@ impl AccountStore for PgAdminAccountStore {
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: vec![command.account_id.clone()],
                 notes: command.notes,
-                turn_state_override: command.turn_state_override,
                 codex_only: command.codex_only,
                 enabled: Some(command.enabled),
                 concurrency_limit: Some(command.concurrency_limit),
@@ -889,7 +885,6 @@ impl AccountStore for PgAdminAccountStore {
             .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
                 account_ids: command.account_ids,
                 notes: None,
-                turn_state_override: None,
                 codex_only: command.codex_only,
                 enabled: command.enabled,
                 concurrency_limit: command.concurrency_limit,

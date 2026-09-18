@@ -22,8 +22,6 @@ pub use gateway_core::account::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountImportSettings {
     pub notes: Option<String>,
-    /// 缺省不携带；提供时应用到导入账号，空串剥离，非空值强制。
-    pub turn_state_override: Option<String>,
     /// 缺省不携带；提供时把本次导入账号的 Codex 客户端限制统一设为该值。
     pub codex_only: Option<bool>,
     pub enabled: bool,
@@ -102,7 +100,6 @@ pub struct AccountRecord {
     pub groups: Vec<AccountGroupRef>,
     pub name: String,
     pub notes: Option<String>,
-    pub turn_state_override: Option<String>,
     pub codex_only: bool,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
@@ -238,8 +235,6 @@ pub struct UpdateAccount {
     pub account_id: String,
     /// 缺省保留备注；空字符串清空备注。
     pub notes: Option<String>,
-    /// 缺省保留现有覆盖；显式 `null` 清除覆盖恢复透传；空字符串剥离，非空值强制。
-    pub turn_state_override: Option<Option<String>>,
     /// 缺省不修改；`Some(v)` 把账号的 Codex 客户端限制设为 `v`。
     pub codex_only: Option<bool>,
     pub enabled: bool,

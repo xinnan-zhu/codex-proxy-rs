@@ -145,16 +145,6 @@ impl MemoryAccountStore {
             .with_request_location(location);
     }
 
-    pub(crate) fn set_turn_state_override(&self, id: &str, turn_state_override: Option<String>) {
-        let id = ProviderAccountId::new(id).expect("account ID");
-        let mut accounts = self.accounts.lock().expect("account store lock");
-        let stored = accounts.get_mut(&id).expect("seeded account");
-        stored.account = stored
-            .account
-            .clone()
-            .with_turn_state_override(turn_state_override);
-    }
-
     pub(crate) fn quota_reads(&self) -> usize {
         self.quota_reads.load(Ordering::SeqCst)
     }

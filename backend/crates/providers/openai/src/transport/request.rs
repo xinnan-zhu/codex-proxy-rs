@@ -561,44 +561,6 @@ pub(crate) fn scope_request_to_account(
     request.turn_metadata = turn_metadata;
 }
 
-/// 按账号配置覆盖 turn state（三态：未配置不调用本函数；非空=强制改写；空串=剥离）。
-///
-/// turn state 在请求里有四个载体，任何一个残留都会让旧值绕开覆盖继续发往上游，
-/// 所以两种语义都必须把它们全部处理掉：
-/// - `request.turn_state`：HTTP `x-codex-turn-state` 头（headers.rs 的 response_headers）
-///   与 WS 帧 client_metadata 投影（client.rs 的 project_websocket_client_metadata）
-///   的共同来源，改它即两个出口一致跟随；置空时 WS 投影还会自动摘除 metadata 键；
-/// - body `turnState` 及别名键 `turn_state`/`x-codex-turn-state`
-///   （见本文件 ACCOUNT_BOUND_STATE_KEYS）：正文顶层参数不是 turn state 的对外
-///   通道——HTTP 上游会按未知参数整体拒绝（Unsupported parameter: turnState），
-///   因此强制与剥离都必须把三个键全部从正文移除，值只走头与 client_metadata；
-/// - `client_metadata["x-codex-turn-state"]`：与 body 同一 Map，是官方 WebSocket
-///   回传 turn state 的通道，与 typed 字段独立演变，不能只依赖投影自动跟随；
-/// - `request.passthrough_headers` 里的原始客户端头：append_passthrough_headers
-///   会 remove 管理头后把它重新 append 回来，形成管理值+客户端原值的多值头，
-///   因此强制与剥离都必须无条件摘除。
-pub(crate) fn apply_turn_state_override(request: &mut CodexResponsesRequest, value: &str) {
-    let strip = value.is_empty();
-    request.turn_state = (!strip).then(|| value.to_owned());
-    // 正文副本强制/剥离都移除：上游只认头与 client_metadata 两个通道。
-    for key in ["turnState", "turn_state", "x-codex-turn-state"] {
-        request.body_mut().remove(key);
-    }
-    if let Some(Value::Object(mut metadata)) = request.client_metadata().cloned() {
-        if strip {
-            metadata.remove(X_CODEX_TURN_STATE_CLIENT_METADATA_KEY);
-        } else {
-            replace_metadata_field(
-                &mut metadata,
-                X_CODEX_TURN_STATE_CLIENT_METADATA_KEY,
-                Some(value),
-            );
-        }
-        request.set_client_metadata((!metadata.is_empty()).then(|| Value::Object(metadata)));
-    }
-    request.passthrough_headers.remove("x-codex-turn-state");
-}
-
 fn metadata_string(request: &CodexResponsesRequest, key: &str) -> Option<String> {
     request
         .client_metadata()?
