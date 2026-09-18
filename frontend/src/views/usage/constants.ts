@@ -2,16 +2,17 @@ import type { UsageDisplayRecord } from './utils/records'
 import type { OpsError } from '@/api'
 import { defineTableColumns } from '@/components/base/BaseTable/columns'
 import { formatProvider } from './utils/format'
+import { usageClientTurnStateBytes } from './utils/records'
 
 type OpsErrorRow = OpsError
 
 export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
   {
-    key: 'accountEmail',
+    key: 'clientKeyName',
     hideable: false,
-    label: '账号',
+    label: '密钥',
     kind: 'identity',
-    size: '3xl',
+    size: '2xl',
   },
   {
     key: 'provider',
@@ -21,16 +22,24 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
     format: (value: unknown) => formatProvider(typeof value === 'string' ? value : null),
   },
   { key: 'model', label: '模型', kind: 'custom', size: 'xl' },
+  {
+    key: 'clientTurnStateBytes',
+    label: '智商',
+    kind: 'status',
+    size: 'sm',
+    format: (value: unknown) =>
+      usageClientTurnStateBytes({ clientTurnStateBytes: typeof value === 'number' ? value : null }),
+  },
   { key: 'reasoningEffort', label: '推理强度', kind: 'status', size: 'lg' },
-  { key: 'route', label: '端点', kind: 'mono' },
+  { key: 'route', label: '端点', kind: 'mono', size: 'lg' },
   { key: 'upstreamTransport', label: '上游', kind: 'status', size: 'md' },
   { key: 'clientTransport', label: '接入', kind: 'status', size: 'md' },
-  { key: 'tokenDetails', label: 'TOKEN', kind: 'numeric', size: 'xl' },
-  { key: 'billing', label: '费用', kind: 'numeric', size: 'lg' },
-  { key: 'latency', label: '延迟', kind: 'numeric', size: 'xl' },
-  { key: 'createdAtDisplay', label: '时间', kind: 'datetime' },
-  { key: 'clientIp', label: 'IP', kind: 'custom', size: '3xl' },
-  { key: 'userAgent', label: 'User-Agent', kind: 'custom', size: '4xl' },
+  { key: 'tokenDetails', label: 'TOKEN', kind: 'numeric', size: 'lg' },
+  { key: 'billing', label: '费用', kind: 'numeric', size: 'md' },
+  { key: 'latency', label: '延迟', kind: 'numeric', size: 'lg' },
+  { key: 'createdAtDisplay', label: '时间', kind: 'datetime', size: 'lg' },
+  { key: 'clientIp', label: 'IP', kind: 'custom', size: 'md' },
+  { key: 'userAgent', label: 'User-Agent', kind: 'custom', size: '2xl' },
   { key: 'actions', label: '操作', kind: 'actions', size: 'sm', hideable: false },
 ])
 

@@ -178,10 +178,6 @@ export function usageTransportTypeClass(transport?: string | null) {
   return 'bg-cp-fill-tertiary text-cp-text-secondary'
 }
 
-export function usageAccountText(record: UsageCommonRecord) {
-  return record.accountEmail || record.accountName || record.accountId || '—'
-}
-
 export function usageAuthenticationKind(record: UsageCommonRecord) {
   return typeof record.authenticationKind === 'string' ? record.authenticationKind : null
 }
@@ -192,6 +188,11 @@ export function usageClientIp(record: { clientIp?: string | null }) {
 
 export function usageUserAgent(record: { userAgent?: string | null }) {
   return record.userAgent || '—'
+}
+
+/** 展示发起请求的 Client Key 名称；Key 已删除时回退客户端 Key ID。 */
+export function usageClientKeyName(record: { clientKeyName?: string | null, clientApiKeyId?: string | null }) {
+  return record.clientKeyName || record.clientApiKeyId || '—'
 }
 
 /** 展示客户端 turn state 字节数：< 1024 显示 B，否则 KB 保留一位小数；未携带为 —。 */

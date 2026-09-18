@@ -1011,6 +1011,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
             client_ip: Some("192.0.2.10".to_owned()),
             user_agent: Some("codex-cli/1.0".to_owned()),
             client_turn_state_bytes: None,
+            client_key_name: None,
             reasoning_effort: Some("max".to_owned()),
             reasoning_preset: Some("ultra".to_owned()),
             subagent_kind: Some("worker".to_owned()),

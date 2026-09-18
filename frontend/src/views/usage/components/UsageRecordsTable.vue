@@ -5,8 +5,8 @@ import { Minimize2 } from '@lucide/vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import {
-  usageAccountText,
   usageAuthenticationKind,
+  usageClientKeyName,
   usageIsCompact,
   usageUserAgent,
 } from '../utils/records'
@@ -47,12 +47,12 @@ withDefaults(
       />
     </template>
 
-    <template #accountEmail="{ row }">
+    <template #clientKeyName="{ row }">
       <span
         class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
-        :title="usageAccountText(row)"
+        :title="usageClientKeyName(row)"
       >
-        {{ usageAccountText(row) }}
+        {{ usageClientKeyName(row) }}
       </span>
     </template>
 
@@ -61,7 +61,10 @@ withDefaults(
     </template>
 
     <template #userAgent="{ row }">
-      <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">
+      <span
+        class="block max-w-full truncate font-mono text-cp-sm leading-none font-emphasis text-cp-text-secondary"
+        :title="usageUserAgent(row)"
+      >
         {{ usageUserAgent(row) }}
       </span>
     </template>
