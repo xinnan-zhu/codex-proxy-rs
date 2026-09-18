@@ -470,7 +470,6 @@ mod provider {
         AccountPageItem {
             account: AccountRecord {
                 notes: None,
-                turn_state_override: None,
                 codex_only: false,
                 model_access: Default::default(),
                 id: "acct_error_test".to_owned(),

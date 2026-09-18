@@ -745,7 +745,6 @@ pub struct ProviderAccount {
     has_refresh_token: bool,
     outbound_proxy: Option<super::OutboundProxy>,
     request_location: Option<super::RequestLocation>,
-    turn_state_override: Option<String>,
     codex_only: bool,
 }
 
@@ -784,7 +783,6 @@ impl ProviderAccount {
             has_refresh_token: false,
             outbound_proxy: None,
             request_location: None,
-            turn_state_override: None,
             codex_only: false,
         }
     }
@@ -835,20 +833,6 @@ impl ProviderAccount {
     #[must_use]
     pub const fn request_location(&self) -> Option<&super::RequestLocation> {
         self.request_location.as_ref()
-    }
-
-    /// 设置按账号覆盖上游 `turn_state` 的三态值：`None` 不覆盖（透传），
-    /// 非空字符串强制为该值，空字符串表示剥离（发送前移除该字段）。
-    #[must_use]
-    pub fn with_turn_state_override(mut self, turn_state_override: Option<String>) -> Self {
-        self.turn_state_override = turn_state_override;
-        self
-    }
-
-    /// 按账号覆盖上游 `turn_state` 的值：`None` 不覆盖；`Some("")` 剥离；其他值强制写入。
-    #[must_use]
-    pub fn turn_state_override(&self) -> Option<&str> {
-        self.turn_state_override.as_deref()
     }
 
     /// 设置是否仅限 Codex 官方客户端调度到该账号；管理端诊断不受此限制。

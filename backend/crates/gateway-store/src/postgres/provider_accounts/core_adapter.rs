@@ -50,7 +50,6 @@ impl ProviderAccountStore for PgProviderAccountRepository {
             ),
             credential_state: account.account.credential_state(),
             credential_observed_at: Utc::now(),
-            turn_state_override: None,
             codex_only: None,
         })
         .await

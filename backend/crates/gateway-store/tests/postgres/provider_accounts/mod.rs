@@ -1176,7 +1176,6 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
         .update_account(
             UpdateAccount {
                 notes: None,
-                turn_state_override: None,
                 codex_only: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1259,7 +1258,6 @@ async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit
     };
     let command = UpdateAccount {
         notes: None,
-        turn_state_override: None,
         codex_only: None,
         model_access: Default::default(),
         account_id: "acct_proxy".to_owned(),
@@ -1334,7 +1332,6 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
     let command = UpdateAccount {
         account_id: "acct_notes".to_owned(),
         notes: Some("  团队备用\n下月续费  ".to_owned()),
-        turn_state_override: None,
         codex_only: None,
         enabled: true,
         concurrency_limit: None,
@@ -1415,7 +1412,6 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
             accounts: vec![account("acct_notes", "notes-user")],
             settings: Some(gateway_admin::model::accounts::AccountImportSettings {
                 notes: None,
-                turn_state_override: None,
                 codex_only: None,
                 enabled: true,
                 concurrency_limit: None,
@@ -1488,7 +1484,6 @@ async fn invalid_account_notes_roll_back_scheduling_revision_and_audit() {
             UpdateAccount {
                 account_id: "acct_notes".to_owned(),
                 notes: Some("备".repeat(501)),
-                turn_state_override: None,
                 codex_only: None,
                 enabled: false,
                 concurrency_limit: None,
@@ -1924,7 +1919,6 @@ async fn authorization_create_returns_existing_account_id_when_identity_is_upser
             AuthorizationCommit {
                 settings: Some(gateway_admin::model::accounts::AccountImportSettings {
                     notes: Some("  OAuth 新建备注  ".to_owned()),
-                    turn_state_override: None,
                     codex_only: None,
                     model_access: Default::default(),
                     enabled: false,
@@ -2126,7 +2120,6 @@ async fn core_refresh_cas_updates_profile_and_credential_under_one_revision() {
             weight: gateway_core::account::AccountWeight::DEFAULT,
             credential_state: CredentialState::Ready,
             credential_observed_at: Utc::now(),
-            turn_state_override: None,
             codex_only: None,
         })
         .await
@@ -2452,7 +2445,6 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
     let revision = repository
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
             notes: None,
-            turn_state_override: None,
             codex_only: None,
             model_access: Default::default(),
             outbound_proxy: None,
@@ -2523,7 +2515,6 @@ async fn credential_rotation_and_settings_share_one_transaction() {
     let settings = UpdateAccount {
         account_id: ACCOUNT_ID.to_owned(),
         notes: Some("统一保存".to_owned()),
-        turn_state_override: None,
         codex_only: None,
         enabled: false,
         concurrency_limit: Some(AccountConcurrencyLimit::new(3).unwrap()),
@@ -2978,7 +2969,6 @@ pub(super) fn account(id: &str, upstream_user_id: &str) -> NewProviderAccount {
         weight: gateway_core::account::AccountWeight::DEFAULT,
         credential_state: CredentialState::Ready,
         credential_observed_at: Utc::now(),
-        turn_state_override: None,
         codex_only: None,
     }
 }
@@ -3163,7 +3153,6 @@ async fn proxy_edit_preserves_an_inflight_token_refresh() {
         .update_account(
             UpdateAccount {
                 notes: None,
-                turn_state_override: None,
                 codex_only: None,
                 model_access: Default::default(),
                 account_id: id.as_str().to_owned(),
@@ -3223,7 +3212,6 @@ async fn account_import_settings_apply_atomically_to_new_and_existing_identities
     .expect("seed group");
     let settings = AccountImportSettings {
         notes: Some("  批量新建\n团队备用  ".to_owned()),
-        turn_state_override: None,
         codex_only: None,
         model_access: Default::default(),
         enabled: false,

@@ -10,37 +10,16 @@
 
 | # | 功能 | 提交 | 上游是否有 |
 |---|------|------|-----------|
-| 1 | 按账号覆盖 X-Codex-Turn-State（三态） | `e8d6ec5e` `33097947` `7a138de7` | 无 |
-| 2 | 账号级「仅限 Codex 官方客户端」开关 | `445215d3` `79673e5a` | 无（模仿 sub2api `codex_cli_only`） |
-| 3 | Client Key 额度手动重置 | `d9297c42` | 无 |
-| 4 | 请求明细统计 turn-state 字节数 | `9e51d04e` | 无 |
-| 5 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 无 |
+| 1 | 账号级「仅限 Codex 官方客户端」开关 | `445215d3` `79673e5a` | 无（模仿 sub2api `codex_cli_only`） |
+| 2 | Client Key 额度手动重置 | `d9297c42` | 无 |
+| 3 | 请求明细统计 turn-state 字节数 | `9e51d04e` | 无 |
+| 4 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 无 |
 | — | 合并上游 v3.10.0 | `00be1c6f` | — |
+| — | 回退按账号覆盖 X-Codex-Turn-State | `e8d6ec5e` `33097947` `7a138de7` 已从应用层移除；补偿迁移 `900004` | 上游本无此功能 |
 
 ---
 
-## 1. 按账号覆盖 X-Codex-Turn-State（三态）
-
-**动机**：按上游账号控制 `X-Codex-Turn-State` 的发送行为，用于多账号（或特定账号）的会话状态实验与排障。
-
-**语义**（`provider_accounts.turn_state_override`）：
-
-| 值 | 行为 |
-|----|------|
-| `NULL`（默认） | 不覆盖，与上游原版一致透传 |
-| 非空字符串 | 强制为该值（同时覆盖客户端本次携带值与同客户端轮次恢复出的旧会话值） |
-| `''`（空串） | 剥离：四个载体全部清除 |
-
-**实现要点**：
-
-- 迁移 `900001_account_turn_state_override.sql`（CHECK ≤2048 字符）。fork 定制迁移统一使用 **90000N 号段**，避免与上游迁移号（当前用到 `0015`）冲突；合并上游前重编号过一次（原 `0015` → `900001`）。
-- 全链路：`gateway-core` ProviderAccount 三件套 → `gateway-store`（rows/mapping/repository/admin_adapter/admin_queries/account_groups/core_adapter）→ `gateway-admin`（model/ports/use_case）→ `gateway-api` admin wire（`turnStateOverride` 三态 wire 字段，update/import/batch 全支持）→ 前端账号表单三态控件（`AccountSettingsFields.vue` + `utils/turnStateOverride.ts`）。
-- **数据面消费点在 providers/openai**（`provider/mod.rs` 选号后、`transport/request.rs` 的 `apply_turn_state_override`），改四个载体：HTTP 头、WS client_metadata、passthrough 头、body 副本。
-- **关键坑（已修复，`33097947`）**：强制值**绝不能写进请求 body 的 `turnState` 键**——HTTP 上游严格校验顶层参数会 400 `Unsupported parameter: turnState`。body 副本只删不写，值只走 header / client_metadata。
-
-**验证**：四场景（透传/强制/剥离/显式 null 清除）对真实上游 sha256 比对全部通过。
-
-## 2. 账号级「仅限 Codex 官方客户端」开关（codex_only）
+## 1. 账号级「仅限 Codex 官方客户端」开关（codex_only）
 
 **动机**：模仿 sub2api 的 `codex_cli_only`，防止非 Codex 客户端的流量打到 Codex 账号上（避免上游风控）。
 
@@ -65,7 +44,7 @@
 
 **与 sub2api 的对齐情况**：开关粒度、识别名单、拒绝文案、诊断豁免均已对齐；sub2api 全局设置里的高级门（黑/白名单、版本上下限、引擎指纹、App Server 开闸、全局 force 旁路）**未搬**。
 
-## 3. Client Key 额度手动重置
+## 2. Client Key 额度手动重置
 
 **动机**：上游只有滚动窗口（24h/168h）到期自动清零，管理员无法手动重置已用额度。
 
@@ -76,18 +55,18 @@
 - `gateway-admin` use_case 走标准 MutationContext 审计模式。
 - 前端：Key 列表操作列新增「重置额度」按钮（RotateCcw 图标 + `BaseConfirmModal` 确认），成功后刷新列表。
 
-## 4. 请求明细统计 turn-state 字节数
+## 3. 请求明细统计 turn-state 字节数
 
 **动机**：观察对话 `X-Codex-Turn-State` 随轮次的增长（实际观察：292B = 满血模型，312B = 降智）。
 
 **实现**：
 
 - 迁移 `900003_request_turn_state_bytes.sql`：`model_requests` 加可空列 `client_turn_state_bytes int4`。
-- **仅统计请求头** `x-codex-turn-state`（用户明确要求；body `turnState` / WS client_metadata 载体不计，注释与 docs/api.md 已注明）。没带该头记 NULL（区别于 0 字节）；统计客户端原始值，账号 override 不影响。
+- **仅统计请求头** `x-codex-turn-state`（用户明确要求；body `turnState` / WS client_metadata 载体不计，注释与 docs/api.md 已注明）。没带该头记 NULL（区别于 0 字节）；统计客户端原始值。
 - 测量点在 HTTP/WS 共用的请求解码层（`OpenAiRequestHeaders.turn_state` 的 `len()`）。
 - 全链路：metadata → `NewModelRequest` → 两个 insert 点 → store 读取 → admin 两个视图（`clientTurnStateBytes`）→ 前端详情「客户端与上游」区「Turn State」行（<1024 显示 `B`，否则一位小数 `KB`）。
 
-## 5. 使用统计列表：密钥列 + 智商列
+## 4. 使用统计列表：密钥列 + 智商列
 
 **动机**：不用点开详情即可看到每请求的发起 key 与满血/降智状态。
 
@@ -103,6 +82,7 @@
 ## 维护说明
 
 - **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。
+- **已回退的 turn_state 覆盖**：`900001` 已冻结，不可删改；`900004` 删除 `provider_accounts.turn_state_override`。已部署实例升级后该列消失，发往上游的 `X-Codex-Turn-State` 恢复与官方一致的透传。
 - **质量门惯例**：每次变更跑 `cargo fmt/check/clippy（-D warnings）` + `pnpm format:check/build`；按用户要求**不跑单测**（测试代码仅补构造点保持可编译）。
 - **部署**：`docker build --target runtime -f deploy/Dockerfile -t cpr-local:<tag> <src>`（必须 `--target runtime`；编译期内存紧张时先加 2G swapfile）；compose 位于 `/root/codex-proxy-rs/deploy/compose.yaml`（`CPR_IMAGE` 切换镜像，内存上限 1100m）。旧镜像保留作回滚。
 - **GitHub**：fork 尚未 push 到远端（等待用户创建仓库）。

@@ -614,7 +614,6 @@ fn account_record(account: &ProviderAccount) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
         notes: None,
-        turn_state_override: None,
         codex_only: false,
         model_access: Default::default(),
         outbound_proxy: None,

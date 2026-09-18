@@ -80,7 +80,6 @@ pub(super) fn account_view(item: AccountDirectoryItem, now: DateTime<Utc>) -> Ac
         id: account.id.clone(),
         name: account.name,
         notes: account.notes,
-        turn_state_override: account.turn_state_override,
         codex_only: account.codex_only,
         provider: account.provider_kind.to_string(),
         groups: account

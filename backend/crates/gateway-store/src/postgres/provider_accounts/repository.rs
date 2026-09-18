@@ -109,7 +109,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         include_disabled: bool,
     ) -> StoreResult<Vec<ProviderAccountSummary>> {
         let rows = sqlx::query(
-            "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, turn_state_override, codex_only, email, upstream_user_id,
+            "select location_country, location_region, location_city, location_timezone, outbound_proxy_url, id, provider_kind, name, notes, codex_only, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
                     access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
@@ -152,11 +152,11 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
                has_refresh_token, access_token_expires_at, next_refresh_at, enabled,
                concurrency_limit, weight, model_access_json, credential_state, provider_quota_json,
                credential_observed_at, quota_access_observed_at, quota_observed_at, created_at, updated_at,
-               turn_state_override, codex_only
+               codex_only
              ) values (
                $18, $19, $1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13,
                $14, $15, coalesce($20, '{\"mode\":\"all\",\"models\":[]}'::jsonb), $16, null, $17, null, null, now(), greatest(now(), $17),
-               $21, $22
+               $21
              )",
         )
         .bind(account.id)
@@ -179,7 +179,6 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         .bind(account.outbound_proxy.as_ref().map(|proxy| proxy.expose_url()))
         .bind(proxy_id)
         .bind(account.model_access.as_ref().map(sqlx::types::Json))
-        .bind(account.turn_state_override)
         .bind(account.codex_only)
         .execute(&mut *transaction)
         .await
@@ -520,14 +519,6 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                     )
                     .await?;
                 }
-                if let Some(turn_state_override) = settings.turn_state_override.as_deref() {
-                    update_provider_account_turn_state_override_in_transaction(
-                        &mut transaction,
-                        &unique_ids,
-                        Some(turn_state_override),
-                    )
-                    .await?;
-                }
                 // 缺省不携带，保留账号已有设置；提供时统一应用到本次导入的全部账号。
                 if let Some(codex_only) = settings.codex_only {
                     update_provider_account_codex_only_in_transaction(
@@ -612,17 +603,6 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                     update_provider_account_notes_in_transaction(&mut transaction, ids, notes)
                         .await?;
                 }
-                // 轮换复用 UpdateAccount 的三态：外层 Some 才触碰该列，
-                // 内层 None（显式 null）清除覆盖，Some(v) 写入（空串为剥离）；
-                // 缺省（外层 None）保留账号已有配置，与 notes 的"未携带不动"一致。
-                if let Some(turn_state_override) = &settings.turn_state_override {
-                    update_provider_account_turn_state_override_in_transaction(
-                        &mut transaction,
-                        ids,
-                        turn_state_override.as_deref(),
-                    )
-                    .await?;
-                }
                 // 布尔开关没有清除语义：Some(v) 直接写入，缺省保留账号已有配置。
                 if let Some(codex_only) = settings.codex_only {
                     update_provider_account_codex_only_in_transaction(
@@ -686,14 +666,6 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                     &mut transaction,
                     &command.account_ids,
                     notes,
-                )
-                .await?;
-            }
-            if let Some(turn_state_override) = &command.turn_state_override {
-                update_provider_account_turn_state_override_in_transaction(
-                    &mut transaction,
-                    &command.account_ids,
-                    turn_state_override.as_deref(),
                 )
                 .await?;
             }
@@ -806,22 +778,6 @@ async fn update_provider_account_notes_in_transaction(
     Ok(())
 }
 
-/// 更新按账号覆盖的 `turn_state`：`None` 表示清除覆盖恢复透传，空串表示剥离，
-/// 两者都是有效状态，不能像 notes 那样用 `nullif` 折叠，也不做 trim。
-async fn update_provider_account_turn_state_override_in_transaction(
-    transaction: &mut Transaction<'_, Postgres>,
-    account_ids: &[String],
-    turn_state_override: Option<&str>,
-) -> StoreResult<()> {
-    sqlx::query("update provider_accounts set turn_state_override = $2 where id = any($1::text[])")
-        .bind(account_ids)
-        .bind(turn_state_override)
-        .execute(&mut **transaction)
-        .await
-        .map_err(|_| postgres_unavailable("update provider account turn state override"))?;
-    Ok(())
-}
-
 /// 更新账号的 Codex 客户端限制开关；调用方按 `Option<bool>` 的携带语义决定是否触碰该列。
 async fn update_provider_account_codex_only_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
@@ -905,11 +861,11 @@ pub(crate) async fn upsert_provider_account_in_transaction(
            has_refresh_token, access_token_expires_at, next_refresh_at, enabled,
            concurrency_limit, weight, model_access_json, credential_state, provider_quota_json,
            credential_observed_at, quota_access_observed_at, quota_observed_at, created_at, updated_at,
-           turn_state_override, codex_only
+           codex_only
          ) values (
            $18, $19, $1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13,
            $14, $15, coalesce($20, '{\"mode\":\"all\",\"models\":[]}'::jsonb), $16, null, $17, null, null, now(), greatest(now(), $17),
-           $21, coalesce($22, false)
+           coalesce($21, false)
          )
          on conflict (
            provider_kind,
@@ -939,7 +895,6 @@ pub(crate) async fn upsert_provider_account_in_transaction(
            quota_observed_at = null,
            last_error_reason = null,
            last_error_message = null,
-           turn_state_override = coalesce(excluded.turn_state_override, provider_accounts.turn_state_override),
            codex_only = coalesce(excluded.codex_only, provider_accounts.codex_only),
            updated_at = greatest(now(), excluded.credential_observed_at)
          returning id",
@@ -964,7 +919,6 @@ pub(crate) async fn upsert_provider_account_in_transaction(
     .bind(account.outbound_proxy.as_ref().map(|proxy| proxy.expose_url()))
     .bind(proxy_id)
     .bind(account.model_access.as_ref().map(sqlx::types::Json))
-    .bind(&account.turn_state_override)
     .bind(account.codex_only)
     .fetch_optional(&mut **transaction)
     .await

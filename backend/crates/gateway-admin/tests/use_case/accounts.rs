@@ -1402,7 +1402,6 @@ async fn accounts_update_should_commit_then_release_disabled_account_and_publish
             &context("update-request"),
             UpdateAccount {
                 notes: None,
-                turn_state_override: None,
                 codex_only: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -1443,7 +1442,6 @@ async fn accounts_update_should_not_notify_provider_when_store_commit_fails() {
             &context("update-failure"),
             UpdateAccount {
                 notes: None,
-                turn_state_override: None,
                 codex_only: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -2528,7 +2526,6 @@ pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
         notes: None,
-        turn_state_override: None,
         codex_only: false,
         model_access: Default::default(),
         outbound_proxy: None,
@@ -2866,7 +2863,6 @@ fn unsupported() -> ProviderAdminError {
 pub(super) fn import_settings() -> gateway_admin::model::accounts::AccountImportSettings {
     gateway_admin::model::accounts::AccountImportSettings {
         notes: Some("团队备用".to_owned()),
-        turn_state_override: None,
         codex_only: None,
         model_access: Default::default(),
         enabled: false,

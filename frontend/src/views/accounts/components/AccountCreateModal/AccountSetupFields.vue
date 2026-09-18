@@ -31,11 +31,8 @@ const form = defineModel<AccountCreateForm>({ required: true })
       v-model:selected-group-ids="form.groupIds"
       v-model:proxy-mode="form.proxyMode"
       v-model:proxy-id="form.proxyId"
-      v-model:turn-state-override-mode="form.turnStateOverrideMode"
-      v-model:turn-state-override-value="form.turnStateOverrideValue"
       v-model:codex-only="form.codexOnly"
       preserve-model-access
-      show-turn-state-override
       show-codex-only
       :groups="groups"
       :groups-loading="groupsLoading"
