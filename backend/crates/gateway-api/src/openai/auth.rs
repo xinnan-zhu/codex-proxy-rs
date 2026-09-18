@@ -201,6 +201,103 @@ pub fn identify_codex_client(headers: &HeaderMap) -> Option<IdentifiedCodexClien
     None
 }
 
+/// Codex 官方客户端家族 UA 前缀（镜像 sub2api `codexOfficialClientUAPrefixes`，
+/// 取证自 codex-rs `is_first_party_originator`）。仅用于 codex_only 账号门控的
+/// 身份判定，与最低版本策略的 `identify_codex_client` 解耦。
+const OFFICIAL_CODEX_UA_PREFIXES: &[&str] = &[
+    "codex_cli_rs/",
+    "codex-tui/",
+    "codex_vscode/",
+    "codex_vscode_copilot/",
+    "codex_app/",
+    "codex_chatgpt_desktop/",
+    "codex_atlas/",
+    "codex_exec/",
+    "codex_sdk_ts/",
+];
+
+/// `Codex ` 前缀家族（如 `Codex Desktop/…`）。保留尾随空格，避免归一化后
+/// 退化为裸 `codex` 而把任意包含 codex 的 UA 放行。
+const OFFICIAL_CODEX_FAMILY_PREFIX: &str = "codex ";
+
+/// 官方 originator 精确集（镜像 sub2api `codexOfficialClientOriginators`）；
+/// app-server `initialize` 会把 clientInfo.name 逐字写入 originator。
+const OFFICIAL_CODEX_ORIGINATORS: &[&str] = &[
+    "codex_cli_rs",
+    "codex-tui",
+    "codex_vscode",
+    "codex_vscode_copilot",
+    "codex_app",
+    "codex_chatgpt_desktop",
+    "codex_atlas",
+    "codex_exec",
+    "codex_sdk_ts",
+];
+
+/// 识别「官方 Codex 客户端」身份，供 codex_only 账号门控使用。
+///
+/// 命中 `identify_codex_client` 的客户端直接沿用其结果（Desktop/CLI）；其余
+/// 官方家族（codex-tui、codex_vscode、codex_exec、codex_atlas 等）归为 `Cli`。
+/// 与最低版本策略无关：未识别的官方家族客户端不受 min version 门禁约束。
+#[must_use]
+pub fn official_codex_client(headers: &HeaderMap) -> Option<CodexClientKind> {
+    const MAXIMUM_HEADER_LENGTH: usize = 4096;
+
+    if let Some(identified) = identify_codex_client(headers) {
+        return Some(identified.kind());
+    }
+    let originator = bounded_ascii_header(headers, "originator", MAXIMUM_HEADER_LENGTH);
+    let user_agent = bounded_ascii_header(headers, "user-agent", MAXIMUM_HEADER_LENGTH);
+    if originator.is_some_and(official_codex_originator)
+        || user_agent.is_some_and(official_codex_ua)
+    {
+        return Some(CodexClientKind::Cli);
+    }
+    None
+}
+
+/// originator 判定：精确集 + `Codex ` 家族前缀，不用「含 codex」宽松兜底。
+fn official_codex_originator(originator: &str) -> bool {
+    let value = originator.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return false;
+    }
+    OFFICIAL_CODEX_ORIGINATORS.contains(&value.as_str())
+        || value.starts_with(OFFICIAL_CODEX_FAMILY_PREFIX)
+}
+
+/// UA 判定：官方前缀集（仅前缀匹配，收窄伪造面）+ `Codex ` 家族前缀 +
+/// 尾部括号组兜底——codex-rs 会把 clientInfo.name 写入 UA 末尾 `(name; version)`，
+/// 前缀被 originator override 改写时仍可恢复真实客户端身份。
+fn official_codex_ua(user_agent: &str) -> bool {
+    let ua = user_agent.trim().to_ascii_lowercase();
+    if ua.is_empty() {
+        return false;
+    }
+    if OFFICIAL_CODEX_UA_PREFIXES
+        .iter()
+        .any(|prefix| ua.starts_with(prefix))
+    {
+        return true;
+    }
+    if ua.starts_with(OFFICIAL_CODEX_FAMILY_PREFIX) {
+        return true;
+    }
+    official_ua_trailer_name(&ua).is_some_and(|name| official_codex_originator(&name))
+}
+
+/// 提取 codex-rs 格式 UA 最后一个括号组里的 clientInfo.name（`;` 之前部分）。
+fn official_ua_trailer_name(ua: &str) -> Option<String> {
+    let last = ua.rfind('(')?;
+    let rest = &ua[last + 1..];
+    let close = rest.find(')')?;
+    let name = rest[..close].trim().split(';').next().unwrap_or("").trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_ascii_lowercase())
+}
+
 fn bounded_ascii_header<'a>(
     headers: &'a HeaderMap,
     name: &'static str,

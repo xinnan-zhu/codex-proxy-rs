@@ -132,8 +132,7 @@ pub(in crate::openai) fn request_client_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    let codex_client =
-        crate::openai::auth::identify_codex_client(headers).map(|client| client.kind());
+    let codex_client = crate::openai::auth::official_codex_client(headers);
     (client_ip, user_agent, codex_client)
 }
 
