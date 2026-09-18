@@ -95,6 +95,14 @@ impl ClientKeyStore for TestClientKeyStore {
         Err(unused())
     }
 
+    async fn reset_client_key_budget(
+        &self,
+        _: &ClientApiKeyId,
+        _: &MutationContext,
+    ) -> AdminStoreResult<(Revision, ClientKeyRecord)> {
+        Err(unused())
+    }
+
     async fn set_client_key_enabled(
         &self,
         _: SetClientKeyEnabled,

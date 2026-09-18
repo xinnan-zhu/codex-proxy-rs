@@ -47,14 +47,17 @@ const {
   showFormModal,
   showDeleteModal,
   showSingleDeleteModal,
+  showResetBudgetModal,
   showKeyModal,
   showAllAccountsConfirm,
   createdKey,
   createdKeyName,
   editingKey,
   pendingDeleteKey,
+  pendingResetBudgetKey,
   savingKey,
   deletingKey,
+  resettingBudget,
   batchDeleting,
   updatingStatusKeyIds,
   revealingKeyIds,
@@ -67,6 +70,8 @@ const {
   handleDelete,
   handleBatchDelete,
   handleToggleStatus,
+  requestResetBudget,
+  handleResetBudget,
   copyToClipboard,
   revealPlaintextKey,
   copyApiKey,
@@ -188,10 +193,12 @@ watch(
                 :deleting="deletingKey"
                 :revealing="revealingKeyIds.has(row.id)"
                 :updating-status="updatingStatusKeyIds.has(row.id)"
+                :resetting-budget="resettingBudget && pendingResetBudgetKey?.id === row.id"
                 @edit="openEdit"
                 @delete="requestDeleteKey"
                 @import-ccs="importToCcs"
                 @toggle="handleToggleStatus"
+                @reset-budget="requestResetBudget"
                 @use="openUseKeyModal"
               />
             </template>
@@ -265,6 +272,19 @@ watch(
     >
       <p class="m-0">
         确定删除 {{ pendingDeleteKey?.name || pendingDeleteKey?.prefix || '该 API Key' }} 吗？
+      </p>
+    </BaseConfirmModal>
+
+    <BaseConfirmModal
+      v-model="showResetBudgetModal"
+      title="重置额度"
+      description="将该 Key 的已用额度清零并重置统计窗口？"
+      confirm-text="确认重置"
+      :loading="resettingBudget"
+      @confirm="handleResetBudget"
+    >
+      <p class="m-0">
+        重置后 {{ pendingResetBudgetKey?.name || pendingResetBudgetKey?.prefix || '该 API Key' }} 的日/周已用额度将清零，统计窗口从当前时刻重新计算。
       </p>
     </BaseConfirmModal>
   </div>

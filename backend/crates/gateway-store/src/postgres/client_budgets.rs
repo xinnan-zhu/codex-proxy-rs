@@ -209,6 +209,33 @@ async fn advance_windows(
     Ok(())
 }
 
+/// 管理端手动重置：清零日/周已用额度，并把滚动窗口锚点强制重置到 `now`。
+/// 锚定语义与 `advance_windows` 一致（daily 为 Asia/Shanghai 日界起的 24 小时，weekly 为 168 小时）；
+/// 不触碰 `client_key_charge_events`，费用事件仍按原 request_id 幂等。
+pub(crate) async fn reset_client_key_budget_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    key_id: &str,
+    now: DateTime<Utc>,
+) -> StoreResult<()> {
+    sqlx::query("insert into client_key_budget_windows
+        (client_api_key_id, daily_start, daily_end, weekly_start, weekly_end, daily_used_usd, weekly_used_usd)
+        select $1, day, day + interval '24 hours', day, day + interval '168 hours', 0, 0
+        from (select date_trunc('day', $2::timestamptz at time zone 'Asia/Shanghai') at time zone 'Asia/Shanghai' as day) d
+        on conflict (client_api_key_id) do update set
+            daily_start = excluded.daily_start,
+            daily_end = excluded.daily_end,
+            daily_used_usd = 0,
+            weekly_start = excluded.weekly_start,
+            weekly_end = excluded.weekly_end,
+            weekly_used_usd = 0")
+        .bind(key_id)
+        .bind(now)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|_| postgres_unavailable("reset client key budget windows"))?;
+    Ok(())
+}
+
 pub(super) async fn load_client_key_budgets(
     pool: &PgPool,
     records: &mut [super::ClientApiKeyRecord],

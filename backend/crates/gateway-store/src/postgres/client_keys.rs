@@ -44,7 +44,10 @@ use crate::{
     postgres_unavailable, require_nonempty,
 };
 
-use super::{ControlPlaneRepository, PgControlPlaneRepository};
+use super::{
+    ControlPlaneRepository, PgControlPlaneRepository, append_admin_audit_event_in_transaction,
+    bump_config_revision_in_transaction, finish_admin_transaction,
+};
 
 const ENTITY: &str = "client API key";
 const CLIENT_API_KEY_LAST_USED_FLUSH_DELAY: Duration = Duration::from_secs(1);
@@ -858,6 +861,59 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .await
             .map_err(|error| admin_store_error(ENTITY, error))?;
         Ok((admin_revision(revision)?, self.required_record(&id).await?))
+    }
+
+    async fn reset_client_key_budget(
+        &self,
+        id: &ClientApiKeyId,
+        context: &MutationContext,
+    ) -> AdminStoreResult<(gateway_admin::model::Revision, AdminClientKeyRecord)> {
+        let mut transaction = self.keys.pool.begin().await.map_err(|_| {
+            admin_store_error(
+                ENTITY,
+                postgres_unavailable("begin client key budget reset"),
+            )
+        })?;
+        let result = async {
+            // 与准入/结算相同的锁顺序：先锁 Key 行再写窗口，串行化同一 Key 的并发结算，
+            // 避免重置与进行中的费用累计互相覆盖。
+            let key = sqlx::query_scalar::<_, String>(
+                "select id from client_api_keys where id = $1 for update",
+            )
+            .bind(id.as_str())
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|_| postgres_unavailable("lock client key for budget reset"))?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: ENTITY,
+                id: id.as_str().to_owned(),
+            })?;
+            super::client_budgets::reset_client_key_budget_in_transaction(
+                &mut transaction,
+                &key,
+                Utc::now(),
+            )
+            .await?;
+            let revision = bump_config_revision_in_transaction(&mut transaction).await?;
+            append_admin_audit_event_in_transaction(
+                &mut transaction,
+                mutation_audit(
+                    context,
+                    "reset_budget",
+                    "client_api_key",
+                    id.as_str(),
+                    vec!["daily_used_usd".to_owned(), "weekly_used_usd".to_owned()],
+                ),
+                revision,
+            )
+            .await?;
+            Ok(revision)
+        }
+        .await;
+        let revision = finish_admin_transaction(transaction, result, "reset client key budget")
+            .await
+            .map_err(|error| admin_store_error(ENTITY, error))?;
+        Ok((admin_revision(revision)?, self.required_record(id).await?))
     }
 
     async fn delete_client_key(

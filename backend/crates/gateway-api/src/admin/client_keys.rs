@@ -699,6 +699,10 @@ where
             post(disable_client_key::<S>),
         )
         .route(
+            "/api/admin/client-keys/reset-budget",
+            post(reset_client_key_budget::<S>),
+        )
+        .route(
             "/api/admin/client-keys/enable",
             post(enable_client_key::<S>),
         )
@@ -829,6 +833,24 @@ where
                 &auth.context().mutation_context(),
                 SetClientKeyEnabled { id, enabled: true },
             )
+            .await,
+    )
+}
+
+async fn reset_client_key_budget<S>(
+    auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(payload): AdminJson<ClientKeyMutationRequest>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let id = payload.into_domain_id().map_err(map_wire_error)?;
+    mutation_response(
+        state
+            .admin_services()
+            .client_keys()
+            .reset_budget(&auth.context().mutation_context(), id)
             .await,
     )
 }

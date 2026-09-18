@@ -127,6 +127,14 @@ export function disableApiKey(data: ApiKeyIdParam) {
   })
 }
 
+export function resetApiKeyBudget(data: ApiKeyIdParam) {
+  return request<ApiKeyMutationResponse>({
+    url: '/api/admin/client-keys/reset-budget',
+    method: 'POST',
+    data,
+  })
+}
+
 export function enableApiKey(data: ApiKeyIdParam) {
   return request<ApiKeyMutationResponse>({
     url: '/api/admin/client-keys/enable',

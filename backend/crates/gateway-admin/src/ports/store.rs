@@ -286,6 +286,13 @@ pub trait ClientKeyStore: Send + Sync {
         context: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
 
+    /// 手动清零该 Key 的日/周已用额度，并把滚动窗口锚点重置到当前时刻。
+    async fn reset_client_key_budget(
+        &self,
+        id: &gateway_core::policy::ClientApiKeyId,
+        context: &MutationContext,
+    ) -> AdminStoreResult<(Revision, ClientKeyRecord)>;
+
     async fn set_client_key_enabled(
         &self,
         command: SetClientKeyEnabled,

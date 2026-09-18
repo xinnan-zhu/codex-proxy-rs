@@ -38,6 +38,11 @@ pub trait ClientKeyService: Send + Sync {
         context: &MutationContext,
         command: UpdateClientKey,
     ) -> Result<ClientKeyMutation, AdminError>;
+    async fn reset_budget(
+        &self,
+        context: &MutationContext,
+        id: ClientApiKeyId,
+    ) -> Result<ClientKeyMutation, AdminError>;
     async fn set_enabled(
         &self,
         context: &MutationContext,
@@ -128,6 +133,24 @@ impl ClientKeyService for DefaultClientKeyService {
             .update_client_key(command, context)
             .await
             .map_err(map_client_key_write_error)?;
+        publish_committed(self.snapshot.as_ref(), config_revision).await?;
+        Ok(ClientKeyMutation {
+            config_revision,
+            record: Some(record),
+            id,
+        })
+    }
+
+    async fn reset_budget(
+        &self,
+        context: &MutationContext,
+        id: ClientApiKeyId,
+    ) -> Result<ClientKeyMutation, AdminError> {
+        let (config_revision, record) = self
+            .store
+            .reset_client_key_budget(&id, context)
+            .await
+            .map_err(|error| map_store_error(error, "client API key"))?;
         publish_committed(self.snapshot.as_ref(), config_revision).await?;
         Ok(ClientKeyMutation {
             config_revision,

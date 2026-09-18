@@ -778,6 +778,14 @@ impl ClientKeyStore for MemoryClientKeyStore {
         Err(unavailable("client key update"))
     }
 
+    async fn reset_client_key_budget(
+        &self,
+        _: &ClientApiKeyId,
+        _: &MutationContext,
+    ) -> AdminStoreResult<(Revision, ClientKeyRecord)> {
+        Err(unavailable("client key budget reset"))
+    }
+
     async fn set_client_key_enabled(
         &self,
         _: SetClientKeyEnabled,
