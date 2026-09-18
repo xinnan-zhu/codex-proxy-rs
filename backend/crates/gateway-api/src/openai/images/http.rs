@@ -72,7 +72,7 @@ async fn handle_image_request(
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
-    let (client_ip, user_agent) = request_client_context(
+    let (client_ip, user_agent, _) = request_client_context(
         &headers,
         connect_info.map(|Extension(ConnectInfo(address))| address),
     );

@@ -21,8 +21,9 @@ export function useAccountBatchEditor(options: {
   const schedulingEnabled = shallowRef(true)
   const concurrencyLimit = shallowRef('')
   const weight = shallowRef('1')
+  const codexOnly = shallowRef(false)
   const modelAccess = ref<AccountModelAccess | undefined>()
-  const editedFields = ref(new Set<'enabled' | 'concurrencyLimit' | 'weight' | 'groupIds'>())
+  const editedFields = ref(new Set<'enabled' | 'concurrencyLimit' | 'weight' | 'groupIds' | 'codexOnly'>())
   const catalogAccountId = shallowRef<string>()
   const proxyMode = shallowRef('preserve')
   const proxyId = shallowRef('')
@@ -32,10 +33,10 @@ export function useAccountBatchEditor(options: {
   const hasChanges = computed(() => Boolean(modelAccess.value) || editedFields.value.size > 0 || proxyMode.value !== 'preserve')
 
   // 未操作的字段保持每个账号原值，避免展开表单就覆盖混合设置。
-  watch([schedulingEnabled, concurrencyLimit, weight, selectedGroupIds], (values, previous) => {
+  watch([schedulingEnabled, concurrencyLimit, weight, selectedGroupIds, codexOnly], (values, previous) => {
     if (!showBatchEditModal.value || saving.value)
       return
-    const fields = ['enabled', 'concurrencyLimit', 'weight', 'groupIds'] as const
+    const fields = ['enabled', 'concurrencyLimit', 'weight', 'groupIds', 'codexOnly'] as const
     fields.forEach((field, index) => {
       if (values[index] !== previous[index])
         editedFields.value.add(field)
@@ -51,6 +52,7 @@ export function useAccountBatchEditor(options: {
     editedFields.value.clear()
     catalogAccountId.value = accounts[0]?.id
     schedulingEnabled.value = accounts.every(account => account.enabled)
+    codexOnly.value = accounts.every(account => account.codexOnly)
     proxyMode.value = 'preserve'
     proxyId.value = ''
     concurrencyLimit.value = sharedConcurrencyLimit(accounts)
@@ -91,6 +93,7 @@ export function useAccountBatchEditor(options: {
         concurrencyLimit: editedFields.value.has('concurrencyLimit') ? scheduling.values.concurrencyLimit : undefined,
         weight: editedFields.value.has('weight') ? scheduling.values.weight : undefined,
         groupIds: editedFields.value.has('groupIds') ? [...new Set(selectedGroupIds.value)] : undefined,
+        codexOnly: editedFields.value.has('codexOnly') ? codexOnly.value : undefined,
       })
       showBatchEditModal.value = false
       options.selectedIds.value = new Set()
@@ -127,6 +130,7 @@ export function useAccountBatchEditor(options: {
     if (open || isSaving)
       return
     schedulingEnabled.value = true
+    codexOnly.value = false
     proxyMode.value = 'preserve'
     proxyId.value = ''
     concurrencyLimit.value = ''
@@ -139,6 +143,7 @@ export function useAccountBatchEditor(options: {
     schedulingEnabled,
     concurrencyLimit,
     weight,
+    codexOnly,
     modelAccess,
     hasChanges,
     catalogAccountId,

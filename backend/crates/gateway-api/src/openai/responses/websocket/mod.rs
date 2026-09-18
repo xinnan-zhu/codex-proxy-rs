@@ -57,7 +57,7 @@ pub(crate) async fn responses_websocket(
         Ok(client) => client,
         Err(error) => return client_access_error_response(error),
     };
-    let (client_ip, user_agent) = request_client_context(
+    let (client_ip, user_agent, codex_client) = request_client_context(
         &headers,
         connect_info.map(|Extension(ConnectInfo(address))| address),
     );
@@ -65,8 +65,7 @@ pub(crate) async fn responses_websocket(
     ResponsesWebSocketAdapter::new(service).upgrade_with_client_context(
         websocket,
         client,
-        client_ip,
-        user_agent,
+        (client_ip, user_agent, codex_client),
         request_headers,
         headers,
     )
@@ -89,11 +88,15 @@ impl ResponsesWebSocketAdapter {
         &self,
         websocket: WebSocketUpgrade,
         client: AuthenticatedClient,
-        client_ip: Option<IpAddr>,
-        user_agent: Option<String>,
+        client_context: (
+            Option<IpAddr>,
+            Option<String>,
+            Option<gateway_core::policy::CodexClientKind>,
+        ),
         request_headers: OpenAiRequestHeaders,
         raw_headers: HeaderMap,
     ) -> Response {
+        let (client_ip, user_agent, codex_client) = client_context;
         let connection_guard = match self.service.try_register_connection() {
             Ok(guard) => guard,
             Err(_) => return runtime_unavailable_response().into_response(),
@@ -112,6 +115,7 @@ impl ResponsesWebSocketAdapter {
             connection_id,
             client_ip,
             user_agent,
+            codex_client,
             request_headers,
             lifecycle: self.service.lifecycle(),
             connection_guard,
@@ -133,6 +137,7 @@ struct ResponsesWebSocketSession {
     connection_id: String,
     client_ip: Option<IpAddr>,
     user_agent: Option<String>,
+    codex_client: Option<gateway_core::policy::CodexClientKind>,
     request_headers: OpenAiRequestHeaders,
     lifecycle: Arc<dyn ConnectionLifecycle>,
     connection_guard: Box<dyn ConnectionGuard>,
@@ -145,6 +150,7 @@ async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocke
         connection_id,
         client_ip,
         user_agent,
+        codex_client,
         request_headers,
         lifecycle,
         connection_guard,
@@ -184,7 +190,9 @@ async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocke
         request_count = request_count.saturating_add(1);
         let correlation_id = Arc::<str>::from(service.next_request_id());
         let decoded = match decode_response_create_with_context(&payload, &request_headers) {
-            Ok(decoded) => decoded.with_client_context(client_ip, user_agent.clone()),
+            Ok(decoded) => decoded
+                .with_client_context(client_ip, user_agent.clone())
+                .with_codex_client(codex_client),
             Err(error) => {
                 trace_rejected_request(
                     &correlation_id,

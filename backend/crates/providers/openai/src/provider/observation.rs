@@ -788,6 +788,15 @@ pub(super) fn map_selection_error(error: CredentialSelectionError) -> ProviderEr
             ProviderErrorKind::NoEligibleAccount,
             UpstreamSendState::NotSent,
         ),
+        CredentialSelectionError::CodexClientRestricted => provider_error(
+            ProviderErrorKind::AccountClientRestricted,
+            UpstreamSendState::NotSent,
+        )
+        .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+            "This account only allows Codex official clients",
+            None,
+            None,
+        )),
         CredentialSelectionError::InvalidCredential
         | CredentialSelectionError::Store
         | CredentialSelectionError::Coordinator

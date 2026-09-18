@@ -21,6 +21,7 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
+const codexOnly = defineModel<boolean>('codexOnly', { required: true })
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const weight = defineModel<string>('weight', { required: true })
 const proxyMode = defineModel<string>('proxyMode', { required: true })
@@ -45,7 +46,9 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         v-model:selected-group-ids="selectedGroupIds"
         v-model:proxy-mode="proxyMode"
         v-model:proxy-id="proxyId"
+        v-model:codex-only="codexOnly"
         preserve-model-access
+        show-codex-only
         :account-id="catalogAccountId"
         :groups="groups"
         :groups-loading="groupsLoading"

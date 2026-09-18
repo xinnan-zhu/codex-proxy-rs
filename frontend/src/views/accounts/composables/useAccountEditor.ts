@@ -29,6 +29,7 @@ export function useAccountEditor(options: {
   const proxyId = shallowRef('')
   const turnStateOverrideMode = shallowRef('inherit')
   const turnStateOverrideValue = shallowRef('')
+  const codexOnly = shallowRef(false)
   const selectedGroupIds = ref<string[]>([])
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
@@ -73,6 +74,7 @@ export function useAccountEditor(options: {
     proxyId.value = ''
     turnStateOverrideMode.value = turnStateOverrideModeOf(account.turnStateOverride)
     turnStateOverrideValue.value = account.turnStateOverride ?? ''
+    codexOnly.value = account.codexOnly
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
@@ -125,6 +127,7 @@ export function useAccountEditor(options: {
         accountId,
         notes: notes.value,
         turnStateOverride: turnStateOverrideFromMode(turnStateOverrideMode.value, turnStateOverrideValue.value),
+        codexOnly: codexOnly.value,
         outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
@@ -162,6 +165,7 @@ export function useAccountEditor(options: {
     proxyId.value = ''
     turnStateOverrideMode.value = 'inherit'
     turnStateOverrideValue.value = ''
+    codexOnly.value = false
     schedulingEnabled.value = true
     concurrencyLimit.value = ''
     weight.value = '1'
@@ -184,6 +188,7 @@ export function useAccountEditor(options: {
     proxyId,
     turnStateOverrideMode,
     turnStateOverrideValue,
+    codexOnly,
     selectedGroupIds,
     saving,
     open,

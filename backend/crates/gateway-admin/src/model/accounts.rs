@@ -24,6 +24,8 @@ pub struct AccountImportSettings {
     pub notes: Option<String>,
     /// 缺省不携带；提供时应用到导入账号，空串剥离，非空值强制。
     pub turn_state_override: Option<String>,
+    /// 缺省不携带；提供时把本次导入账号的 Codex 客户端限制统一设为该值。
+    pub codex_only: Option<bool>,
     pub enabled: bool,
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
     pub weight: AccountWeight,
@@ -101,6 +103,7 @@ pub struct AccountRecord {
     pub name: String,
     pub notes: Option<String>,
     pub turn_state_override: Option<String>,
+    pub codex_only: bool,
     pub email: Option<String>,
     pub upstream_user_id: Option<String>,
     pub upstream_account_id: Option<String>,
@@ -237,6 +240,8 @@ pub struct UpdateAccount {
     pub notes: Option<String>,
     /// 缺省保留现有覆盖；显式 `null` 清除覆盖恢复透传；空字符串剥离，非空值强制。
     pub turn_state_override: Option<Option<String>>,
+    /// 缺省不修改；`Some(v)` 把账号的 Codex 客户端限制设为 `v`。
+    pub codex_only: Option<bool>,
     pub enabled: bool,
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
     pub weight: AccountWeight,
@@ -262,6 +267,8 @@ pub struct BatchUpdateAccounts {
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
     pub group_ids: Option<Vec<gateway_core::routing::AccountGroupId>>,
     pub outbound_proxy: Option<super::proxies::AccountProxySelection>,
+    /// 缺省不修改；`Some(v)` 把所选账号的 Codex 客户端限制统一设为 `v`。
+    pub codex_only: Option<bool>,
 }
 
 /// 批量账号更新结果。

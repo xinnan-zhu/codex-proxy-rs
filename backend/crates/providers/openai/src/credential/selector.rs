@@ -369,6 +369,7 @@ impl CodexCredentialSelector {
                 accounts.push(account);
             }
             let mut model_access_rejected = 0_usize;
+            let mut codex_only_rejected = 0_usize;
             let accounts = accounts
                 .into_iter()
                 .filter(|account| {
@@ -378,6 +379,17 @@ impl CodexCredentialSelector {
                                 .attempt
                                 .account_scope()
                                 .is_some_and(|scope| scope.allows(account.id())))
+                        && {
+                            // 账号级 Codex 客户端限制：开启后仅官方客户端可调度；
+                            // 管理端诊断（connection test）不受此限制。
+                            let allowed = diagnostic
+                                || !account.codex_only()
+                                || request.attempt.codex_client().is_some();
+                            if !allowed {
+                                codex_only_rejected += 1;
+                            }
+                            allowed
+                        }
                         && (diagnostic
                             || upstream_model.is_none_or(|upstream_model| {
                                 let allowed =
@@ -411,6 +423,17 @@ impl CodexCredentialSelector {
                     "account.model_access",
                     serde_json::json!({"rejectedCount": model_access_rejected}),
                 );
+            }
+            if codex_only_rejected > 0 && request.attempt.trace().is_enabled() {
+                request.attempt.trace().record(
+                    "account.codex_only",
+                    serde_json::json!({"rejectedCount": codex_only_rejected}),
+                );
+            }
+            // 池子非空但全部被 Codex 客户端限制排除时，给出结构化拒绝而不是
+            // 笼统的无可用账号；与并发容量耗尽区分开，客户端可见可诊断。
+            if accounts.is_empty() && codex_only_rejected > 0 {
+                return Err(CredentialSelectionError::CodexClientRestricted);
             }
             if !diagnostic {
                 self.quota.prepare_scheduling(&accounts).await;
@@ -1450,6 +1473,8 @@ pub enum CredentialSelectionError {
     QueueRejected(#[from] QueueRejection),
     #[error("no eligible Codex account")]
     NoEligibleCredential,
+    #[error("account only allows Codex official clients")]
+    CodexClientRestricted,
     #[error("Codex account capacity is unavailable")]
     CapacityUnavailable { retry_after: Option<Duration> },
     #[error("Codex account data is invalid")]

@@ -28,6 +28,7 @@ export interface AccountCreateForm {
   proxyId: string
   turnStateOverrideMode: string
   turnStateOverrideValue: string
+  codexOnly: boolean
 }
 
 export function emptyAccountCreateForm(): AccountCreateForm {
@@ -49,6 +50,7 @@ export function emptyAccountCreateForm(): AccountCreateForm {
     proxyId: '',
     turnStateOverrideMode: 'inherit',
     turnStateOverrideValue: '',
+    codexOnly: false,
   }
 }
 
@@ -79,5 +81,7 @@ export function accountImportSettings(form: AccountCreateForm) {
     notes: form.notes.trim() || undefined,
     // 缺省（不覆盖）不携带该字段，保持与 notes 一致的“缺省省略”惯例。
     ...(turnStateOverride === null ? {} : { turnStateOverride }),
+    // 缺省（关闭）不携带该字段，导入侧默认 false。
+    ...(form.codexOnly ? { codexOnly: form.codexOnly } : {}),
   }
 }

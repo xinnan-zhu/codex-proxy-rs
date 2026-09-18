@@ -148,6 +148,7 @@ const {
   schedulingEnabled: batchSchedulingEnabled,
   concurrencyLimit: batchConcurrencyLimit,
   weight: batchWeight,
+  codexOnly: batchCodexOnly,
   modelAccess: batchModelAccess,
   hasChanges: batchHasChanges,
   catalogAccountId: batchCatalogAccountId,
@@ -179,6 +180,7 @@ const {
   proxyId: editingProxyId,
   turnStateOverrideMode: editingTurnStateOverrideMode,
   turnStateOverrideValue: editingTurnStateOverrideValue,
+  codexOnly: editingCodexOnly,
   selectedGroupIds: editingGroupIds,
   saving: savingAccountEdit,
   open: openAccountEdit,
@@ -416,6 +418,7 @@ const {
       v-model:proxy-id="editingProxyId"
       v-model:turn-state-override-mode="editingTurnStateOverrideMode"
       v-model:turn-state-override-value="editingTurnStateOverrideValue"
+      v-model:codex-only="editingCodexOnly"
       v-model:selected-group-ids="editingGroupIds"
       :configuration-loading="configurationLoading"
       :configuration-ready="configurationReady"
@@ -431,6 +434,7 @@ const {
       v-model:enabled="batchSchedulingEnabled"
       v-model:concurrency-limit="batchConcurrencyLimit"
       v-model:weight="batchWeight"
+      v-model:codex-only="batchCodexOnly"
       v-model:model-access="batchModelAccess"
       v-model:proxy-mode="batchProxyMode"
       v-model:proxy-id="batchProxyId"

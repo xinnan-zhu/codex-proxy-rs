@@ -70,6 +70,7 @@ pub struct BatchUpdateAccountsRequest {
     pub weight: Option<u64>,
     pub model_access: Option<gateway_core::account::AccountModelAccess>,
     pub group_ids: Option<Vec<String>>,
+    pub codex_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +125,7 @@ impl BatchUpdateAccountsRequest {
             && self.model_access.is_none()
             && self.outbound_proxy_id.is_none()
             && self.outbound_proxy_url.is_none()
+            && self.codex_only.is_none()
         {
             return Err(WireValidationError::new("accountSettings"));
         }
@@ -147,6 +149,7 @@ impl BatchUpdateAccountsRequest {
                 .as_deref()
                 .map(validate_wire_group_ids)
                 .transpose()?,
+            codex_only: self.codex_only,
         })
     }
 }
@@ -271,6 +274,7 @@ pub struct AccountView {
     pub name: String,
     pub notes: Option<String>,
     pub turn_state_override: Option<String>,
+    pub codex_only: bool,
     pub provider: String,
     pub groups: Vec<AccountGroupRefView>,
     pub resource_ref: String,

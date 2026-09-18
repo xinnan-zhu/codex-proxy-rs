@@ -171,6 +171,7 @@ fn update(account_id: &str, selection: AccountProxySelection) -> UpdateAccount {
     UpdateAccount {
         notes: None,
         turn_state_override: None,
+        codex_only: None,
         model_access: Default::default(),
         account_id: account_id.to_owned(),
         enabled: true,
@@ -831,6 +832,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
                     outbound_proxy: Some(AccountProxySelection::Url(
                         OutboundProxy::parse("http://127.0.0.1:9090").unwrap()
                     )),
+                    codex_only: None,
                 },
                 &context()
             )

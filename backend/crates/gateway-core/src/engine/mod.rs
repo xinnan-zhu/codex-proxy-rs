@@ -318,6 +318,7 @@ pub struct RequestAttemptContext {
     request_location: Option<crate::account::RequestLocation>,
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
+    codex_client: Option<crate::policy::CodexClientKind>,
     timing_started_at: Instant,
     trace: crate::diagnostics::TraceContext,
     concurrency_wait_budget: crate::concurrency::ConcurrencyWaitBudget,
@@ -339,6 +340,16 @@ impl RequestAttemptContext {
         self
     }
 
+    /// 附着连接边界识别出的 Codex 官方客户端类型，供账号级客户端限制消费。
+    #[must_use]
+    pub const fn with_codex_client(
+        mut self,
+        codex_client: Option<crate::policy::CodexClientKind>,
+    ) -> Self {
+        self.codex_client = codex_client;
+        self
+    }
+
     #[must_use]
     pub fn new(request_id: ModelRequestId, client_api_key_ref: ClientApiKeyId) -> Self {
         Self {
@@ -346,6 +357,7 @@ impl RequestAttemptContext {
             client_api_key_ref,
             disable_fast: false,
             request_location: None,
+            codex_client: None,
             timing_started_at: Instant::now(),
             trace: crate::diagnostics::TraceContext::default(),
             concurrency_wait_budget: crate::concurrency::ConcurrencyWaitBudget::default(),
@@ -415,6 +427,12 @@ impl AttemptContext {
     #[must_use]
     pub const fn request_location(&self) -> Option<&crate::account::RequestLocation> {
         self.request.request_location.as_ref()
+    }
+
+    /// 返回连接边界识别出的 Codex 官方客户端；`None` 表示非 Codex 或未识别。
+    #[must_use]
+    pub const fn codex_client(&self) -> Option<crate::policy::CodexClientKind> {
+        self.request.codex_client
     }
 
     /// 当前 attempt 的诊断关联；克隆后可传给后台 transport 任务。
@@ -577,6 +595,7 @@ pub struct NewModelRequest {
     pub requested_model: Option<PublicModelId>,
     pub client_ip: Option<IpAddr>,
     pub user_agent: Option<String>,
+    pub codex_client: Option<crate::policy::CodexClientKind>,
     pub reasoning_effort: Option<String>,
     pub reasoning_preset: Option<String>,
     pub request_kind: Option<String>,
