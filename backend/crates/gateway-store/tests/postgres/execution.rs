@@ -1220,6 +1220,7 @@ pub(super) fn accepted_request(id: &str) -> CoreNewModelRequest {
         requested_model: Some(PublicModelId::new("coding").expect("public model")),
         client_ip: None,
         user_agent: None,
+        codex_client: None,
         reasoning_effort: None,
         reasoning_preset: None,
         request_kind: None,

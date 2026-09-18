@@ -60,6 +60,9 @@ pub struct AccountImportSettingsRequest {
     /// 缺省不携带；提供时与编辑接口同规则校验，随导入应用到账号。
     #[serde(default)]
     pub turn_state_override: Option<String>,
+    /// 缺省不携带；提供时把本次导入账号的 Codex 客户端限制统一设为该值。
+    #[serde(default)]
+    pub codex_only: Option<bool>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub concurrency_limit: Option<u64>,
@@ -84,6 +87,7 @@ impl AccountImportSettingsRequest {
         Ok(gateway_admin::model::accounts::AccountImportSettings {
             notes: self.notes,
             turn_state_override: self.turn_state_override,
+            codex_only: self.codex_only,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,
             weight: parse_account_weight(self.weight)?,
@@ -248,6 +252,9 @@ pub struct UpdateAccountRequest {
     /// 三态：缺省不修改；显式 `null` 清除覆盖恢复透传；空串剥离；其他值强制。
     #[serde(default, deserialize_with = "deserialize_turn_state_override")]
     pub turn_state_override: Option<Option<String>>,
+    /// 缺省不修改；`Some(v)` 把账号的 Codex 客户端限制设为 `v`。
+    #[serde(default)]
+    pub codex_only: Option<bool>,
     pub enabled: bool,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub concurrency_limit: Option<u64>,
@@ -281,6 +288,7 @@ impl UpdateAccountRequest {
             account_id: self.account_id,
             notes: self.notes,
             turn_state_override: self.turn_state_override,
+            codex_only: self.codex_only,
             enabled: self.enabled,
             concurrency_limit: parse_concurrency_limit(self.concurrency_limit)?,
             weight: parse_account_weight(self.weight)?,

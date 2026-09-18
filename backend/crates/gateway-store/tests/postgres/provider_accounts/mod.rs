@@ -1177,6 +1177,7 @@ async fn terminal_admin_mutations_keep_revision_account_and_audit_atomic() {
             UpdateAccount {
                 notes: None,
                 turn_state_override: None,
+                codex_only: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_id: "acct_terminal_mutation".to_owned(),
@@ -1259,6 +1260,7 @@ async fn account_proxy_edits_preserve_credentials_and_clear_egress_without_audit
     let command = UpdateAccount {
         notes: None,
         turn_state_override: None,
+        codex_only: None,
         model_access: Default::default(),
         account_id: "acct_proxy".to_owned(),
         enabled: true,
@@ -1333,6 +1335,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
         account_id: "acct_notes".to_owned(),
         notes: Some("  团队备用\n下月续费  ".to_owned()),
         turn_state_override: None,
+        codex_only: None,
         enabled: true,
         concurrency_limit: None,
         weight: gateway_core::account::AccountWeight::DEFAULT,
@@ -1379,6 +1382,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
                 group_ids: Some(vec![]),
                 model_access: None,
                 outbound_proxy: None,
+                codex_only: None,
             },
             &context,
         )
@@ -1412,6 +1416,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
             settings: Some(gateway_admin::model::accounts::AccountImportSettings {
                 notes: None,
                 turn_state_override: None,
+                codex_only: None,
                 enabled: true,
                 concurrency_limit: None,
                 weight: gateway_core::account::AccountWeight::DEFAULT,
@@ -1484,6 +1489,7 @@ async fn invalid_account_notes_roll_back_scheduling_revision_and_audit() {
                 account_id: "acct_notes".to_owned(),
                 notes: Some("备".repeat(501)),
                 turn_state_override: None,
+                codex_only: None,
                 enabled: false,
                 concurrency_limit: None,
                 weight: gateway_core::account::AccountWeight::DEFAULT,
@@ -1684,6 +1690,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
             BatchUpdateAccounts {
                 model_access: Default::default(),
                 outbound_proxy: None,
+                codex_only: None,
                 account_ids: account_ids.clone(),
                 enabled: Some(false),
                 concurrency_limit: Some(gateway_core::account::AccountConcurrencyLimit::new(7)),
@@ -1721,6 +1728,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
             BatchUpdateAccounts {
                 model_access: Default::default(),
                 outbound_proxy: None,
+                codex_only: None,
                 account_ids: account_ids.clone(),
                 enabled: Some(true),
                 concurrency_limit: Some(None),
@@ -1917,6 +1925,7 @@ async fn authorization_create_returns_existing_account_id_when_identity_is_upser
                 settings: Some(gateway_admin::model::accounts::AccountImportSettings {
                     notes: Some("  OAuth 新建备注  ".to_owned()),
                     turn_state_override: None,
+                    codex_only: None,
                     model_access: Default::default(),
                     enabled: false,
                     concurrency_limit: None,
@@ -2118,6 +2127,7 @@ async fn core_refresh_cas_updates_profile_and_credential_under_one_revision() {
             credential_state: CredentialState::Ready,
             credential_observed_at: Utc::now(),
             turn_state_override: None,
+            codex_only: None,
         })
         .await
         .expect("seed provider account");
@@ -2443,6 +2453,7 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
             notes: None,
             turn_state_override: None,
+            codex_only: None,
             model_access: Default::default(),
             outbound_proxy: None,
             account_ids: vec!["acct_admin_a".to_owned()],
@@ -2513,6 +2524,7 @@ async fn credential_rotation_and_settings_share_one_transaction() {
         account_id: ACCOUNT_ID.to_owned(),
         notes: Some("统一保存".to_owned()),
         turn_state_override: None,
+        codex_only: None,
         enabled: false,
         concurrency_limit: Some(AccountConcurrencyLimit::new(3).unwrap()),
         weight: AccountWeight::new(7).unwrap(),
@@ -2967,6 +2979,7 @@ pub(super) fn account(id: &str, upstream_user_id: &str) -> NewProviderAccount {
         credential_state: CredentialState::Ready,
         credential_observed_at: Utc::now(),
         turn_state_override: None,
+        codex_only: None,
     }
 }
 
@@ -3151,6 +3164,7 @@ async fn proxy_edit_preserves_an_inflight_token_refresh() {
             UpdateAccount {
                 notes: None,
                 turn_state_override: None,
+                codex_only: None,
                 model_access: Default::default(),
                 account_id: id.as_str().to_owned(),
                 enabled: true,
@@ -3210,6 +3224,7 @@ async fn account_import_settings_apply_atomically_to_new_and_existing_identities
     let settings = AccountImportSettings {
         notes: Some("  批量新建\n团队备用  ".to_owned()),
         turn_state_override: None,
+        codex_only: None,
         model_access: Default::default(),
         enabled: false,
         concurrency_limit: Some(AccountConcurrencyLimit::new(3).expect("concurrency")),
@@ -3346,6 +3361,7 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
         weight: None,
         group_ids: None,
         outbound_proxy: None,
+        codex_only: None,
         model_access: Some(policy.clone()),
     };
     let context = MutationContext {

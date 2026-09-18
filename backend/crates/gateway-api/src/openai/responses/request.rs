@@ -5,6 +5,7 @@ use std::{borrow::Cow, fmt, net::IpAddr};
 use axum::http::HeaderMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gateway_core::operation::{GenerateRequest, Operation, ProtocolPayload, ProviderSessionState};
+use gateway_core::policy::CodexClientKind;
 use gateway_protocol::openai::{
     X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER, X_OPENAI_MEMGEN_REQUEST_HEADER,
     is_transport_managed_request_header,
@@ -209,6 +210,7 @@ pub struct ResponsesRequestMetadata {
     continuation: ContinuationIntent,
     client_ip: Option<IpAddr>,
     user_agent: Option<String>,
+    codex_client: Option<CodexClientKind>,
 }
 
 impl ResponsesRequestMetadata {
@@ -247,6 +249,12 @@ impl ResponsesRequestMetadata {
     pub fn user_agent(&self) -> Option<&str> {
         self.user_agent.as_deref()
     }
+
+    /// 返回连接边界识别出的 Codex 官方客户端；`None` 表示非 Codex 或未识别。
+    #[must_use]
+    pub const fn codex_client(&self) -> Option<CodexClientKind> {
+        self.codex_client
+    }
 }
 
 impl fmt::Debug for ResponsesRequestMetadata {
@@ -259,6 +267,7 @@ impl fmt::Debug for ResponsesRequestMetadata {
             .field("continuation", &self.continuation)
             .field("client_ip", &self.client_ip)
             .field("has_user_agent", &self.user_agent.is_some())
+            .field("has_codex_client", &self.codex_client.is_some())
             .finish()
     }
 }
@@ -305,6 +314,13 @@ impl DecodedResponsesRequest {
     ) -> Self {
         self.metadata.client_ip = client_ip;
         self.metadata.user_agent = user_agent;
+        self
+    }
+
+    /// 附着连接边界识别出的 Codex 官方客户端类型。
+    #[must_use]
+    pub const fn with_codex_client(mut self, codex_client: Option<CodexClientKind>) -> Self {
+        self.metadata.codex_client = codex_client;
         self
     }
 }
@@ -482,6 +498,7 @@ pub(super) fn decode_request_object(
             continuation,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
         },
     })
 }

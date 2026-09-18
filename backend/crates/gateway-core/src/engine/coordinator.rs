@@ -132,6 +132,7 @@ where
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
         let request_id = request.id.clone();
         let client_api_key_ref = request.client_api_key_ref.clone();
+        let codex_client = request.codex_client;
         let timing_started_at = Instant::now();
         let deadline = request.deadline_at;
         let account_state_owner = continuation
@@ -167,6 +168,7 @@ where
             engine: Arc::clone(&self.engine),
             request_id,
             client_api_key_ref,
+            codex_client,
             concurrency_wait_budget: ConcurrencyWaitBudget::default(),
             observation: ResponseObservation::new(timing_started_at),
             budget_prior_attempts_usd: Decimal::ZERO,
@@ -272,6 +274,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     engine: Arc<GatewayEngine<S>>,
     request_id: ModelRequestId,
     client_api_key_ref: crate::policy::ClientApiKeyId,
+    codex_client: Option<crate::policy::CodexClientKind>,
     concurrency_wait_budget: ConcurrencyWaitBudget,
     observation: ResponseObservation,
     budget_prior_attempts_usd: Decimal,
@@ -790,6 +793,7 @@ where
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
                 .with_disable_fast(self.plan.disable_fast())
                 .with_request_location(self.plan.request_location().cloned())
+                .with_codex_client(self.codex_client)
                 .with_concurrency_wait_budget(self.concurrency_wait_budget.clone())
                 .with_timing_started_at(self.observation.timing_started_at)
                 .with_trace(self.trace.clone()),

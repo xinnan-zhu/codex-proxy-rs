@@ -680,6 +680,7 @@ fn model_request(operation: &Operation, deadline: SystemTime) -> NewModelRequest
         requested_model: Some(PublicModelId::new("gpt-5").expect("model")),
         client_ip: Some("127.0.0.1".parse().expect("client IP")),
         user_agent: Some("gateway-core-test".to_owned()),
+        codex_client: None,
         reasoning_effort: Some("medium".to_owned()),
         reasoning_preset: Some("balanced".to_owned()),
         request_kind: Some("responses".to_owned()),

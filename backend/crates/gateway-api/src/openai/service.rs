@@ -103,6 +103,7 @@ impl OpenAiService {
                     stream: metadata.stream(),
                     client_ip: metadata.client_ip(),
                     user_agent: metadata.user_agent().map(str::to_owned),
+                    codex_client: metadata.codex_client(),
                     previous_response_id,
                 },
             })
@@ -135,6 +136,7 @@ impl OpenAiService {
                     stream: false,
                     client_ip,
                     user_agent,
+                    codex_client: None,
                     previous_response_id: None,
                 },
             })

@@ -18,7 +18,8 @@ withDefaults(defineProps<{
   preserveModelAccess?: boolean
   proxyError?: string
   showTurnStateOverride?: boolean
-}>(), { preserveProxy: true, showTurnStateOverride: false })
+  showCodexOnly?: boolean
+}>(), { preserveProxy: true, showTurnStateOverride: false, showCodexOnly: false })
 
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
@@ -30,6 +31,8 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 // 批量编辑暂不支持该字段，未绑定时随 showTurnStateOverride 一并隐藏。
 const turnStateOverrideMode = defineModel<string>('turnStateOverrideMode', { default: 'inherit' })
 const turnStateOverrideValue = defineModel<string>('turnStateOverrideValue', { default: '' })
+// 批量编辑通过 showCodexOnly 显式开启；未绑定时隐藏开关。
+const codexOnly = defineModel<boolean>('codexOnly', { default: false })
 
 const turnStateOverrideOptions = [
   { label: '不覆盖', value: 'inherit', description: '保持客户端原值与会话恢复值透传' },
@@ -104,5 +107,16 @@ const turnStateOverrideOptions = [
         />
       </BaseFormItem>
     </template>
+    <div v-if="showCodexOnly" class="flex min-h-6 items-center justify-between gap-3">
+      <div class="grid gap-1">
+        <span class="text-cp leading-none font-medium text-cp-text-secondary">仅限 Codex 客户端</span>
+        <span class="text-cp-sm leading-none text-cp-text-tertiary">开启后仅 Codex 官方客户端可使用此账号</span>
+      </div>
+      <BaseSwitch
+        v-model="codexOnly"
+        label="切换仅限 Codex 客户端"
+        :disabled="disabled"
+      />
+    </div>
   </div>
 </template>

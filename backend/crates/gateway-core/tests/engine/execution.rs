@@ -130,6 +130,7 @@ fn request(service: &DefaultExecutionService, transport: ClientTransport) -> Sta
             stream: transport != ClientTransport::HttpJson,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
             previous_response_id: None,
         },
     }
@@ -1315,6 +1316,7 @@ fn assert_provider_endpoint_observation(model: Option<&str>) {
             stream: false,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
             previous_response_id: None,
         },
     }))
@@ -1359,6 +1361,7 @@ fn circuit_store_failure_should_fail_open_during_request_start() {
             stream: false,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
             previous_response_id: None,
         },
     }))
@@ -1394,6 +1397,7 @@ fn slow_circuit_store_should_time_out_and_fail_open_during_request_start() {
             stream: false,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
             previous_response_id: None,
         },
     }))
@@ -1430,6 +1434,7 @@ fn known_catalog_should_reject_a_model_that_the_provider_did_not_publish() {
             stream: false,
             client_ip: None,
             user_agent: None,
+            codex_client: None,
             previous_response_id: None,
         },
     }));
@@ -1510,6 +1515,7 @@ fn execution_metadata_with_continuation() -> ExecutionRequestMetadata {
         stream: false,
         client_ip: None,
         user_agent: None,
+        codex_client: None,
         previous_response_id: Some(PreviousResponseId::new("response-private")),
     }
 }

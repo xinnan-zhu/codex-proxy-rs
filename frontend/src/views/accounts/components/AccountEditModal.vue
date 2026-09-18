@@ -37,6 +37,7 @@ const proxyMode = defineModel<string>('proxyMode', { required: true })
 const proxyId = defineModel<string>('proxyId', { required: true })
 const turnStateOverrideMode = defineModel<string>('turnStateOverrideMode', { required: true })
 const turnStateOverrideValue = defineModel<string>('turnStateOverrideValue', { required: true })
+const codexOnly = defineModel<boolean>('codexOnly', { required: true })
 const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: true })
 </script>
 
@@ -88,7 +89,9 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         v-model:proxy-id="proxyId"
         v-model:turn-state-override-mode="turnStateOverrideMode"
         v-model:turn-state-override-value="turnStateOverrideValue"
+        v-model:codex-only="codexOnly"
         show-turn-state-override
+        show-codex-only
         :groups="groups"
         :groups-loading="groupsLoading"
         :disabled="saving"

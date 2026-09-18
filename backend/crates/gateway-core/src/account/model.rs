@@ -746,6 +746,7 @@ pub struct ProviderAccount {
     outbound_proxy: Option<super::OutboundProxy>,
     request_location: Option<super::RequestLocation>,
     turn_state_override: Option<String>,
+    codex_only: bool,
 }
 
 impl ProviderAccount {
@@ -784,6 +785,7 @@ impl ProviderAccount {
             outbound_proxy: None,
             request_location: None,
             turn_state_override: None,
+            codex_only: false,
         }
     }
 
@@ -847,6 +849,19 @@ impl ProviderAccount {
     #[must_use]
     pub fn turn_state_override(&self) -> Option<&str> {
         self.turn_state_override.as_deref()
+    }
+
+    /// 设置是否仅限 Codex 官方客户端调度到该账号；管理端诊断不受此限制。
+    #[must_use]
+    pub const fn with_codex_only(mut self, codex_only: bool) -> Self {
+        self.codex_only = codex_only;
+        self
+    }
+
+    /// 该账号是否仅限 Codex 官方客户端；`true` 时非 Codex 客户端请求不得调度到此账号。
+    #[must_use]
+    pub const fn codex_only(&self) -> bool {
+        self.codex_only
     }
 
     #[must_use]

@@ -62,11 +62,13 @@ pub(crate) async fn responses(
             return protocol_error_response(StatusCode::BAD_REQUEST, error.protocol_body());
         }
     };
-    let (client_ip, user_agent) = request_client_context(
+    let (client_ip, user_agent, codex_client) = request_client_context(
         &headers,
         connect_info.map(|Extension(ConnectInfo(address))| address),
     );
-    let decoded = decoded.with_client_context(client_ip, user_agent);
+    let decoded = decoded
+        .with_client_context(client_ip, user_agent)
+        .with_codex_client(codex_client);
     let streaming = decoded.metadata().stream();
     let connection_guard = if streaming {
         match service.try_register_connection() {
@@ -114,7 +116,11 @@ pub(crate) async fn responses(
 pub(in crate::openai) fn request_client_context(
     headers: &HeaderMap,
     peer_address: Option<SocketAddr>,
-) -> (Option<IpAddr>, Option<String>) {
+) -> (
+    Option<IpAddr>,
+    Option<String>,
+    Option<gateway_core::policy::CodexClientKind>,
+) {
     let client_ip = ["cf-connecting-ip", "x-real-ip"]
         .into_iter()
         .find_map(|name| header_ip(headers, name))
@@ -126,7 +132,9 @@ pub(in crate::openai) fn request_client_context(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    (client_ip, user_agent)
+    let codex_client =
+        crate::openai::auth::identify_codex_client(headers).map(|client| client.kind());
+    (client_ip, user_agent, codex_client)
 }
 
 fn header_ip(headers: &HeaderMap, name: &str) -> Option<IpAddr> {
