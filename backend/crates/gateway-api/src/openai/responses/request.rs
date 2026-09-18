@@ -210,6 +210,9 @@ pub struct ResponsesRequestMetadata {
     continuation: ContinuationIntent,
     client_ip: Option<IpAddr>,
     user_agent: Option<String>,
+    /// 官方 Codex 客户端身份（`auth::official_codex_client`），供 codex_only 账号门控
+    /// 使用；覆盖 codex-rs 全官方家族，Desktop 与其余家族（CLI/tui/vscode/exec 等）
+    /// 仅作区分，不代表版本策略——最低版本门禁仍走 `identify_codex_client`。
     codex_client: Option<CodexClientKind>,
 }
 
