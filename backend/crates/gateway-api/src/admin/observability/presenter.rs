@@ -411,6 +411,7 @@ pub(crate) fn usage_record_view(record: domain::UsageRecord) -> UsageRecordView 
         client_ip: record.client_ip,
         user_agent: record.user_agent,
         client_turn_state_bytes: record.client_turn_state_bytes,
+        client_key_name: record.client_key_name,
         reasoning_effort: record.reasoning_effort,
         reasoning_preset: record.reasoning_preset,
         compact: Some(record.compact),

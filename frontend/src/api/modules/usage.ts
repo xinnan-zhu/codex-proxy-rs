@@ -147,6 +147,8 @@ export interface UsageRecord {
   userAgent: string | null
   /** 客户端请求头 x-codex-turn-state 的字节数；未携带该头为 null。 */
   clientTurnStateBytes: number | null
+  /** 发起请求的 Client Key 名称；Key 已删除为 null。 */
+  clientKeyName: string | null
   reasoningEffort: string | null
   reasoningPreset: string | null
   compact: boolean | null
