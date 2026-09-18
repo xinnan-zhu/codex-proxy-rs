@@ -596,6 +596,7 @@ pub struct NewModelRequest {
     pub client_ip: Option<IpAddr>,
     pub user_agent: Option<String>,
     pub codex_client: Option<crate::policy::CodexClientKind>,
+    pub client_turn_state_bytes: Option<i64>,
     pub reasoning_effort: Option<String>,
     pub reasoning_preset: Option<String>,
     pub request_kind: Option<String>,

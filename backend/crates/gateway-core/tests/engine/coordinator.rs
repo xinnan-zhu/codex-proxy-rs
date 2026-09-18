@@ -681,6 +681,7 @@ fn model_request(operation: &Operation, deadline: SystemTime) -> NewModelRequest
         client_ip: Some("127.0.0.1".parse().expect("client IP")),
         user_agent: Some("gateway-core-test".to_owned()),
         codex_client: None,
+        client_turn_state_bytes: None,
         reasoning_effort: Some("medium".to_owned()),
         reasoning_preset: Some("balanced".to_owned()),
         request_kind: Some("responses".to_owned()),

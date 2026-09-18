@@ -60,6 +60,8 @@ export interface UsageViewModel {
   createdAtDisplay: string
   clientIp: string | null
   userAgent: string | null
+  /** 客户端请求头 x-codex-turn-state 的字节数；未携带该头为 null。 */
+  clientTurnStateBytes: number | null
   reasoningEffort: string | null
   reasoningPreset: string | null
   compact: boolean
@@ -128,6 +130,7 @@ export function normalizeUsageRecord(record: UsageRecordDetail): UsageViewModel 
     createdAtDisplay: record.createdAtDisplay,
     clientIp: record.clientIp,
     userAgent: record.userAgent,
+    clientTurnStateBytes: record.clientTurnStateBytes,
     reasoningEffort: record.reasoningEffort,
     reasoningPreset: record.reasoningPreset,
     compact: record.compact === true,
@@ -186,6 +189,16 @@ export function usageClientIp(record: { clientIp?: string | null }) {
 
 export function usageUserAgent(record: { userAgent?: string | null }) {
   return record.userAgent || '—'
+}
+
+/** 展示客户端 turn state 字节数：< 1024 显示 B，否则 KB 保留一位小数；未携带为 —。 */
+export function usageClientTurnStateBytes(record: { clientTurnStateBytes?: number | null }) {
+  const bytes = record.clientTurnStateBytes
+  if (bytes === null || bytes === undefined)
+    return '—'
+  if (bytes < 1024)
+    return `${bytes} B`
+  return `${(bytes / 1024).toFixed(1)} KB`
 }
 
 export function usageReasoningEffort(record: UsageCommonRecord) {

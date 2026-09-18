@@ -1150,6 +1150,10 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 缺少终态声明时保留首次声明。这些值仅表示上游报告，不作为模型真实性证明，也不参与路由、
 聚合或本地计价模型选择。历史数据只回填此前已保存的 OpenAI 模型报告，其余保留未知。
 
+请求记录列表与详情返回 `clientTurnStateBytes`：客户端请求头 `x-codex-turn-state` 值的字节数；
+未携带该头时为 `null`（区别于 0 字节）。只统计原始请求头载体，body `turnState` 与 WebSocket
+client_metadata 载体不计入，账号级 turn_state override 也不影响该统计。
+
 请求记录列表的 `search` 使用字面量前缀匹配，支持请求 ID、Client Key ID / 名称、
 账号 ID、账号邮箱与名称、请求 / 上游模型 ID、上游请求 ID。密钥名称不区分大小写，其他字段区分大小写。
 密钥名称按当前密钥记录检索，改名后使用新名称，删除后仍可按 Client Key ID 查询历史记录。
