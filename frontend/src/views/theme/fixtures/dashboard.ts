@@ -175,6 +175,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
     createdAtDisplay: options.createdAtDisplay,
     clientIp: options.clientIp,
     userAgent: options.userAgent,
+    clientTurnStateBytes: null,
   }
 }
 

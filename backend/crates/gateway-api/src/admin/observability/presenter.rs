@@ -297,6 +297,7 @@ pub(crate) fn usage_list_record_view(record: domain::UsageListRecord) -> UsageLi
         created_at_display,
         client_ip: record.client_ip,
         user_agent: record.user_agent,
+        client_turn_state_bytes: record.client_turn_state_bytes,
     }
 }
 
@@ -409,6 +410,7 @@ pub(crate) fn usage_record_view(record: domain::UsageRecord) -> UsageRecordView 
         created_at_display: china_datetime(&record.started_at),
         client_ip: record.client_ip,
         user_agent: record.user_agent,
+        client_turn_state_bytes: record.client_turn_state_bytes,
         reasoning_effort: record.reasoning_effort,
         reasoning_preset: record.reasoning_preset,
         compact: Some(record.compact),

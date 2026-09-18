@@ -898,6 +898,7 @@ fn total_record(
         capacity_total_slots: None,
         client_ip: None,
         user_agent: None,
+        client_turn_state_bytes: None,
         reasoning_effort: None,
         reasoning_preset: None,
         subagent_kind: None,
