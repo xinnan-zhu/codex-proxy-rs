@@ -178,6 +178,10 @@ export function usageTransportTypeClass(transport?: string | null) {
   return 'bg-cp-fill-tertiary text-cp-text-secondary'
 }
 
+export function usageAccountText(record: UsageCommonRecord) {
+  return record.accountEmail || record.accountName || record.accountId || '—'
+}
+
 export function usageAuthenticationKind(record: UsageCommonRecord) {
   return typeof record.authenticationKind === 'string' ? record.authenticationKind : null
 }
