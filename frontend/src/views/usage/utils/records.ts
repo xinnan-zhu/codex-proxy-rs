@@ -205,6 +205,17 @@ export function usageClientTurnStateBytes(record: { clientTurnStateBytes?: numbe
   return `${(bytes / 1024).toFixed(1)}KB`
 }
 
+// 列表「智商」列的展示：292/312 是实际观察到的满血/降智状态值，直接映射为文字；
+// 其余未知大小回退为原始字节数，便于发现新的状态档位。
+export function usageIqLabel(record: { clientTurnStateBytes?: number | null }) {
+  const bytes = record.clientTurnStateBytes
+  if (bytes === 292)
+    return '满血'
+  if (bytes === 312)
+    return '降智'
+  return usageClientTurnStateBytes(record)
+}
+
 export function usageReasoningEffort(record: UsageCommonRecord) {
   const reasoningEffort = record.reasoningEffort || '—'
   if (usageIsSubagent(record))
