@@ -2,7 +2,7 @@
 
 本文档记录本 fork 相对官方仓库的全部差异，供维护与升级参考。
 
-- 上游基线：`main`（已合并至 v3.10.0，合并提交 `00be1c6f`，2026-09-17）
+- 上游基线：`main`（已合并至 v3.11.0）
 - Fork 分支：`feat/account-turn-state-override`
 - 部署实例：`api2.koalaccc.xyz`（compose 位于 `/root/codex-proxy-rs/deploy/`，镜像 `cpr-local:turnstate-*` 系列）
 
@@ -11,11 +11,11 @@
 | # | 功能 | 提交 | 上游是否有 |
 |---|------|------|-----------|
 | 1 | 账号级「仅限 Codex 官方客户端」开关 | `445215d3` `79673e5a` | 无（模仿 sub2api `codex_cli_only`） |
-| 2 | Client Key 额度手动重置 | `d9297c42` | 无 |
-| 3 | 请求明细统计 turn-state 字节数 | `9e51d04e` | 无 |
-| 4 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 无 |
+| 2 | 请求明细统计 turn-state 字节数 | `9e51d04e` | 无 |
+| 3 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 无 |
 | — | 合并上游 v3.10.0 | `00be1c6f` | — |
 | — | 回退按账号覆盖 X-Codex-Turn-State | `e8d6ec5e` `33097947` `7a138de7` 已从应用层移除；补偿迁移 `900004` | 上游本无此功能 |
+| — | 合并上游 v3.11.0 | 本次 | Client Key 额度重置改用官方实现（`period`: daily/weekly/all） |
 
 ---
 
@@ -44,18 +44,7 @@
 
 **与 sub2api 的对齐情况**：开关粒度、识别名单、拒绝文案、诊断豁免均已对齐；sub2api 全局设置里的高级门（黑/白名单、版本上下限、引擎指纹、App Server 开闸、全局 force 旁路）**未搬**。
 
-## 2. Client Key 额度手动重置
-
-**动机**：上游只有滚动窗口（24h/168h）到期自动清零，管理员无法手动重置已用额度。
-
-**实现**：
-
-- 新端点 `POST /api/admin/client-keys/reset-budget`，body `{"id"}`。
-- 存储实现（`gateway-store/src/postgres/client_budgets.rs`）：事务内先 `select … for update` 锁 `client_api_keys` 行（与 admit/settle **同锁序**，防止与并发结算互相覆盖），再 upsert `client_key_budget_windows`：`daily_used_usd`/`weekly_used_usd` 清零，窗口锚点重置为当前时刻（Asia/Shanghai 日界 +24h/+168h，与 `advance_windows` 同语义）。`client_key_charge_events` 扣费流水**不动**。
-- `gateway-admin` use_case 走标准 MutationContext 审计模式。
-- 前端：Key 列表操作列新增「重置额度」按钮（RotateCcw 图标 + `BaseConfirmModal` 确认），成功后刷新列表。
-
-## 3. 请求明细统计 turn-state 字节数
+## 2. 请求明细统计 turn-state 字节数
 
 **动机**：观察对话 `X-Codex-Turn-State` 随轮次的增长（实际观察：292B = 满血模型，312B = 降智）。
 
@@ -66,7 +55,7 @@
 - 测量点在 HTTP/WS 共用的请求解码层（`OpenAiRequestHeaders.turn_state` 的 `len()`）。
 - 全链路：metadata → `NewModelRequest` → 两个 insert 点 → store 读取 → admin 两个视图（`clientTurnStateBytes`）→ 前端详情「客户端与上游」区「Turn State」行（<1024 显示 `B`，否则一位小数 `KB`）。
 
-## 4. 使用统计列表：密钥列 + 智商列
+## 3. 使用统计列表：密钥列 + 智商列
 
 **动机**：不用点开详情即可看到每请求的发起 key 与满血/降智状态。
 
@@ -81,7 +70,7 @@
 
 ## 维护说明
 
-- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。
+- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。v3.11.0 新增 `0016`，与 90000N 不冲突。
 - **已回退的 turn_state 覆盖**：`900001` 已冻结，不可删改；`900004` 删除 `provider_accounts.turn_state_override`。已部署实例升级后该列消失，发往上游的 `X-Codex-Turn-State` 恢复与官方一致的透传。
 - **质量门惯例**：每次变更跑 `cargo fmt/check/clippy（-D warnings）` + `pnpm format:check/build`；按用户要求**不跑单测**（测试代码仅补构造点保持可编译）。
 - **部署**：`docker build --target runtime -f deploy/Dockerfile -t cpr-local:<tag> <src>`（必须 `--target runtime`；编译期内存紧张时先加 2G swapfile）；compose 位于 `/root/codex-proxy-rs/deploy/compose.yaml`（`CPR_IMAGE` 切换镜像，内存上限 1100m）。旧镜像保留作回滚。
