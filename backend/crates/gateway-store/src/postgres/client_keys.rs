@@ -20,7 +20,7 @@ use gateway_admin::{
             ClientKeyListQuery as AdminClientKeyListQuery, ClientKeyPage as AdminClientKeyPage,
             ClientKeyRecord as AdminClientKeyRecord, ClientKeySecret as AdminClientKeySecret,
             ClientKeySort as AdminClientKeySort, ClientKeySortField as AdminClientKeySortField,
-            DeleteClientKey, NewClientKey, SetClientKeyEnabled,
+            DeleteClientKey, NewClientKey, ResetClientKeyBudget, SetClientKeyEnabled,
             SortDirection as AdminSortDirection, UpdateClientKey as AdminUpdateClientKey,
         },
     },
@@ -44,10 +44,7 @@ use crate::{
     postgres_unavailable, require_nonempty,
 };
 
-use super::{
-    ControlPlaneRepository, PgControlPlaneRepository, append_admin_audit_event_in_transaction,
-    bump_config_revision_in_transaction, finish_admin_transaction,
-};
+use super::{ControlPlaneRepository, PgControlPlaneRepository};
 
 const ENTITY: &str = "client API key";
 const CLIENT_API_KEY_LAST_USED_FLUSH_DELAY: Duration = Duration::from_secs(1);
@@ -55,6 +52,10 @@ const CLIENT_API_KEY_LAST_USED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeySnapshot {
+    pub request_profiles: std::collections::BTreeMap<
+        gateway_core::routing::ProviderKind,
+        gateway_core::account::OpaqueProviderData,
+    >,
     pub id: ClientApiKeyId,
     pub plaintext_key: PlaintextClientApiKey,
     pub group_ids: Vec<AccountGroupId>,
@@ -70,6 +71,7 @@ impl ClientApiKeySnapshot {
         requests_per_minute: i64,
     ) -> StoreResult<Self> {
         Ok(Self {
+            request_profiles: std::collections::BTreeMap::new(),
             id: ClientApiKeyId::new(id).map_err(|_| invalid("persisted key ID is invalid"))?,
             plaintext_key: PlaintextClientApiKey::new(key)
                 .map_err(|_| invalid("persisted plaintext key is invalid"))?,
@@ -109,6 +111,7 @@ impl fmt::Debug for ClientApiKeySecret {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeyRecord {
+    pub openai_client_profile_override: Option<gateway_core::account::OpaqueProviderData>,
     pub id: String,
     pub name: String,
     pub label: Option<String>,
@@ -269,6 +272,7 @@ pub struct ClientApiKeyPage {
 
 #[derive(Clone)]
 pub struct NewClientApiKey {
+    pub openai_client_profile_override: Option<gateway_core::account::OpaqueProviderData>,
     pub id: String,
     pub name: String,
     pub label: Option<String>,
@@ -301,6 +305,7 @@ impl NewClientApiKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateClientApiKeyDetails {
+    pub openai_client_profile_override: Option<Option<gateway_core::account::OpaqueProviderData>>,
     pub id: String,
     pub name: String,
     pub label: Option<String>,
@@ -357,7 +362,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         query.validate()?;
         let total = count_client_api_keys(&self.pool, query.search.as_deref()).await?;
         let mut statement = QueryBuilder::<Postgres>::new(
-            "select k.id, k.name, k.label,
+            "select k.id, k.name, k.label, k.provider_request_profiles_json -> 'openai' as openai_client_profile_override,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, '[]'::jsonb as groups, '{}'::text[] as provider_kinds
@@ -417,7 +422,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
     async fn get_client_api_key(&self, id: &str) -> StoreResult<Option<ClientApiKeyRecord>> {
         require_nonempty(ENTITY, "id", id)?;
         let record = sqlx::query(
-            "select k.id, k.name, k.label,
+            "select k.id, k.name, k.label, k.provider_request_profiles_json -> 'openai' as openai_client_profile_override,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, coalesce(groups.groups, '[]'::jsonb) as groups,
@@ -693,6 +698,16 @@ impl PgAdminClientKeyStore {
 
 #[async_trait]
 impl ClientKeyStore for PgAdminClientKeyStore {
+    async fn reset_client_key_budget(
+        &self,
+        command: ResetClientKeyBudget,
+        context: &MutationContext,
+    ) -> AdminStoreResult<()> {
+        super::client_budgets::reset_client_key_budget(&self.keys.pool, command, context)
+            .await
+            .map_err(|error| admin_store_error(ENTITY, error))
+    }
+
     async fn get_client_key(
         &self,
         id: &ClientApiKeyId,
@@ -753,6 +768,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .create_client_api_key(
                 NewClientApiKey {
+                    openai_client_profile_override: command.openai_client_profile_override,
                     id: id.as_str().to_owned(),
                     name: command.name,
                     label: command.label,
@@ -781,6 +797,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "requests_per_minute",
                         "daily_limit_usd",
                         "weekly_limit_usd",
+                        "provider_request_profiles_json",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -802,6 +819,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .update_client_api_key(
                 UpdateClientApiKeyDetails {
+                    openai_client_profile_override: command.openai_client_profile_override,
                     id: id.as_str().to_owned(),
                     name: command.name,
                     label: command.label,
@@ -828,6 +846,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "requests_per_minute",
                         "daily_limit_usd",
                         "weekly_limit_usd",
+                        "provider_request_profiles_json",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -861,59 +880,6 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .await
             .map_err(|error| admin_store_error(ENTITY, error))?;
         Ok((admin_revision(revision)?, self.required_record(&id).await?))
-    }
-
-    async fn reset_client_key_budget(
-        &self,
-        id: &ClientApiKeyId,
-        context: &MutationContext,
-    ) -> AdminStoreResult<(gateway_admin::model::Revision, AdminClientKeyRecord)> {
-        let mut transaction = self.keys.pool.begin().await.map_err(|_| {
-            admin_store_error(
-                ENTITY,
-                postgres_unavailable("begin client key budget reset"),
-            )
-        })?;
-        let result = async {
-            // 与准入/结算相同的锁顺序：先锁 Key 行再写窗口，串行化同一 Key 的并发结算，
-            // 避免重置与进行中的费用累计互相覆盖。
-            let key = sqlx::query_scalar::<_, String>(
-                "select id from client_api_keys where id = $1 for update",
-            )
-            .bind(id.as_str())
-            .fetch_optional(&mut *transaction)
-            .await
-            .map_err(|_| postgres_unavailable("lock client key for budget reset"))?
-            .ok_or_else(|| StoreError::NotFound {
-                entity: ENTITY,
-                id: id.as_str().to_owned(),
-            })?;
-            super::client_budgets::reset_client_key_budget_in_transaction(
-                &mut transaction,
-                &key,
-                Utc::now(),
-            )
-            .await?;
-            let revision = bump_config_revision_in_transaction(&mut transaction).await?;
-            append_admin_audit_event_in_transaction(
-                &mut transaction,
-                mutation_audit(
-                    context,
-                    "reset_budget",
-                    "client_api_key",
-                    id.as_str(),
-                    vec!["daily_used_usd".to_owned(), "weekly_used_usd".to_owned()],
-                ),
-                revision,
-            )
-            .await?;
-            Ok(revision)
-        }
-        .await;
-        let revision = finish_admin_transaction(transaction, result, "reset client key budget")
-            .await
-            .map_err(|error| admin_store_error(ENTITY, error))?;
-        Ok((admin_revision(revision)?, self.required_record(id).await?))
     }
 
     async fn delete_client_key(
@@ -1011,6 +977,7 @@ fn admin_client_key_cursor(cursor: ClientApiKeyCursor) -> AdminStoreResult<Admin
 
 fn admin_client_key_record(record: ClientApiKeyRecord) -> AdminStoreResult<AdminClientKeyRecord> {
     Ok(AdminClientKeyRecord {
+        openai_client_profile_override: record.openai_client_profile_override,
         id: ClientApiKeyId::new(record.id)
             .map_err(|_| admin_store_error(ENTITY, invalid("invalid client key id")))?,
         name: record.name,
@@ -1061,8 +1028,8 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     sqlx::query(
         "insert into client_api_keys (
            id, name, label, key, enabled, max_concurrency, requests_per_minute,
-           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd
-         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric)",
+           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json
+         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, case when $9::jsonb is null then '{}'::jsonb else jsonb_build_object('openai', $9::jsonb) end)",
     )
     .bind(&key.id)
     .bind(key.name.trim())
@@ -1072,6 +1039,7 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     .bind(to_i64(key.requests_per_minute)?)
     .bind(key.budget.daily_usd.canonical())
     .bind(key.budget.weekly_usd.canonical())
+    .bind(key.openai_client_profile_override.as_ref().map(|profile| sqlx::types::Json(profile.expose_to_provider())))
     .execute(&mut **transaction)
     .await
     .map_err(|error| {
@@ -1103,7 +1071,10 @@ pub(crate) async fn update_client_api_key_in_transaction(
          set name = $2, label = $3, max_concurrency = $4,
              requests_per_minute = $5, updated_at = now(),
              daily_limit_usd = coalesce($6::text::numeric, daily_limit_usd),
-             weekly_limit_usd = coalesce($7::text::numeric, weekly_limit_usd)
+             weekly_limit_usd = coalesce($7::text::numeric, weekly_limit_usd),
+             provider_request_profiles_json = case when not $8 then provider_request_profiles_json
+                 when $9::jsonb is null then provider_request_profiles_json - 'openai'
+                 else jsonb_set(provider_request_profiles_json, '{openai}', $9) end
          where id = $1",
     )
     .bind(&key.id)
@@ -1113,6 +1084,13 @@ pub(crate) async fn update_client_api_key_in_transaction(
     .bind(to_i64(key.requests_per_minute)?)
     .bind(key.daily_limit_usd.map(|amount| amount.canonical()))
     .bind(key.weekly_limit_usd.map(|amount| amount.canonical()))
+    .bind(key.openai_client_profile_override.is_some())
+    .bind(
+        key.openai_client_profile_override
+            .as_ref()
+            .and_then(Option::as_ref)
+            .map(|profile| sqlx::types::Json(profile.expose_to_provider())),
+    )
     .execute(&mut **transaction)
     .await
     .map_err(|_| postgres_unavailable("update client API key in transaction"))?;
@@ -1262,6 +1240,12 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
         .try_get("groups")
         .map_err(|_| invalid("invalid groups"))?;
     Ok(ClientApiKeyRecord {
+        openai_client_profile_override: row
+            .try_get::<Option<sqlx::types::Json<serde_json::Map<String, serde_json::Value>>>, _>(
+                "openai_client_profile_override",
+            )
+            .map_err(|_| invalid("invalid request profile"))?
+            .map(|value| gateway_core::account::OpaqueProviderData::new(value.0)),
         id: row.try_get("id").map_err(|_| invalid("invalid id"))?,
         name: row.try_get("name").map_err(|_| invalid("invalid name"))?,
         label: row.try_get("label").map_err(|_| invalid("invalid label"))?,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import type { ApiKey } from '@/api'
+import { ref, shallowRef, watch } from 'vue'
 
 import BaseCard from '@/components/base/BaseCard.vue'
 import BaseCheckbox from '@/components/base/BaseCheckbox.vue'
@@ -12,6 +13,7 @@ import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
 import { usePageSelection } from '@/composables/usePageSelection'
 import ApiKeyActions from './components/ApiKeyActions.vue'
 import ApiKeyBudgetCell from './components/ApiKeyBudgetCell.vue'
+import ApiKeyBudgetResetModal from './components/ApiKeyBudgetResetModal.vue'
 import ApiKeyCreateModal from './components/ApiKeyCreateModal.vue'
 import ApiKeyFilters from './components/ApiKeyFilters.vue'
 import ApiKeyIdentityCell from './components/ApiKeyIdentityCell.vue'
@@ -25,6 +27,13 @@ import { useApiKeyUse } from './composables/useApiKeyUse'
 import { apiKeyColumns } from './constants'
 
 const selectedIds = ref<Set<string>>(new Set())
+const showBudgetResetModal = shallowRef(false)
+const resettingKey = shallowRef<ApiKey | null>(null)
+
+function openBudgetReset(key: ApiKey) {
+  resettingKey.value = key
+  showBudgetResetModal.value = true
+}
 const {
   loading,
   apiKeys,
@@ -47,17 +56,14 @@ const {
   showFormModal,
   showDeleteModal,
   showSingleDeleteModal,
-  showResetBudgetModal,
   showKeyModal,
   showAllAccountsConfirm,
   createdKey,
   createdKeyName,
   editingKey,
   pendingDeleteKey,
-  pendingResetBudgetKey,
   savingKey,
   deletingKey,
-  resettingBudget,
   batchDeleting,
   updatingStatusKeyIds,
   revealingKeyIds,
@@ -70,8 +76,6 @@ const {
   handleDelete,
   handleBatchDelete,
   handleToggleStatus,
-  requestResetBudget,
-  handleResetBudget,
   copyToClipboard,
   revealPlaintextKey,
   copyApiKey,
@@ -193,12 +197,11 @@ watch(
                 :deleting="deletingKey"
                 :revealing="revealingKeyIds.has(row.id)"
                 :updating-status="updatingStatusKeyIds.has(row.id)"
-                :resetting-budget="resettingBudget && pendingResetBudgetKey?.id === row.id"
                 @edit="openEdit"
+                @reset-budget="openBudgetReset"
                 @delete="requestDeleteKey"
                 @import-ccs="importToCcs"
                 @toggle="handleToggleStatus"
-                @reset-budget="requestResetBudget"
                 @use="openUseKeyModal"
               />
             </template>
@@ -227,6 +230,12 @@ watch(
       @import-ccs="importCreatedKeyToCcs"
     />
 
+    <ApiKeyBudgetResetModal
+      v-model="showBudgetResetModal"
+      :api-key="resettingKey"
+      @reset="loadApiKeys"
+    />
+
     <ApiKeyUseModal
       v-model="showUseKeyModal"
       :api-key="selectedUseKey"
@@ -237,13 +246,13 @@ watch(
     <BaseConfirmModal
       v-model="showAllAccountsConfirm"
       title="授予全部账号权限"
-      description="保存后，该密钥可以使用所有账号。"
+      description="保存后，该密钥可以使用所有账号"
       confirm-text="确认授予全部账号"
       :loading="savingKey"
       @confirm="confirmAllAccountsScope"
     >
       <p class="m-0">
-        该密钥可以使用所有账号，包括以后新增和未分组的账号。
+        该密钥可以使用所有账号，包括以后新增和未分组的账号
       </p>
     </BaseConfirmModal>
 
@@ -272,19 +281,6 @@ watch(
     >
       <p class="m-0">
         确定删除 {{ pendingDeleteKey?.name || pendingDeleteKey?.prefix || '该 API Key' }} 吗？
-      </p>
-    </BaseConfirmModal>
-
-    <BaseConfirmModal
-      v-model="showResetBudgetModal"
-      title="重置额度"
-      description="将该 Key 的已用额度清零并重置统计窗口？"
-      confirm-text="确认重置"
-      :loading="resettingBudget"
-      @confirm="handleResetBudget"
-    >
-      <p class="m-0">
-        重置后 {{ pendingResetBudgetKey?.name || pendingResetBudgetKey?.prefix || '该 API Key' }} 的日/周已用额度将清零，统计窗口从当前时刻重新计算。
       </p>
     </BaseConfirmModal>
   </div>
