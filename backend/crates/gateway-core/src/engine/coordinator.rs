@@ -885,6 +885,7 @@ where
                         error.kind(),
                         ProviderErrorKind::AccountCapacityUnavailable
                             | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::QuotaExhausted
                             | ProviderErrorKind::ProviderInfrastructureUnavailable
                             | ProviderErrorKind::ConcurrencyQueueFull
                             | ProviderErrorKind::ConcurrencyQueueTimeout
@@ -901,6 +902,7 @@ where
                         error.kind(),
                         ProviderErrorKind::AccountCapacityUnavailable
                             | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::QuotaExhausted
                             | ProviderErrorKind::ConcurrencyQueueFull
                             | ProviderErrorKind::ConcurrencyQueueTimeout
                     ) && let Some(last_failure) = self.last_retryable_failure.take()
@@ -923,6 +925,7 @@ where
                         error.kind(),
                         ProviderErrorKind::AccountCapacityUnavailable
                             | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::QuotaExhausted
                             | ProviderErrorKind::ProviderInfrastructureUnavailable
                             | ProviderErrorKind::ConcurrencyQueueFull
                             | ProviderErrorKind::ConcurrencyQueueTimeout
@@ -1451,6 +1454,7 @@ where
                 error.kind(),
                 ProviderErrorKind::NoEligibleAccount
                     | ProviderErrorKind::AccountCapacityUnavailable
+                    | ProviderErrorKind::QuotaExhausted
             )
         {
             return false;
