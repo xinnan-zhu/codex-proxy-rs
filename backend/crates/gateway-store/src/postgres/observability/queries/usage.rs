@@ -124,7 +124,7 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select mr.id, client_key.name as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -140,9 +140,9 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             mr.account_selection_wait_ms, mr.capacity_used_slots, mr.capacity_total_slots,
             host(mr.client_ip) as client_ip, mr.user_agent, mr.client_turn_state_bytes,
             mr.reasoning_effort, mr.reasoning_preset, mr.subagent_kind, mr.compact,
-            mr.started_at, k.name as client_key_name
+            mr.started_at, client_key.name as client_key_name
      from model_requests mr
-     left join client_api_keys k on k.id = mr.client_api_key_id";
+     left join client_api_keys client_key on client_key.id = mr.client_api_key_ref";
 
 pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
     "select mr.id, mr.client_api_key_ref, mr.config_revision,
@@ -173,7 +173,7 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.image_generation_succeeded, mr.started_at, mr.deadline_at, mr.completed_at,
             k.name as client_key_name
      from model_requests mr
-     left join client_api_keys k on k.id = mr.client_api_key_id";
+     left join client_api_keys k on k.id = mr.client_api_key_ref";
 
 pub(crate) async fn list_usage_records(
     pool: &PgPool,

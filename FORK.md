@@ -2,7 +2,7 @@
 
 本文档记录本 fork 相对官方仓库的全部差异，供维护与升级参考。
 
-- 上游基线：`main`（已合并至 v3.11.0）
+- 上游基线：`main`（已合并至 v3.12.1）
 - Fork 分支：`feat/account-turn-state-override`
 - 部署实例：`api2.koalaccc.xyz`（compose 位于 `/root/codex-proxy-rs/deploy/`，镜像 `cpr-local:turnstate-*` 系列）
 
@@ -12,10 +12,11 @@
 |---|------|------|-----------|
 | 1 | 账号级「仅限 Codex 官方客户端」开关 | `445215d3` `79673e5a` | 无（模仿 sub2api `codex_cli_only`） |
 | 2 | 请求明细统计 turn-state 字节数 | `9e51d04e` | 无 |
-| 3 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 无 |
+| 3 | 使用统计列表：密钥列 + 智商列 | `028eab7c` `fbd1816b` `0d1b0e9e`（部分回退） | 密钥名称列已由上游 v3.12.0 提供；智商列为 fork 保留 |
 | — | 合并上游 v3.10.0 | `00be1c6f` | — |
 | — | 回退按账号覆盖 X-Codex-Turn-State | `e8d6ec5e` `33097947` `7a138de7` 已从应用层移除；补偿迁移 `900004` | 上游本无此功能 |
-| — | 合并上游 v3.11.0 | 本次 | Client Key 额度重置改用官方实现（`period`: daily/weekly/all） |
+| — | 合并上游 v3.11.0 | `cdf9df18` | Client Key 额度重置改用官方实现（`period`: daily/weekly/all） |
+| — | 合并上游 v3.12.1 | 本次 | 官方用量列表增加密钥名称与长上下文计费标记；fork 保留智商列 |
 
 ---
 
@@ -61,16 +62,15 @@
 
 **实现**：
 
-- **「账号」列 → 「密钥」列**：列表查询 `left join client_api_keys` 取 `clientKeyName`（key 已删回退引用 ID），列宽 240px。
+- **密钥列**：v3.12.0 起采用官方 `clientApiKeyName`（「密钥名称」），并保留官方「账号」列。列表仍 `left join client_api_keys`；key 已删时名称为空。
 - **「智商」列**（模型列右侧，`028eab7c` 新增、`fbd1816b` 改显示）：`clientTurnStateBytes` 映射——`292` 显示「满血」、`312` 显示「降智」，其它未知大小回退原始字节数（便于发现新档位），无值显示 —。
-- **列宽收紧**：User-Agent 多行折行→单行截断（悬浮看全文，352→240）、IP 加宽（112→144）、模型 184→144、上游/接入 112→88、TOKEN/延迟/端点/时间 184→144、费用 144→112。表最小总宽 2560→2120px。
 - **回退（`0d1b0e9e`）**：`4ec11cdb` 曾按错误理解改详情弹窗（标题追加 `· Turn State …`、首行「账号」改「密钥」），已还原——详情弹窗保持原标题「使用记录详情」与「账号」行；详情内「Turn State」原始字节数行保留。
 
 ---
 
 ## 维护说明
 
-- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。v3.11.0 新增 `0016`，与 90000N 不冲突。
+- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。v3.12.1 仍止于 `0016`，与 90000N 不冲突。
 - **已回退的 turn_state 覆盖**：`900001` 已冻结，不可删改；`900004` 删除 `provider_accounts.turn_state_override`。已部署实例升级后该列消失，发往上游的 `X-Codex-Turn-State` 恢复与官方一致的透传。
 - **质量门惯例**：每次变更跑 `cargo fmt/check/clippy（-D warnings）` + `pnpm format:check/build`；按用户要求**不跑单测**（测试代码仅补构造点保持可编译）。
 - **部署**：`docker build --target runtime -f deploy/Dockerfile -t cpr-local:<tag> <src>`（必须 `--target runtime`；编译期内存紧张时先加 2G swapfile）；compose 位于 `/root/codex-proxy-rs/deploy/compose.yaml`（`CPR_IMAGE` 切换镜像，内存上限 1100m）。旧镜像保留作回滚。

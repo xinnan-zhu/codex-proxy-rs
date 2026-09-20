@@ -5,8 +5,8 @@ import { Minimize2 } from '@lucide/vue'
 import BaseTable from '@/components/base/BaseTable/index.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import {
+  usageAccountText,
   usageAuthenticationKind,
-  usageClientKeyName,
   usageIsCompact,
   usageUserAgent,
 } from '../utils/records'
@@ -40,6 +40,15 @@ withDefaults(
     :loading="loading"
     :empty-text="emptyText"
   >
+    <template #clientApiKeyName="{ displayValue }">
+      <span
+        class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
+        :title="String(displayValue)"
+      >
+        {{ displayValue }}
+      </span>
+    </template>
+
     <template #provider="{ row }">
       <ProviderIconGroup
         :provider="String(row.provider || '')"
@@ -47,12 +56,12 @@ withDefaults(
       />
     </template>
 
-    <template #clientKeyName="{ row }">
+    <template #accountEmail="{ row }">
       <span
         class="block max-w-full truncate font-mono text-cp-sm leading-none font-bold text-cp-text"
-        :title="usageClientKeyName(row)"
+        :title="usageAccountText(row)"
       >
-        {{ usageClientKeyName(row) }}
+        {{ usageAccountText(row) }}
       </span>
     </template>
 
@@ -61,10 +70,7 @@ withDefaults(
     </template>
 
     <template #userAgent="{ row }">
-      <span
-        class="block max-w-full truncate font-mono text-cp-sm leading-none font-emphasis text-cp-text-secondary"
-        :title="usageUserAgent(row)"
-      >
+      <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">
         {{ usageUserAgent(row) }}
       </span>
     </template>
