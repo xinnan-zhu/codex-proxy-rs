@@ -75,4 +75,4 @@
 - **已回退的 turn_state 覆盖**：`900001` 已冻结，不可删改；`900004` 删除 `provider_accounts.turn_state_override`。已部署实例升级后该列消失，发往上游的 `X-Codex-Turn-State` 恢复与官方一致的透传。
 - **质量门惯例**：每次变更跑 `cargo fmt/check/clippy（-D warnings）` + `pnpm format:check/build`；按用户要求**不跑单测**（测试代码仅补构造点保持可编译）。
 - **部署**：`docker build --target runtime -f deploy/Dockerfile -t cpr-local:<tag> <src>`（必须 `--target runtime`；编译期内存紧张时先加 2G swapfile）；compose 位于 `/root/codex-proxy-rs/deploy/compose.yaml`（`CPR_IMAGE` 切换镜像，内存上限 1100m）。旧镜像保留作回滚。
-- **GitHub**：fork 尚未 push 到远端（等待用户创建仓库）。
+- **GitHub**：`https://github.com/xinnan-zhu/codex-proxy-rs`（`origin`）；官方上游为 `upstream`（`zyycn/codex-proxy-rs`）。合并官方更新：`git fetch upstream && git merge upstream/main`，再 `git push origin`。
