@@ -567,6 +567,7 @@ impl AccountsService for DefaultAccountsService {
                         model_access: None,
                         group_ids: None,
                         outbound_proxy: None,
+                        codex_only: None,
                     },
                     context,
                 )

@@ -2,7 +2,7 @@
 
 本文档记录本 fork 相对官方仓库的全部差异，供维护与升级参考。
 
-- 上游基线：`main`（已合并至 v3.12.1）
+- 上游基线：`main`（已合并至 v3.13.0）
 - Fork 分支：`feat/account-turn-state-override`
 - 部署实例：`api2.koalaccc.xyz`（compose 位于 `/root/codex-proxy-rs/deploy/`，镜像 `cpr-local:turnstate-*` 系列）
 
@@ -16,7 +16,8 @@
 | — | 合并上游 v3.10.0 | `00be1c6f` | — |
 | — | 回退按账号覆盖 X-Codex-Turn-State | `e8d6ec5e` `33097947` `7a138de7` 已从应用层移除；补偿迁移 `900004` | 上游本无此功能 |
 | — | 合并上游 v3.11.0 | `cdf9df18` | Client Key 额度重置改用官方实现（`period`: daily/weekly/all） |
-| — | 合并上游 v3.12.1 | 本次 | 官方用量列表增加密钥名称与长上下文计费标记；fork 保留智商列 |
+| — | 合并上游 v3.12.1 | `41766143` | 官方用量列表增加密钥名称与长上下文计费标记；fork 保留智商列 |
+| — | 合并上游 v3.13.0 | 本次 | 官方用量列表在账号下展示备注；无新迁移 |
 
 ---
 
@@ -70,7 +71,7 @@
 
 ## 维护说明
 
-- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。v3.12.1 仍止于 `0016`，与 90000N 不冲突。
+- **合并上游**：`git fetch upstream && git merge upstream/main`；若上游新增迁移号与 90000N 撞号，重编号本 fork 迁移并同步 `_sqlx_migrations` 表与 `.frozen-sha256`。v3.13.0 仍止于 `0016`，与 90000N 不冲突。
 - **已回退的 turn_state 覆盖**：`900001` 已冻结，不可删改；`900004` 删除 `provider_accounts.turn_state_override`。已部署实例升级后该列消失，发往上游的 `X-Codex-Turn-State` 恢复与官方一致的透传。
 - **质量门惯例**：每次变更跑 `cargo fmt/check/clippy（-D warnings）` + `pnpm format:check/build`；按用户要求**不跑单测**（测试代码仅补构造点保持可编译）。
 - **部署**：`docker build --target runtime -f deploy/Dockerfile -t cpr-local:<tag> <src>`（必须 `--target runtime`；编译期内存紧张时先加 2G swapfile）；compose 位于 `/root/codex-proxy-rs/deploy/compose.yaml`（`CPR_IMAGE` 切换镜像，内存上限 1100m）。旧镜像保留作回滚。
