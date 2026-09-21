@@ -16,6 +16,10 @@
 
 </div>
 
+> [!IMPORTANT]
+> 这是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人 fork，不是官方仓库。当前已同步官方 **v3.13.0**。
+> 相对官方多了：账号「仅限 Codex 官方客户端」、请求 Turn State 字节统计、使用记录「智商」列。完整说明见 [FORK.md](FORK.md)。
+
 > [!NOTE]
 > 本项目提供 Responses API，不支持 `/v1/chat/completions`，接入前请确认客户端支持 Responses 协议
 
@@ -108,6 +112,7 @@ curl http://127.0.0.1:8080/v1/models \
 
 ## 文档
 
+- [本 fork 相对官方的改动](FORK.md)
 - [客户端接入与生图](deploy/README.md#客户端配置)
 - [部署、备份与恢复](deploy/README.md)
 - [API 参考](docs/api.md)
