@@ -2,7 +2,6 @@ import type { UsageDisplayRecord } from './utils/records'
 import type { OpsError } from '@/api'
 import { defineTableColumns } from '@/components/base/BaseTable/columns'
 import { formatProvider } from './utils/format'
-import { usageIqLabel } from './utils/records'
 
 type OpsErrorRow = OpsError
 
@@ -23,14 +22,7 @@ export const usageRecordColumns = defineTableColumns<UsageDisplayRecord>([
     format: (value: unknown) => formatProvider(typeof value === 'string' ? value : null),
   },
   { key: 'model', label: '模型', kind: 'custom', size: 'lg' },
-  {
-    key: 'clientTurnStateBytes',
-    label: '智商',
-    kind: 'status',
-    size: 'sm',
-    format: (value: unknown) =>
-      usageIqLabel({ clientTurnStateBytes: typeof value === 'number' ? value : null }),
-  },
+  { key: 'clientTurnStateBytes', label: '智商', kind: 'status', size: 'md' },
   { key: 'reasoningEffort', label: '推理强度', kind: 'status', size: 'md', align: 'left' },
   { key: 'route', label: '端点', kind: 'mono' },
   { key: 'upstreamTransport', label: '上游', kind: 'status', size: 'md' },
