@@ -83,7 +83,16 @@ CPR_IMAGE=ghcr.io/xinnan-zhu/codex-proxy-rs:latest docker compose up -d --no-bui
 
 不要用官方 `ghcr.io/zyycn/codex-proxy-rs`，那份镜像没有本 fork 的改动。
 
-管理端「检查更新」读的是 GitHub Releases（`CPR_UPDATE_REPOSITORY`），不是 GHCR。部署实例应设为 `xinnan-zhu/codex-proxy-rs`，避免点更新后装上官方二进制、冲掉 fork 改动。仓库里还没有符合更新器格式的 Release 资产（`codex-proxy-rs_<version>_<os>_<arch>.tar.gz` + `checksums.txt`）时，检查结果会是「当前没有可用更新」。
+管理端「检查更新」读的是 GitHub Releases（`CPR_UPDATE_REPOSITORY=xinnan-zhu/codex-proxy-rs`），不是 GHCR。点更新会下载：
+
+```text
+codex-proxy-rs_<version>_linux_amd64.tar.gz
+checksums.txt
+```
+
+发布方式：推送 tag `vX.Y.Z`，或在 Actions 里手动运行 **Publish release**（可填版本；留空则用 `release/version.yaml`）。版本必须是官方更新器能识别的 SemVer：`3.13.1` 或 `3.13.0-exp.1` 这类。当前运行若是正式版 `3.13.0`，必须发**更高的正式版号**（例如 `3.13.1`）管理端才会提示可更新；同号或 `exp` 不会从正式版升上去。
+
+不要改官方的 `release.yml`：它绑定官方仓库名和发版脚本，合入上游时会冲突。本 fork 只用 `publish-release.yml`。
 
 ## 同步官方更新
 

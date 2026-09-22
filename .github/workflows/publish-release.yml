@@ -1,0 +1,184 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, for example 3.13.1 (empty = release/version.yaml)'
+        required: false
+        type: string
+
+concurrency:
+  group: publish-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_MIN_STACK: 16777216
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve version
+        id: meta
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [ -n "${INPUT_VERSION:-}" ]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}/\1/p' release/version.yaml | tr -d '[:space:]')"
+            version="${version#v}"
+          fi
+          python3 - "$version" <<'PY'
+          import re
+          import sys
+          version = sys.argv[1]
+          if not re.fullmatch(
+              r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc|exp)\.[1-9]\d*)?",
+              version,
+          ):
+              raise SystemExit(f"invalid release version: {version}")
+          PY
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "build_time=${build_time}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.7.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        run: |
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1a3a6d54512beeaffd394f8d516ca16f2c506a20 # 1.97
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: cargo-release-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-release-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-
+            cargo-release-amd64-
+
+      - name: Build linux amd64 binary
+        working-directory: backend
+        env:
+          CPR_VERSION: ${{ steps.meta.outputs.version }}
+          CPR_GIT_SHA: ${{ github.sha }}
+          CPR_BUILD_TIME: ${{ steps.meta.outputs.build_time }}
+          CPR_BUILD_TYPE: release
+        run: cargo build --release --locked --bin codex-proxy-rs
+
+      - name: Package release assets
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import shutil
+          import tarfile
+
+          APP_NAME = "codex-proxy-rs"
+          version = os.environ["VERSION"]
+          binary_src = pathlib.Path("backend/target/release") / APP_NAME
+          frontend_dir = pathlib.Path("frontend/dist")
+          config_template = pathlib.Path("deploy/config.example.yaml")
+          if not binary_src.is_file():
+              raise SystemExit(f"missing binary: {binary_src}")
+          if not frontend_dir.is_dir():
+              raise SystemExit(f"missing frontend dist: {frontend_dir}")
+
+          release_dir = pathlib.Path("dist/release")
+          shutil.rmtree(release_dir, ignore_errors=True)
+          release_dir.mkdir(parents=True)
+
+          package_root = pathlib.Path("package") / APP_NAME
+          shutil.rmtree(package_root.parent, ignore_errors=True)
+          web_dist = package_root / "web" / "dist"
+          web_dist.mkdir(parents=True)
+          binary_dest = package_root / APP_NAME
+          shutil.copy2(binary_src, binary_dest)
+          binary_dest.chmod(0o755)
+          shutil.copytree(frontend_dir, web_dist, dirs_exist_ok=True)
+          deploy_dir = package_root / "deploy"
+          deploy_dir.mkdir()
+          shutil.copy2(config_template, deploy_dir / config_template.name)
+
+          archive_name = f"{APP_NAME}_{version}_linux_amd64.tar.gz"
+          archive_path = release_dir / archive_name
+          with tarfile.open(archive_path, "w:gz") as archive:
+              archive.add(package_root, arcname=APP_NAME)
+
+          assets = [archive_path]
+          checksum_path = release_dir / "checksums.txt"
+          with checksum_path.open("w", encoding="utf-8") as file:
+              for asset in assets:
+                  digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+                  file.write(f"{digest}  {asset.name}\n")
+          print(archive_path)
+          print(checksum_path.read_text())
+          PY
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          cat > "${notes}" <<EOF
+          # ${TAG}
+
+          本 fork 的 linux/amd64 更新包，供管理端在线更新使用。
+
+          - 提交：\`${GITHUB_SHA}\`
+          - 构建类型：release
+          EOF
+          extra=()
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            extra+=(--target "${GITHUB_SHA}")
+          fi
+          if [[ "${VERSION}" == *-* ]]; then
+            extra+=(--prerelease)
+          fi
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file "${notes}" \
+            "${extra[@]}" \
+            dist/release/*
