@@ -156,7 +156,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
              ) values (
                $18, $19, $1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13,
                $14, $15, coalesce($20, '{\"mode\":\"all\",\"models\":[]}'::jsonb), $16, null, $17, null, null, now(), greatest(now(), $17),
-               $21
+               coalesce($21, false)
              )",
         )
         .bind(account.id)
