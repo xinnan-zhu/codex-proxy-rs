@@ -1617,6 +1617,7 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
                 model_access: None,
                 group_ids: None,
                 outbound_proxy: None,
+                codex_only: None,
             },
             &MutationContext {
                 actor: MutationActor::System,
