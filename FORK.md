@@ -64,6 +64,25 @@
 | `900003` | `model_requests.client_turn_state_bytes` |
 | `900004` | 删除 turn_state 覆盖列 |
 
+## 预编译镜像
+
+本机内存紧，不要在部署机上 `docker build`。GitHub Actions 在推送 `main` 或手动触发 `Publish image` 后，把运行时镜像推到 GHCR：
+
+```text
+ghcr.io/xinnan-zhu/codex-proxy-rs:latest
+ghcr.io/xinnan-zhu/codex-proxy-rs:sha-<commit>
+```
+
+首次发布后把该 Package 设为 Public（GitHub → Packages → `codex-proxy-rs` → Package settings → Change visibility），然后本机无需登录即可拉取：
+
+```bash
+docker pull ghcr.io/xinnan-zhu/codex-proxy-rs:latest
+cd /path/to/deploy
+CPR_IMAGE=ghcr.io/xinnan-zhu/codex-proxy-rs:latest docker compose up -d --no-build --no-deps --force-recreate codex-proxy-rs
+```
+
+不要用官方 `ghcr.io/zyycn/codex-proxy-rs`，那份镜像没有本 fork 的改动。
+
 ## 同步官方更新
 
 ```bash
