@@ -1063,6 +1063,7 @@ accountAutoFreezeDurationSeconds
 accountAutoFreezeProbeEnabled
 accountAutoFreezeProbeModel
 accountAutoFreezeAdaptiveConcurrency
+blockDegradedTurnState
 ```
 
 `requestLocationEnabled` 是必填布尔值，默认 `false`：关闭时不覆盖客户端原有位置和时区；开启时使用已保存的
@@ -1087,6 +1088,9 @@ accountAutoFreezeAdaptiveConcurrency
 
 `rotationStrategy` 可取 `smart`、`quota_reset_priority`、`round_robin`、`sticky`。
 两个 `minCodex*Version` 字段为 `string | null`，只设置最低版本，不存在最大版本字段。
+
+`blockDegradedTurnState` 是必填布尔值，默认 `false`。打开后，上游响应的 `x-codex-turn-state` 恰好 312 字节时，不把该响应发给客户端，改为 `403` / `policy_denied`。
+292、其它长度和未返回该头的响应仍照常交付。关闭时上游返回的 312 仍转发给客户端。管理端连接测试不经过该门。保存后通过现有配置发布机制对新请求生效。
 
 ### 模型定价
 

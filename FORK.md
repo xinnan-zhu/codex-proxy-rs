@@ -48,6 +48,22 @@
 
 密钥名称列用官方 v3.12.0 起的 `clientApiKeyName`（「密钥名称」），账号列也保留。详情弹窗标题和「账号」行与官方一致；详情内仍显示 Turn State 原始字节数。
 
+### 4. 阻断降智对话
+
+管理端「安全与访问」有全局开关 `block_degraded_turn_state`（默认关）。312 是上游响应里的 `x-codex-turn-state`，不是客户端先发明的。打开后，上游响应头或 WebSocket metadata 里的该值恰好 312 字节时，这次响应不发给客户端，改为英文 403。292、其它长度、没返回该头的响应照常交付。管理端「连接测试」走诊断路径，不受此开关拦截。
+
+关闭时与未加此门时一致：上游返回的 312 仍转给客户端，使用记录智商列照常显示客户端回带的请求头长度。
+
+不改写发往上游的 `X-Codex-Turn-State`，也不按账号跳过再换号。判定只看上游返回值的字节数，不读 body `turnState`。
+
+拒绝为 HTTP 403，`error.code` 为 `policy_denied`，英文 message 固定为：
+
+```text
+This conversation triggered upstream degraded-intelligence risk control and was blocked.
+```
+
+实现要点：迁移 `900005`，列 `runtime_settings.block_degraded_turn_state`。
+
 ## 明确不再保留
 
 - **按账号覆盖 `X-Codex-Turn-State`**：曾经加过，已从应用层回退。发往上游的该头与官方一样透传。迁移 `900001` 冻结保留，`900004` 删列。
@@ -63,6 +79,7 @@
 | `900002` | `provider_accounts.codex_only` |
 | `900003` | `model_requests.client_turn_state_bytes` |
 | `900004` | 删除 turn_state 覆盖列 |
+| `900005` | `runtime_settings.block_degraded_turn_state` |
 
 ## 预编译镜像
 
@@ -102,4 +119,4 @@ git merge upstream/main
 git push origin
 ```
 
-冲突时：额度重置和官方 UI 改动优先上游；上面三项 fork 功能保留。若官方新迁移号与 `90000N` 撞号，重编号本 fork 迁移，并同步 `_sqlx_migrations` 与 `.frozen-sha256`。
+冲突时：额度重置和官方 UI 改动优先上游；上面四项 fork 功能保留。若官方新迁移号与 `90000N` 撞号，重编号本 fork 迁移，并同步 `_sqlx_migrations` 与 `.frozen-sha256`。

@@ -42,6 +42,7 @@ pub struct SnapshotSettingsFacts {
     model_mappings: BTreeMap<String, String>,
     min_codex_desktop_version: Option<String>,
     min_codex_cli_version: Option<String>,
+    block_degraded_turn_state: bool,
 }
 
 impl SnapshotSettingsFacts {
@@ -90,6 +91,13 @@ impl SnapshotSettingsFacts {
         self
     }
 
+    /// 打开后拒绝客户端头恰好 312 字节的对话。默认关闭，不参与选号。
+    #[must_use]
+    pub const fn with_block_degraded_turn_state(mut self, enabled: bool) -> Self {
+        self.block_degraded_turn_state = enabled;
+        self
+    }
+
     #[must_use]
     pub fn new(
         max_concurrent_per_account: u32,
@@ -114,6 +122,7 @@ impl SnapshotSettingsFacts {
             model_mappings,
             min_codex_desktop_version,
             min_codex_cli_version,
+            block_degraded_turn_state: false,
         }
     }
 }
@@ -564,6 +573,7 @@ async fn compile_runtime_snapshot(
             .with_account_directory(account_directory)
             .with_exhaustive_provider_catalogs(exhaustive_provider_catalogs)
             .with_min_codex_client_versions(min_client_versions)
+            .with_block_degraded_turn_state(facts.settings.block_degraded_turn_state)
     })
 }
 
@@ -586,6 +596,7 @@ pub struct RuntimeSnapshot {
     account_directory: Arc<RuntimeAccountDirectory>,
     client_policies: Arc<BTreeMap<ClientApiKeyId, ClientPolicy>>,
     min_codex_client_versions: CodexClientMinVersions,
+    block_degraded_turn_state: bool,
 }
 
 impl RuntimeSnapshot {
@@ -713,7 +724,20 @@ impl RuntimeSnapshot {
             account_directory: Arc::new(RuntimeAccountDirectory::default()),
             client_policies: Arc::new(client_policy_map),
             min_codex_client_versions: CodexClientMinVersions::default(),
+            block_degraded_turn_state: false,
         })
+    }
+
+    /// 是否拒绝客户端头 `x-codex-turn-state` 恰好 312 字节的对话。
+    #[must_use]
+    pub const fn block_degraded_turn_state(&self) -> bool {
+        self.block_degraded_turn_state
+    }
+
+    #[must_use]
+    pub const fn with_block_degraded_turn_state(mut self, enabled: bool) -> Self {
+        self.block_degraded_turn_state = enabled;
+        self
     }
 
     #[must_use]
@@ -1013,6 +1037,7 @@ impl RuntimeSnapshot {
             config_revision: self.revision,
             pricing: Arc::clone(&self.pricing),
             request_location: self.request_location.clone(),
+            block_degraded_turn_state: self.block_degraded_turn_state,
             account_selection_policy: self.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)
@@ -1056,6 +1081,7 @@ impl RuntimeSnapshot {
             config_revision: self.revision,
             pricing: Arc::clone(&self.pricing),
             request_location: self.request_location.clone(),
+            block_degraded_turn_state: self.block_degraded_turn_state,
             account_selection_policy: self.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)

@@ -40,6 +40,8 @@ pub enum ProviderErrorKind {
     NoEligibleAccount,
     /// 目标账号仅限 Codex 官方客户端，当前客户端不被允许调度到该账号。
     AccountClientRestricted,
+    /// 上游返回了应阻断、不得交给客户端的降智 turn-state。
+    PolicyDenied,
     /// Provider 的账号存储、租约协调或本地凭据数据不可用。
     ProviderInfrastructureUnavailable,
     /// 请求超时。
@@ -75,6 +77,7 @@ impl ProviderErrorKind {
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::NoEligibleAccount => "no_eligible_account",
             Self::AccountClientRestricted => "account_client_restricted",
+            Self::PolicyDenied => "policy_denied",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",
             Self::Timeout => "timeout",
             Self::Transport => "transport",
@@ -1105,6 +1108,10 @@ impl GatewayError {
             ProviderErrorKind::AccountClientRestricted => Self::new(
                 GatewayErrorKind::PolicyDenied,
                 "upstream account rejected this client",
+            ),
+            ProviderErrorKind::PolicyDenied => Self::new(
+                GatewayErrorKind::PolicyDenied,
+                "This conversation triggered upstream degraded-intelligence risk control and was blocked.",
             ),
             ProviderErrorKind::ProviderInfrastructureUnavailable => Self::new(
                 GatewayErrorKind::ProviderInfrastructureUnavailable,
