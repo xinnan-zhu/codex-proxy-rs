@@ -83,6 +83,8 @@ CPR_IMAGE=ghcr.io/xinnan-zhu/codex-proxy-rs:latest docker compose up -d --no-bui
 
 不要用官方 `ghcr.io/zyycn/codex-proxy-rs`，那份镜像没有本 fork 的改动。
 
+管理端「检查更新」读的是 GitHub Releases（`CPR_UPDATE_REPOSITORY`），不是 GHCR。部署实例应设为 `xinnan-zhu/codex-proxy-rs`，避免点更新后装上官方二进制、冲掉 fork 改动。仓库里还没有符合更新器格式的 Release 资产（`codex-proxy-rs_<version>_<os>_<arch>.tar.gz` + `checksums.txt`）时，检查结果会是「当前没有可用更新」。
+
 ## 同步官方更新
 
 ```bash
