@@ -17,7 +17,7 @@
 </div>
 
 > [!IMPORTANT]
-> 这是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人 fork，不是官方仓库。当前已同步官方 **v3.13.0**。
+> 这是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人 fork，不是官方仓库。当前已同步官方 **v3.13.1**。
 > 相对官方多了：账号「仅限 Codex 官方客户端」、请求 Turn State 字节统计、使用记录「智商」列。完整说明见 [FORK.md](FORK.md)。
 
 > [!NOTE]
