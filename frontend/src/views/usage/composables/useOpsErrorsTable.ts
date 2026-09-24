@@ -11,6 +11,7 @@ interface UseOpsErrorsTableOptions {
   timeRangeParams: Readonly<Ref<UsageTimeRangeParams>>
   latestTimeRangeParams: () => UsageTimeRangeParams
   provider: Readonly<Ref<string>>
+  model: Readonly<Ref<string>>
   active: Readonly<Ref<boolean>>
 }
 
@@ -19,13 +20,14 @@ export function useOpsErrorsTable(options: UseOpsErrorsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
   let disposed = false
-  // 时间、平台和搜索共同构成分页快照，避免翻页混入另一组筛选结果。
+  // 时间、平台、模型和搜索共同构成分页快照，避免翻页混入另一组筛选结果。
   let tableParams = snapshot()
 
   function snapshot() {
     return {
       ...options.latestTimeRangeParams(),
       provider: options.provider.value || undefined,
+      model: options.model.value || undefined,
       search: search.value,
     }
   }
@@ -88,7 +90,7 @@ export function useOpsErrorsTable(options: UseOpsErrorsTableOptions) {
     { debounce: 250 },
   )
 
-  watch([options.timeRangeParams, options.provider, options.active], () => {
+  watch([options.timeRangeParams, options.provider, options.model, options.active], () => {
     if (options.active.value)
       void reloadLatest()
     else

@@ -35,6 +35,8 @@ const {
   currentPage,
   searchQuery,
   providerQuery,
+  modelQuery,
+  modelOptions,
   usagePagination,
   loading,
   analyticsLoading,
@@ -55,6 +57,17 @@ const {
 
 const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
 
+// 当前范围里已无记录的已选模型仍保留为选项，避免下拉框显示空白。
+const modelSelectOptions = computed(() => {
+  const models = modelQuery.value && !modelOptions.value.includes(modelQuery.value)
+    ? [modelQuery.value, ...modelOptions.value]
+    : modelOptions.value
+  return [
+    { label: '全部模型', value: '' },
+    ...models.map(model => ({ label: model, value: model })),
+  ]
+})
+
 watch(timeRange, () => {
   refreshTimeRangeEnd()
   currentPage.value = 1
@@ -67,6 +80,12 @@ watch(timeRange, () => {
     <BasePageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
         <BaseSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
+        <BaseSelect
+          v-model="modelQuery"
+          :options="modelSelectOptions"
+          aria-label="按模型筛选"
+          class="w-44"
+        />
         <ProviderFilterSegmented
           v-model="providerQuery"
           :disabled="refreshingList"
@@ -75,7 +94,7 @@ watch(timeRange, () => {
       </template>
     </BasePageHeader>
 
-    <UsageSummaryCards :summary="summary" />
+    <UsageSummaryCards :summary="summary" :cost="insights.overview.cost" />
     <UsageInsightsGrid
       v-model:diagnostic-dimension="diagnosticDimension"
       :overview="insights.overview"
@@ -158,6 +177,7 @@ watch(timeRange, () => {
             :time-range-params="timeRangeParams"
             :latest-time-range-params="latestTimeRangeParams"
             :provider="providerQuery"
+            :model="modelQuery"
             :active="recordView === 'errors'"
           />
         </div>

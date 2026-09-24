@@ -23,7 +23,10 @@ type UsageLoadScope = 'all' | 'table'
 interface UsageLoadOptions {
   scope?: UsageLoadScope
   background?: boolean
+  keepModelOptions?: boolean
 }
+
+const UNKNOWN_DIAGNOSTIC_KEY = '__none__'
 
 export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const loading = shallowRef(true)
@@ -37,6 +40,8 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const searchQuery = shallowRef('')
   const search = computed(() => searchQuery.value.trim() || undefined)
   const providerQuery = shallowRef('')
+  const modelQuery = shallowRef('')
+  const modelOptions = shallowRef<string[]>([])
   let tableParams = snapshot()
   const refreshingList = shallowRef(false)
   const diagnosticDimension = shallowRef('model')
@@ -46,10 +51,16 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   let tableController: AbortController | undefined
   let analyticsController: AbortController | undefined
   let diagnosticController: AbortController | undefined
+  let modelOptionsRequestId = 0
+  let modelOptionsController: AbortController | undefined
   let disposed = false
-  const scopedParams = () => ({
+  const providerParams = () => ({
     ...options.timeRangeParams.value,
     ...(providerQuery.value ? { provider: providerQuery.value } : {}),
+  })
+  const scopedParams = () => ({
+    ...providerParams(),
+    ...(modelQuery.value ? { model: modelQuery.value } : {}),
   })
   const usagePagination = computed(() => ({
     currentPage: currentPage.value,
@@ -61,6 +72,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     return {
       ...options.latestTimeRangeParams(),
       provider: providerQuery.value || undefined,
+      model: modelQuery.value || undefined,
       search: search.value,
     }
   }
@@ -71,7 +83,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   }
 
   async function loadUsageRecords(loadOptions: UsageLoadOptions = {}) {
-    const { scope = 'all', background = false } = loadOptions
+    const { scope = 'all', background = false, keepModelOptions = false } = loadOptions
     const globalParams = scopedParams()
     if (scope === 'all') {
       resetPagination()
@@ -81,7 +93,28 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     await Promise.all([
       ...(options.active.value ? [loadUsagePage(background)] : []),
       ...(scope === 'all' ? [loadUsageAnalytics(globalParams, background)] : []),
+      ...(scope === 'all' && !keepModelOptions ? [loadModelOptions()] : []),
     ])
+  }
+
+  // 选项只随时间与平台变化，不带模型筛选，否则选中后列表只剩当前模型；
+  // 只列出有成功调用的模型，客户端写错的模型名只会产生失败请求。
+  async function loadModelOptions() {
+    const requestId = ++modelOptionsRequestId
+    modelOptionsController?.abort()
+    modelOptionsController = new AbortController()
+    try {
+      const result = await getUsageRecordInsightsDiagnostics({
+        ...providerParams(),
+        dimension: 'model',
+      }, { signal: modelOptionsController.signal, silent: true })
+      if (requestId !== modelOptionsRequestId)
+        return
+      modelOptions.value = result.items
+        .filter(item => item.successCount > 0 && item.key && item.key !== UNKNOWN_DIAGNOSTIC_KEY)
+        .map(item => item.key)
+    }
+    catch {}
   }
 
   async function loadUsagePage(background: boolean) {
@@ -219,6 +252,10 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     void loadUsageRecords({ background: true })
   })
 
+  watch(modelQuery, () => {
+    void loadUsageRecords({ background: true, keepModelOptions: true })
+  })
+
   watch(options.active, (active) => {
     if (active) {
       void reloadLatestTable()
@@ -243,9 +280,11 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     tableRequestId += 1
     analyticsRequestId += 1
     diagnosticRequestId += 1
+    modelOptionsRequestId += 1
     tableController?.abort()
     analyticsController?.abort()
     diagnosticController?.abort()
+    modelOptionsController?.abort()
   })
 
   return {
@@ -253,6 +292,8 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     pageSize,
     searchQuery,
     providerQuery,
+    modelQuery,
+    modelOptions,
     usagePagination,
     loading,
     analyticsLoading,

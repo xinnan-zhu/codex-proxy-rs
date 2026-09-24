@@ -1,18 +1,27 @@
 <script setup lang="ts">
-import type { getUsageRecordSummary } from '@/api'
-import { Activity, Database, FileText, Timer } from '@lucide/vue'
+import type { getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
+import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
 
 import { computed } from 'vue'
 import BaseCard from '@/components/base/BaseCard.vue'
 import BaseMotionIcon from '@/components/base/BaseMotionIcon.vue'
+import { formatUsd } from '../utils/format'
 
 const props = defineProps<{
   summary: Awaited<ReturnType<typeof getUsageRecordSummary>>
+  cost: Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>['cost']
 }>()
 
 function averageLatencyDisplay(value: string) {
   return !value || value === '—' || value === '-' ? '0 ms' : value
 }
+
+const costDetail = computed(() => {
+  const { partial, unknown } = props.cost.coverage
+  if (partial + unknown > 0)
+    return `${partial + unknown} 次请求计费不完整，实际可能更高`
+  return `每次成功 ${formatUsd(props.cost.costPerSuccessfulRequest, true)}`
+})
 
 const items = computed(() => [
   {
@@ -22,6 +31,14 @@ const items = computed(() => [
     value: props.summary.totalRequests,
     detail: '筛选范围内',
     tone: 'bg-cp-blue-container text-cp-blue-on-container',
+  },
+  {
+    key: 'cost',
+    label: '总费用',
+    icon: CircleDollarSign,
+    value: formatUsd(props.cost.estimatedCost),
+    detail: costDetail.value,
+    tone: 'bg-cp-purple-container text-cp-purple-on-container',
   },
   {
     key: 'tokens',
@@ -51,7 +68,7 @@ const items = computed(() => [
 </script>
 
 <template>
-  <section class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="使用概览">
+  <section class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5" aria-label="使用概览">
     <BaseCard
       v-for="item in items"
       :key="item.key"
@@ -69,7 +86,7 @@ const items = computed(() => [
         <strong class="block truncate text-[22px] leading-none font-extrabold text-cp-text">
           {{ item.value }}
         </strong>
-        <span class="block truncate text-cp-sm leading-none font-emphasis text-cp-text-secondary">
+        <span class="block truncate text-cp-sm leading-none font-emphasis text-cp-text-secondary" :title="item.detail">
           {{ item.detail }}
         </span>
       </div>
