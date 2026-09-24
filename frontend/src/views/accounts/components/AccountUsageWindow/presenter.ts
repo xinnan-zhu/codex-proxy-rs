@@ -1,5 +1,6 @@
 import type { AccountQuotaWindow } from '../../constants'
 import { clamp } from 'es-toolkit'
+import { parseTimestamp } from '@/utils/date'
 import { formatInteger } from '@/utils/number'
 import { isRecord } from '@/utils/object'
 
@@ -24,7 +25,22 @@ interface AccountLocalUsage {
   requestCountDisplay?: string
   totalTokens?: number
   totalTokensDisplay?: string
+  billingAmountUsdDisplay?: string
+  costEstimateStatus?: string
   requestBuckets?: AccountRequestBucket[]
+}
+
+export interface QuotaWindowCost {
+  usedDisplay: string
+  usedPartial: boolean
+  estimatedTotalDisplay: string
+}
+
+export interface QuotaWindowCycleProgress {
+  elapsedPercent: number
+  elapsedPercentDisplay: string
+  remainingDisplay: string
+  barStyle: { width: string }
 }
 
 interface AccountUsageWindowVariantDefinition {
@@ -187,6 +203,10 @@ function accountLocalUsage(value: unknown): AccountLocalUsage | null {
     localUsage.totalTokens = value.totalTokens
   if (typeof value.totalTokensDisplay === 'string')
     localUsage.totalTokensDisplay = value.totalTokensDisplay
+  if (typeof value.billingAmountUsdDisplay === 'string')
+    localUsage.billingAmountUsdDisplay = value.billingAmountUsdDisplay
+  if (typeof value.costEstimateStatus === 'string')
+    localUsage.costEstimateStatus = value.costEstimateStatus
   return localUsage
 }
 
@@ -240,6 +260,54 @@ function localTokenDisplay(localUsage: AccountLocalUsage | null) {
 export function quotaWindowLocalUsageDisplay(window: AccountQuotaWindow) {
   const localUsage = accountLocalUsage(window.localUsage)
   return localTokenDisplay(localUsage) || null
+}
+
+/** 窗口没有网关费用记录时返回 null，调用方不展示费用行。 */
+export function quotaWindowCost(window: AccountQuotaWindow): QuotaWindowCost | null {
+  const localUsage = accountLocalUsage(window.localUsage)
+  const usedDisplay = localUsage?.billingAmountUsdDisplay?.trim()
+  if (!usedDisplay || usedDisplay === '—')
+    return null
+  return {
+    usedDisplay,
+    usedPartial: localUsage?.costEstimateStatus === 'partial',
+    estimatedTotalDisplay: window.estimatedQuotaUsdDisplay?.trim() || '—',
+  }
+}
+
+/** 按重置时间倒推周期起点；缺少窗口时长或重置时间时不展示进度。 */
+export function quotaWindowCycleProgress(
+  window: AccountQuotaWindow,
+  now: number,
+): QuotaWindowCycleProgress | null {
+  const resetAt = window.resetAt ? parseTimestamp(window.resetAt) : null
+  const windowSeconds = window.windowSeconds
+  if (resetAt === null || typeof windowSeconds !== 'number' || windowSeconds <= 0)
+    return null
+
+  const windowMilliseconds = windowSeconds * 1_000
+  const remainingMilliseconds = clamp(resetAt - now, 0, windowMilliseconds)
+  const elapsedPercent = (1 - remainingMilliseconds / windowMilliseconds) * 100
+  return {
+    elapsedPercent,
+    elapsedPercentDisplay: `${Math.floor(elapsedPercent)}%`,
+    remainingDisplay: remainingDurationDisplay(remainingMilliseconds),
+    barStyle: { width: `${elapsedPercent}%` },
+  }
+}
+
+function remainingDurationDisplay(milliseconds: number) {
+  const totalMinutes = Math.floor(milliseconds / 60_000)
+  if (totalMinutes < 1)
+    return '即将重置'
+  const days = Math.floor(totalMinutes / (24 * 60))
+  const hours = Math.floor(totalMinutes / 60) % 24
+  const minutes = totalMinutes % 60
+  if (days > 0)
+    return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`
+  if (hours > 0)
+    return minutes > 0 ? `${hours} 小时 ${minutes} 分` : `${hours} 小时`
+  return `${minutes} 分钟`
 }
 
 function requestCountDisplay(localUsage: AccountLocalUsage | null) {

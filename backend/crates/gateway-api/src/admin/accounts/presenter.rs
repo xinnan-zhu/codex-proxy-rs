@@ -1,7 +1,10 @@
 //! Admin 领域结果到安全 HTTP wire 的展示投影。
 
 use super::*;
-use gateway_admin::model::quota_forecast::{AccountQuotaForecast, AccountQuotaForecastReport};
+use gateway_admin::model::observability::CostCoverage;
+use gateway_admin::model::quota_forecast::{
+    AccountQuotaForecast, AccountQuotaForecastReport, window_quota_usd_estimate,
+};
 
 pub(super) fn account_page_data(
     result: AccountDirectoryPage,
@@ -224,6 +227,7 @@ pub(super) fn account_quota_view(
 }
 
 pub(crate) fn quota_window_view(window: ProviderQuotaWindow) -> AccountQuotaWindowView {
+    let estimated_quota_usd = window_quota_usd_estimate(&window);
     let ProviderQuotaWindow {
         key,
         group,
@@ -256,13 +260,26 @@ pub(crate) fn quota_window_view(window: ProviderQuotaWindow) -> AccountQuotaWind
             .map_or_else(|| "—".to_owned(), |value| format!("{value:.1}%")),
         limit_reached,
         local_usage: local_usage.as_ref().map(quota_local_usage),
+        estimated_quota_usd,
+        estimated_quota_usd_display: forecast_usd_display(estimated_quota_usd),
+        reset_at: reset_at.map(|value| china_rfc3339(&value)),
         reset_at_display: reset_at.map_or_else(|| "—".to_owned(), |value| china_datetime(&value)),
     }
 }
 
 pub(super) fn quota_local_usage(usage: &AccountUsage) -> Value {
     let total_tokens = usage.total_tokens.unwrap_or_default();
+    let usd = usage
+        .costs
+        .iter()
+        .find(|cost| cost.currency.eq_ignore_ascii_case("USD"));
     serde_json::json!({
+        "billingAmountUsd": usd.map(|cost| cost.amount.as_str().to_owned()),
+        "billingAmountUsdDisplay": usd.map_or_else(
+            || "—".to_owned(),
+            |cost| format_decimal_currency(cost.amount.as_str(), "USD"),
+        ),
+        "costEstimateStatus": cost_estimate_status(&usage.cost_coverage),
         "requestCount": usage.request_count,
         "requestCountDisplay": format_number(usage.request_count),
         "inputTokens": usage.input_tokens.unwrap_or_default(),
@@ -294,17 +311,8 @@ pub(super) fn account_usage_view(
     let Some(usage) = usage else {
         return empty_account_usage();
     };
-    let known_count = usage
-        .cost_coverage
-        .provider_reported_count
-        .saturating_add(usage.cost_coverage.calculated_count);
-    let cost_estimate_status = if known_count == 0 {
-        "unknown"
-    } else if usage.cost_coverage.unavailable_count > 0 {
-        "partial"
-    } else {
-        "known"
-    };
+    let known_count = usage.cost_coverage.known_count();
+    let cost_estimate_status = cost_estimate_status(&usage.cost_coverage);
     AccountUsageView {
         window_label_display: match period {
             Some(AccountUsagePeriod::Weekly) => "周额度窗口",
@@ -357,17 +365,8 @@ pub(super) fn account_model_usage_view(
     usage: AccountModelUsage,
     now: DateTime<Utc>,
 ) -> ModelUsageView {
-    let known_count = usage
-        .cost_coverage
-        .provider_reported_count
-        .saturating_add(usage.cost_coverage.calculated_count);
-    let cost_estimate_status = if known_count == 0 {
-        "unknown"
-    } else if usage.cost_coverage.unavailable_count > 0 {
-        "partial"
-    } else {
-        "known"
-    };
+    let known_count = usage.cost_coverage.known_count();
+    let cost_estimate_status = cost_estimate_status(&usage.cost_coverage);
     let usd = usage
         .costs
         .iter()
@@ -414,6 +413,16 @@ pub(super) fn account_model_usage_view(
         costs: usage.costs.iter().map(account_currency_cost_view).collect(),
         last_used_at: china_rfc3339(&usage.last_used_at),
         last_used_at_display: relative_time(usage.last_used_at, now),
+    }
+}
+
+fn cost_estimate_status(coverage: &CostCoverage) -> &'static str {
+    if coverage.known_count() == 0 {
+        "unknown"
+    } else if coverage.unavailable_count > 0 {
+        "partial"
+    } else {
+        "known"
     }
 }
 

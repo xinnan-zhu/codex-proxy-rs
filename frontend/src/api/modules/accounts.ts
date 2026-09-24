@@ -25,6 +25,10 @@ export interface AccountQuotaWindow {
   usedPercentDisplay: string
   limitReached: boolean
   localUsage?: unknown
+  // 本周期网关费用 ÷ 已用比例的折算值，站外消耗会让它偏低。
+  estimatedQuotaUsd: number | null
+  estimatedQuotaUsdDisplay: string
+  resetAt: string | null
   resetAtDisplay: string
 }
 

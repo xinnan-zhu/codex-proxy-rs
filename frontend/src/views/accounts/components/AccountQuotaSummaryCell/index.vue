@@ -26,6 +26,9 @@ const currentUsageTextClass = computed(() => currentUsageWindow.value
   ? quotaWindowPresentation(currentUsageWindow.value, '2px').percentTextClass
   : 'text-cp-text-quaternary')
 const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length - 1, 0))
+const usageCostDisplay = computed(() => props.account.usage.costs
+  .find(cost => cost.currency.toUpperCase() === 'USD')
+  ?.estimatedAmountDisplay)
 </script>
 
 <template>
@@ -58,6 +61,15 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
           <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">
             Tokens
           </span>
+          <template v-if="usageCostDisplay">
+            <span class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary">·</span>
+            <strong
+              class="shrink-0 text-cp-xs font-heavy text-cp-green-text"
+              :title="`${account.usage.windowLabelDisplay}网关记录费用`"
+            >
+              {{ usageCostDisplay }}
+            </strong>
+          </template>
         </span>
         <span
           class="flex shrink-0 items-baseline gap-1 text-[9px] font-emphasis text-cp-text-quaternary"

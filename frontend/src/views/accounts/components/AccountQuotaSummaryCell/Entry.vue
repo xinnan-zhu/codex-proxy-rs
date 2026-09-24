@@ -6,8 +6,13 @@ import { computed } from 'vue'
 import BasePopover from '@/components/base/BasePopover.vue'
 import { useUiClock } from '@/composables/useUiClock'
 import AccountRequestTimeline from '../AccountUsageWindow/AccountRequestTimeline.vue'
+import AccountQuotaCycleProgress from '../AccountUsageWindow/CycleProgress.vue'
 import AccountUsageWindow from '../AccountUsageWindow/index.vue'
-import { resolveAccountUsageWindowPresentation } from '../AccountUsageWindow/presenter'
+import {
+  quotaWindowCost,
+  quotaWindowCycleProgress,
+  resolveAccountUsageWindowPresentation,
+} from '../AccountUsageWindow/presenter'
 import AccountQuotaWindowGroup from './WindowGroup.vue'
 
 const props = withDefaults(defineProps<{
@@ -46,6 +51,8 @@ const detailItems = computed(() =>
       usedPercentDisplay: window.usedPercentDisplay,
       resetAtDisplay: window.resetAtDisplay,
       localUsageDisplay: view.quota.localUsageVisible ? view.quota.localUsageDisplay : '—',
+      cost: quotaWindowCost(window),
+      cycle: quotaWindowCycleProgress(window, now.value.getTime()),
       percentTextClass: view.quota.percentTextClass,
       barClass: view.quota.barClass,
       barStyle: view.quota.barStyle,
@@ -151,6 +158,25 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
                 :style="item.barStyle"
               />
             </div>
+            <template v-if="item.cycle">
+              <AccountQuotaCycleProgress
+                class="mt-1 h-1"
+                :progress="item.cycle"
+                :label="item.label"
+              />
+              <p class="m-0 mt-1.5 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5">
+                <span class="flex min-w-0 items-baseline gap-1">
+                  <span class="shrink-0 font-emphasis text-cp-text-tertiary">距重置</span>
+                  <strong class="truncate font-mono font-heavy tabular-nums text-cp-blue-text">
+                    {{ item.cycle.remainingDisplay }}
+                  </strong>
+                </span>
+                <span class="shrink-0 font-emphasis text-cp-text-tertiary">
+                  周期已过
+                  <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ item.cycle.elapsedPercentDisplay }}</strong>
+                </span>
+              </p>
+            </template>
           </template>
 
           <dl class="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[10px] leading-4">
@@ -175,6 +201,26 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
               <dd class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text">
                 {{ item.localUsageDisplay }}
               </dd>
+              <template v-if="item.cost">
+                <dt class="font-emphasis text-cp-text-tertiary">
+                  本周期费用
+                </dt>
+                <dd
+                  class="m-0 text-right font-mono font-heavy tabular-nums text-cp-green-text"
+                  :title="item.cost.usedPartial ? '部分请求缺少计费数据，实际费用可能更高' : undefined"
+                >
+                  {{ item.cost.usedDisplay }}{{ item.cost.usedPartial ? '+' : '' }}
+                </dd>
+                <dt class="font-emphasis text-cp-text-tertiary">
+                  估算总额度
+                </dt>
+                <dd
+                  class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text"
+                  title="按本周期网关费用 ÷ 已用比例折算；站外用量或账号中途接入会让估值偏低"
+                >
+                  ≈ {{ item.cost.estimatedTotalDisplay }}
+                </dd>
+              </template>
               <dt class="font-emphasis text-cp-text-tertiary">
                 重置时间
               </dt>

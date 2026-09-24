@@ -199,6 +199,29 @@ impl AccountQuotaForecast {
     }
 }
 
+/// 按本周期网关记录的美元费用与上游已用比例，折算单个窗口的总额度。
+///
+/// 这是列表参考值：站外消耗、账号在周期中途接入或费用未知都会让结果偏低；
+/// 需要区分采样边界的精确估算仍以 [`account_quota_forecasts`] 为准。
+#[must_use]
+pub fn window_quota_usd_estimate(window: &ProviderQuotaWindow) -> Option<f64> {
+    let percent = window
+        .used_percent
+        .filter(|p| p.is_finite() && (MIN_USED_PERCENT..=100.0).contains(p))?;
+    let usd = window
+        .local_usage
+        .as_ref()?
+        .costs
+        .iter()
+        .find(|cost| cost.currency.eq_ignore_ascii_case("USD"))?
+        .amount
+        .as_str()
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value > 0.0)?;
+    estimate(usd, 100.0 / percent)
+}
+
 fn estimate(value: f64, factor: f64) -> Option<f64> {
     let estimate = value * factor;
     (estimate.is_finite() && estimate >= 0.0).then_some(estimate)

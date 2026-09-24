@@ -389,6 +389,10 @@ pub struct AccountQuotaWindowView {
     pub limit_reached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_usage: Option<serde_json::Value>,
+    /// 按本周期网关费用 ÷ 已用比例折算的窗口总额度，仅作参考。
+    pub estimated_quota_usd: Option<f64>,
+    pub estimated_quota_usd_display: String,
+    pub reset_at: Option<String>,
     pub reset_at_display: String,
 }
 

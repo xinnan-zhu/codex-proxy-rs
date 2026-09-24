@@ -2,7 +2,9 @@
 import type { AccountQuotaWindow } from '../../constants'
 
 import { computed } from 'vue'
-import { quotaWindowPresentation } from '../AccountUsageWindow/presenter'
+import { useUiClock } from '@/composables/useUiClock'
+import AccountQuotaCycleProgress from '../AccountUsageWindow/CycleProgress.vue'
+import { quotaWindowCycleProgress, quotaWindowPresentation } from '../AccountUsageWindow/presenter'
 
 const props = withDefaults(defineProps<{
   label: string
@@ -12,12 +14,14 @@ const props = withDefaults(defineProps<{
   showPercentage: true,
 })
 
+const now = useUiClock()
 const windowItems = computed(() => props.windows.map(window => ({
   key: window.key,
   labelTooltip: window.labelDisplay,
   usedPercent: window.usedPercent,
   usedPercentDisplay: window.usedPercentDisplay,
   presentation: quotaWindowPresentation(window, '2px'),
+  cycle: quotaWindowCycleProgress(window, now.value.getTime()),
 })))
 const highestUsageWindow = computed(() => props.windows.reduce((highest, window) => {
   if (typeof window.usedPercent !== 'number')
@@ -30,6 +34,9 @@ const highestUsageDisplay = computed(() => highestUsageWindow.value?.usedPercent
 const highestUsageTextClass = computed(() => highestUsageWindow.value
   ? quotaWindowPresentation(highestUsageWindow.value, '2px').percentTextClass
   : 'text-cp-text-quaternary')
+const highestUsageCycle = computed(() => highestUsageWindow.value
+  ? quotaWindowCycleProgress(highestUsageWindow.value, now.value.getTime())
+  : null)
 
 const trackGridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${Math.max(windowItems.value.length, 1)}, minmax(0, 1fr))`,
@@ -49,24 +56,38 @@ const trackGridStyle = computed(() => ({
       >
         {{ highestUsageDisplay }}
       </strong>
+      <span
+        v-else-if="highestUsageCycle"
+        class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary"
+        :title="`${highestUsageWindow?.labelDisplay ?? ''}重置时间：${highestUsageWindow?.resetAtDisplay ?? '—'}`"
+      >
+        距重置
+        <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
+      </span>
     </div>
 
-    <div class="grid min-w-0 gap-1" :style="trackGridStyle">
-      <div
-        v-for="item in windowItems"
-        :key="item.key"
-        class="h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"
-        role="progressbar"
-        :aria-label="item.labelTooltip"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        :aria-valuenow="item.usedPercent ?? undefined"
-        :aria-valuetext="item.usedPercentDisplay"
-      >
+    <div class="grid min-w-0 gap-x-1" :style="trackGridStyle">
+      <div v-for="item in windowItems" :key="item.key" class="grid min-w-0 gap-0.5">
         <div
-          class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
-          :class="item.presentation.barClass"
-          :style="item.presentation.barStyle"
+          class="h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+          role="progressbar"
+          :aria-label="item.labelTooltip"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="item.usedPercent ?? undefined"
+          :aria-valuetext="item.usedPercentDisplay"
+        >
+          <div
+            class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
+            :class="item.presentation.barClass"
+            :style="item.presentation.barStyle"
+          />
+        </div>
+        <AccountQuotaCycleProgress
+          v-if="item.cycle"
+          class="h-1"
+          :progress="item.cycle"
+          :label="item.labelTooltip"
         />
       </div>
     </div>

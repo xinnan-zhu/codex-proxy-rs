@@ -3,7 +3,7 @@ use gateway_admin::model::{
     accounts::{AccountCost, AccountUsage},
     observability::CostCoverage,
     provider_credentials::{ProviderQuota, ProviderQuotaWindow, QuotaLocalUsageAttribution},
-    quota_forecast::{AccountQuotaForecast, account_quota_forecasts},
+    quota_forecast::{AccountQuotaForecast, account_quota_forecasts, window_quota_usd_estimate},
     quota_forecast_sampling::{QuotaForecastMethod, QuotaForecastSample, QuotaForecastUsage},
 };
 
@@ -126,6 +126,27 @@ fn forecasts_use_actual_periods_and_do_not_extrapolate_remaining_capacity() {
     assert!((month.estimated_usd.unwrap() - 10.0 * 30.0 / 7.0).abs() < 1e-10);
     assert_eq!(month.remaining_tokens, week.remaining_tokens);
     assert_eq!(month.remaining_usd, week.remaining_usd);
+}
+
+#[test]
+fn window_quota_estimate_scales_cycle_cost_by_used_percent() {
+    assert_eq!(window_quota_usd_estimate(&window("week", 7)), Some(10.0));
+
+    let mut low = window("week", 7);
+    low.used_percent = Some(4.9);
+    assert_eq!(window_quota_usd_estimate(&low), None);
+
+    let mut unknown = window("week", 7);
+    unknown.used_percent = None;
+    assert_eq!(window_quota_usd_estimate(&unknown), None);
+
+    let mut other_currency = window("week", 7);
+    other_currency.local_usage.as_mut().unwrap().costs[0].currency = "EUR".to_owned();
+    assert_eq!(window_quota_usd_estimate(&other_currency), None);
+
+    let mut no_usage = window("week", 7);
+    no_usage.local_usage = None;
+    assert_eq!(window_quota_usd_estimate(&no_usage), None);
 }
 
 #[test]

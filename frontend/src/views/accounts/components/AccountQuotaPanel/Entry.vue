@@ -4,7 +4,10 @@ import type { AccountQuotaWindow } from '../../constants'
 import { computed } from 'vue'
 import { useUiClock } from '@/composables/useUiClock'
 import AccountRequestTimeline from '../AccountUsageWindow/AccountRequestTimeline.vue'
+import AccountQuotaCycleProgress from '../AccountUsageWindow/CycleProgress.vue'
 import {
+  quotaWindowCost,
+  quotaWindowCycleProgress,
   quotaWindowLocalUsageDisplay,
   quotaWindowPresentation,
   resolveAccountUsageWindowPresentation,
@@ -41,6 +44,8 @@ const items = computed(() => props.windows.map((window) => {
     usedPercent: window.usedPercent,
     usedPercentDisplay: window.usedPercentDisplay,
     localUsageDisplay: quotaWindowLocalUsageDisplay(window),
+    cost: quotaWindowCost(window),
+    cycle: quotaWindowCycleProgress(window, now.value.getTime()),
     resetAtDisplay: window.resetAtDisplay,
     percentTextClass: presentation.percentTextClass,
     barClass: presentation.barClass,
@@ -115,23 +120,73 @@ const items = computed(() => props.windows.map((window) => {
             </span>
           </div>
 
-          <div
-            class="h-1.5 w-full overflow-hidden rounded-full bg-cp-border-secondary"
-            role="progressbar"
-            :aria-label="item.ariaLabel"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-valuenow="item.usedPercent ?? undefined"
-            :aria-valuetext="item.usedPercentDisplay"
-          >
+          <div class="grid min-w-0 gap-1">
             <div
-              class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
-              :class="item.barClass"
-              :style="item.barStyle"
+              class="h-1.5 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+              role="progressbar"
+              :aria-label="item.ariaLabel"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="item.usedPercent ?? undefined"
+              :aria-valuetext="item.usedPercentDisplay"
+            >
+              <div
+                class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
+                :class="item.barClass"
+                :style="item.barStyle"
+              />
+            </div>
+            <AccountQuotaCycleProgress
+              v-if="item.cycle"
+              class="h-1.5"
+              :progress="item.cycle"
+              :label="item.ariaLabel"
             />
           </div>
 
-          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
+          <p
+            v-if="item.cycle"
+            class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
+          >
+            <span class="flex min-w-0 items-baseline gap-1">
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">距重置</span>
+              <strong class="truncate font-mono font-heavy tabular-nums text-cp-blue-text">
+                {{ item.cycle.remainingDisplay }}
+              </strong>
+            </span>
+            <span
+              class="min-w-0 truncate font-mono font-emphasis tabular-nums text-cp-text-tertiary"
+              :title="`重置时间：${item.resetAtDisplay}`"
+            >
+              {{ item.resetAtDisplay }}
+            </span>
+          </p>
+
+          <p
+            v-if="item.cost"
+            class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
+          >
+            <span class="flex min-w-0 items-baseline gap-1">
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">本周期</span>
+              <strong
+                class="truncate font-mono font-heavy tabular-nums text-cp-green-text"
+                :title="item.cost.usedPartial ? '部分请求缺少计费数据，实际费用可能更高' : '本周期网关记录的费用'"
+              >
+                {{ item.cost.usedDisplay }}{{ item.cost.usedPartial ? '+' : '' }}
+              </strong>
+            </span>
+            <span
+              class="flex min-w-0 items-baseline gap-1"
+              title="按本周期网关费用 ÷ 已用比例折算；站外用量或账号中途接入会让估值偏低"
+            >
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">估算总额度</span>
+              <strong class="truncate font-mono font-heavy tabular-nums text-cp-text">
+                ≈ {{ item.cost.estimatedTotalDisplay }}
+              </strong>
+            </span>
+          </p>
+
+          <p v-if="!item.cycle" class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
             <span class="shrink-0 font-emphasis">重置</span>
             <span class="min-w-0 truncate font-mono font-emphasis tabular-nums" :title="item.resetAtDisplay">
               {{ item.resetAtDisplay }}
