@@ -2,7 +2,7 @@
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护 fork，不是官方仓库。
 
-- 当前基线：官方 `main` **v3.13.1**
+- 当前基线：官方 `main` **v3.14.1**
 - 远程：`origin` 为本仓库，`upstream` 为官方仓库
 
 官方功能、部署方式和客户端接入仍以官方 README / 文档为准。这里只记录本 fork **多出来的**、以及**明确不再保留**的差异。
@@ -64,6 +64,21 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 实现要点：迁移 `900005`，列 `runtime_settings.block_degraded_turn_state`。
 
+### 5. 账号额度的周期费用与重置进度
+
+账号管理的额度面板和列表额度单元格，在每个额度窗口下显示：
+
+- 本周期已用费用（按本地使用记录的 USD 计费）；
+- 估算总额度：本周期费用 ÷ 已用百分比，已用比例过低时不估算；
+- 蓝色重置进度条，与额度条等长并紧贴其下，标签行显示「距重置 X」，用于直观对比额度消耗与周期时间的比例。
+
+实现要点：`quota_forecast::window_quota_usd_estimate`；账号额度窗口接口多了 `estimatedQuotaUsd`、`estimatedQuotaUsdDisplay`、`resetAt`，窗口本地用量多了 `billingAmountUsd`、`costEstimateStatus`。
+
+### 6. 使用统计的模型筛选与总费用
+
+- 使用统计页右上角可按模型筛选；选项只包含筛选范围内有成功调用的模型，错误请求里的模型名不出现。筛选同时作用于使用记录、洞察图表与错误面板。
+- 顶部概览卡片增加「总费用」，副标题显示每次成功请求的平均费用；存在计费不完整的请求时改为提示实际可能更高。
+
 ## 明确不再保留
 
 - **按账号覆盖 `X-Codex-Turn-State`**：曾经加过，已从应用层回退。发往上游的该头与官方一样透传。迁移 `900001` 冻结保留，`900004` 删列。
@@ -71,7 +86,7 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 ## 数据库迁移
 
-本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.13.1 止于 `0017`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
+本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.14.1 止于 `0018`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
 
 | 编号 | 作用 |
 |------|------|
@@ -119,4 +134,4 @@ git merge upstream/main
 git push origin
 ```
 
-冲突时：额度重置和官方 UI 改动优先上游；上面四项 fork 功能保留。若官方新迁移号与 `90000N` 撞号，重编号本 fork 迁移，并同步 `_sqlx_migrations` 与 `.frozen-sha256`。
+冲突时：额度重置和官方 UI 改动优先上游；上面各项 fork 功能保留。若官方新迁移号与 `90000N` 撞号，重编号本 fork 迁移，并同步 `_sqlx_migrations` 与 `.frozen-sha256`。

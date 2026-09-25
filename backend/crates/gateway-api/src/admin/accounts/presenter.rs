@@ -63,6 +63,7 @@ pub(super) fn account_models_data(result: ProviderModels) -> AccountModelsData {
 pub(super) fn account_view(item: AccountDirectoryItem, now: DateTime<Utc>) -> AccountView {
     let AccountDirectoryItem {
         account,
+        capabilities,
         plan_type_display,
         projection,
         usage,
@@ -80,6 +81,7 @@ pub(super) fn account_view(item: AccountDirectoryItem, now: DateTime<Utc>) -> Ac
     }
     let (quota, refresh_token_expires_at) = account_quota_view(quota, cooldown, now);
     AccountView {
+        capabilities: capabilities.into(),
         id: account.id.clone(),
         name: account.name,
         notes: account.notes,

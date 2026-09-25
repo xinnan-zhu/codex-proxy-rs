@@ -64,6 +64,9 @@ fn update_body() -> Value {
         "accountAutoFreezeProbeEnabled": true,
         "accountAutoFreezeProbeModel": null,
         "accountAutoFreezeAdaptiveConcurrency": true,
+        "accountWarmupEnabled": false,
+        "accountWarmupScheduleTime": "08:00",
+        "accountWarmupModel": null,
         "blockDegradedTurnState": false
     })
 }
@@ -85,6 +88,19 @@ fn settings_request_accepts_unlimited_default_account_concurrency() {
     let request: UpdateRuntimeSettingsRequest =
         serde_json::from_value(body).expect("decode settings");
     request.validate().expect("zero means unlimited");
+}
+
+#[test]
+fn settings_request_requires_model_when_warmup_is_enabled() {
+    let mut body = update_body();
+    body["accountWarmupEnabled"] = json!(true);
+    let request: UpdateRuntimeSettingsRequest =
+        serde_json::from_value(body).expect("decode settings");
+
+    assert_eq!(
+        request.validate().unwrap_err().field(),
+        "accountWarmupModel"
+    );
 }
 
 #[test]
@@ -112,8 +128,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
     use gateway_core::routing::{PublicModelId, UpstreamModelId};
 
     let settings = RuntimeSettings {
-        openai_client_profile: None,
-        xai_client_profile: None,
+        request_profiles: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: Revision::new(7).expect("revision"),
@@ -148,6 +163,9 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
         account_auto_freeze_probe_enabled: true,
         account_auto_freeze_probe_model: None,
         account_auto_freeze_adaptive_concurrency: true,
+        account_warmup_enabled: false,
+        account_warmup_schedule_time: "08:00".to_owned(),
+        account_warmup_model: None,
         block_degraded_turn_state: false,
         updated_at: Utc
             .with_ymd_and_hms(2026, 8, 2, 10, 30, 0)
@@ -159,6 +177,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
     assert_eq!(
         value,
         json!({
+            "providerRequestProfiles": {},
             "openaiClientProfile": null,
             "xaiClientProfile": null,
         "requestLocationEnabled": false,
@@ -185,11 +204,14 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             "accountAutoFreezeThreshold": 12,
             "accountAutoFreezeWindowSeconds": 600,
             "accountAutoFreezeDurationSeconds": 7200,
-            "accountAutoFreezeProbeEnabled": true,
-            "accountAutoFreezeProbeModel": null,
-            "accountAutoFreezeAdaptiveConcurrency": true,
-            "blockDegradedTurnState": false,
-            "updatedAt": "2026-08-02T10:30:00Z"
+                "accountAutoFreezeProbeEnabled": true,
+                "accountAutoFreezeProbeModel": null,
+                "accountAutoFreezeAdaptiveConcurrency": true,
+                "accountWarmupEnabled": false,
+                "accountWarmupScheduleTime": "08:00",
+                "accountWarmupModel": null,
+                "blockDegradedTurnState": false,
+                "updatedAt": "2026-08-02T10:30:00Z"
         })
     );
 }
@@ -215,8 +237,7 @@ fn settings_request_and_response_fields_should_stay_in_lockstep() {
         .cloned()
         .collect();
     let settings = RuntimeSettings {
-        openai_client_profile: None,
-        xai_client_profile: None,
+        request_profiles: Default::default(),
         request_location_enabled: false,
         request_location: Default::default(),
         config_revision: Revision::new(7).expect("revision"),
@@ -253,6 +274,9 @@ fn settings_request_and_response_fields_should_stay_in_lockstep() {
         account_auto_freeze_probe_enabled: true,
         account_auto_freeze_probe_model: None,
         account_auto_freeze_adaptive_concurrency: true,
+        account_warmup_enabled: false,
+        account_warmup_schedule_time: "08:00".to_owned(),
+        account_warmup_model: None,
         block_degraded_turn_state: false,
         updated_at: chrono::Utc::now(),
     };
@@ -266,6 +290,7 @@ fn settings_request_and_response_fields_should_stay_in_lockstep() {
             .cloned()
             .collect();
     let mut expected_fields = request_fields;
+    expected_fields.insert("providerRequestProfiles".to_owned());
     expected_fields.insert("openaiClientProfile".to_owned());
     expected_fields.insert("xaiClientProfile".to_owned());
     expected_fields.insert("updatedAt".to_owned());
@@ -666,6 +691,63 @@ fn global_profile_can_be_omitted_but_cannot_be_cleared() {
         body[field] = json!({"versionMode":"latest"});
         assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(body).is_ok());
     }
+}
+
+#[tokio::test]
+async fn generic_global_profiles_decode_native_providers_and_reject_legacy_conflicts() {
+    let mut body = update_body();
+    body["providerRequestProfiles"] = json!({
+        "openai":{"preset":"desktop"},
+        "xai":{"preset":"managed"},
+    });
+    body["openaiClientProfile"] = json!({"preset":"desktop"});
+    let decoded = serde_json::from_value::<UpdateRuntimeSettingsRequest>(body.clone()).unwrap();
+    assert!(decoded.provider_request_profiles.contains_key("xai"));
+
+    body["openaiClientProfile"] = json!({"preset":"cli"});
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn settings_update_rejects_a_new_unknown_profile() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let mut body = update_body();
+    body["providerRequestProfiles"] = json!({
+        "plugin.unknown":{"preset":"new"}
+    });
+
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body.clone()),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    body["providerRequestProfiles"] = json!({"plugin.unknown":null});
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 fn custom_pricing() -> Value {

@@ -8,6 +8,7 @@ export default defineConfig({
   base: '/',
   plugins: [vue(), tailwindcss()],
   resolve: {
+    dedupe: ['vue'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },

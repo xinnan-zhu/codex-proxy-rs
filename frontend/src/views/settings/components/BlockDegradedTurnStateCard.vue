@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseSwitch from '@/components/base/BaseSwitch.vue'
+import { BaseCard, BaseSwitch } from '@codex-proxy/ui'
 
 const enabled = defineModel<boolean>({ required: true })
 </script>

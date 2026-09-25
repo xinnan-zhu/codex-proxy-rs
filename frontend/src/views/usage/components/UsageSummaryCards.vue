@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import type { getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
-import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
+import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
 
+import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
 import { computed } from 'vue'
-import BaseCard from '@/components/base/BaseCard.vue'
-import BaseMotionIcon from '@/components/base/BaseMotionIcon.vue'
 import { formatUsd } from '../utils/format'
 
 const props = defineProps<{
