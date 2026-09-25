@@ -81,7 +81,7 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 ### 7. 系统更新走代理
 
-系统更新弹窗有「下载代理」下拉框：可选「直连」（默认）或代理管理里已保存的任一代理。选择会保存到服务端，检查 Release、下载更新包和 checksum 都走同一出口；更新日志第一行会显示本次是直连还是经由哪个代理（不含认证信息）。删除被选中的代理后自动回到直连。
+系统更新弹窗有「下载代理」下拉框：可选「直连」（默认）或代理管理里已保存的任一代理。选择会保存到服务端，检查 Release、下载更新包和 checksum 都走同一出口；更新日志的「获取 Release」一行会注明本次是直连还是经由哪个代理（不含认证信息）。删除被选中的代理后自动回到直连。
 
 实现要点：迁移 `900006`，列 `runtime_settings.system_update_proxy_id`（外键 `outbound_proxies`，删除时置空）；接口 `GET/POST /api/admin/system/update/proxy`。
 

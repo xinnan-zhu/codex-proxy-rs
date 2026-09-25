@@ -341,16 +341,11 @@ impl ProcessSystemOperations {
         let proxy = self.update_proxy();
         self.events.info(
             Some(operation_id),
-            Some("network"),
-            proxy.as_ref().map_or_else(
-                || "直连 GitHub".to_owned(),
-                |proxy| format!("通过代理 {} 访问 GitHub", proxy.endpoint()),
-            ),
-        );
-        self.events.info(
-            Some(operation_id),
             Some("release"),
-            "正在获取最新 Release 信息",
+            proxy.as_ref().map_or_else(
+                || "正在获取最新 Release 信息（直连）".to_owned(),
+                |proxy| format!("正在获取最新 Release 信息（代理 {}）", proxy.endpoint()),
+            ),
         );
         let release = fetch_latest(
             &self.config.github_api_base,
