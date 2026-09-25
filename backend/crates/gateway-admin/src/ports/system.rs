@@ -107,4 +107,7 @@ pub trait SystemOperations: Send + Sync {
     ) -> Result<SystemOperationAccepted, SystemOperationError>;
 
     async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError>;
+
+    /// 之后的 Release 检查与更新包下载使用的出站代理；`None` 表示直连。
+    fn set_update_proxy(&self, _proxy: Option<gateway_core::account::OutboundProxy>) {}
 }

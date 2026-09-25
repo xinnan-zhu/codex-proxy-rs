@@ -4,6 +4,7 @@ use std::env;
 use std::time::{Duration, Instant};
 
 use gateway_admin::model::system::SystemUpdateDetail;
+use gateway_core::account::OutboundProxy;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
@@ -68,6 +69,7 @@ impl ReleaseCache {
     pub(crate) async fn detail(
         &self,
         config: &SystemUpdateConfig,
+        proxy: Option<&OutboundProxy>,
         refresh: bool,
     ) -> Result<SystemUpdateDetail, OperationError> {
         if let Some(reason) = config.update_support_error() {
@@ -79,11 +81,15 @@ impl ReleaseCache {
             .ok_or_else(|| conflict("update repository is not configured"))?;
         validate_repository(repository)?;
         validate_api_base(&config.github_api_base).map_err(conflict)?;
-        let key = config.release_cache_key();
+        let key = format!(
+            "{}|{}",
+            config.release_cache_key(),
+            proxy.map_or_else(|| "direct".to_owned(), OutboundProxy::endpoint)
+        );
         if !refresh && let Some(detail) = self.cached(&key).await {
             return Ok(detail);
         }
-        match fetch_latest(&config.github_api_base, repository, &config.version).await {
+        match fetch_latest(&config.github_api_base, repository, &config.version, proxy).await {
             Ok(release) => {
                 let detail = release.as_ref().map_or_else(
                     || super::base_update_detail(config, config.update_support_error(), None),
@@ -120,13 +126,14 @@ pub(crate) async fn fetch_latest(
     api_base: &str,
     repository: &str,
     current_version: &str,
+    proxy: Option<&OutboundProxy>,
 ) -> Result<Option<GitHubRelease>, OperationError> {
     validate_api_base(api_base).map_err(conflict)?;
     validate_repository(repository)?;
     let base = api_base.trim_end_matches('/');
     let current = semver::Version::parse(&normalize_version(current_version))
         .map_err(|_| invalid("current version is invalid"))?;
-    let client = reqwest::Client::builder()
+    let client = client_builder(proxy)?
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -280,12 +287,23 @@ pub fn validate_download_url(raw: &str, api_base: &str) -> Result<(), OperationE
     }
 }
 
+fn client_builder(proxy: Option<&OutboundProxy>) -> Result<reqwest::ClientBuilder, OperationError> {
+    let builder = reqwest::Client::builder();
+    let Some(proxy) = proxy else {
+        return Ok(builder);
+    };
+    let proxy = reqwest::Proxy::all(proxy.expose_url())
+        .map_err(|_| invalid("system update proxy is invalid"))?;
+    Ok(builder.proxy(proxy))
+}
+
 pub(crate) fn download_client(
     api_base: &str,
     timeout: Duration,
+    proxy: Option<&OutboundProxy>,
 ) -> Result<reqwest::Client, OperationError> {
     let api_base = api_base.to_owned();
-    reqwest::Client::builder()
+    client_builder(proxy)?
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if download_url_allowed(attempt.url(), &api_base) {

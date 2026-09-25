@@ -99,6 +99,26 @@ export function restartSystem(options: RequestOptions = {}) {
   })
 }
 
+export interface SystemUpdateProxy {
+  proxyId: string | null
+}
+
+export function getSystemUpdateProxy(options: RequestOptions = {}) {
+  return request<SystemUpdateProxy>({
+    url: '/api/admin/system/update/proxy',
+    method: 'GET',
+    ...options,
+  })
+}
+
+export function updateSystemUpdateProxy(data: SystemUpdateProxy) {
+  return request<SystemUpdateProxy>({
+    url: '/api/admin/system/update/proxy',
+    method: 'POST',
+    data,
+  })
+}
+
 export function getSystemUpdateStatus(options: RequestOptions = {}) {
   return request<SystemUpdateStatus>({
     url: '/api/admin/system/update/status',

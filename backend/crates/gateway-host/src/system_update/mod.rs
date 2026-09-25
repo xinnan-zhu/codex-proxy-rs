@@ -24,6 +24,7 @@ use gateway_admin::ports::system::{
     SystemOperationError, SystemOperationErrorKind, SystemOperations, SystemUpdateCandidate,
     SystemUpdateEventStream, SystemUpdatePreflight,
 };
+use gateway_core::account::OutboundProxy;
 use gateway_core::lifecycle::CancellationToken;
 use serde::Deserialize;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
@@ -233,6 +234,7 @@ pub struct ProcessSystemOperations {
     config: Arc<SystemUpdateConfig>,
     operation_lock: Arc<AsyncMutex<()>>,
     release_cache: Arc<ReleaseCache>,
+    update_proxy: Arc<std::sync::RwLock<Option<OutboundProxy>>>,
 }
 
 impl ProcessSystemOperations {
@@ -244,7 +246,15 @@ impl ProcessSystemOperations {
             config: Arc::new(config),
             operation_lock: Arc::new(AsyncMutex::new(())),
             release_cache: Arc::new(ReleaseCache::default()),
+            update_proxy: Arc::new(std::sync::RwLock::new(None)),
         }
+    }
+
+    fn update_proxy(&self) -> Option<OutboundProxy> {
+        self.update_proxy
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn start_update(
@@ -328,6 +338,15 @@ impl ProcessSystemOperations {
             .update_repository
             .as_deref()
             .ok_or_else(|| conflict("update repository is not configured"))?;
+        let proxy = self.update_proxy();
+        self.events.info(
+            Some(operation_id),
+            Some("network"),
+            proxy.as_ref().map_or_else(
+                || "直连 GitHub".to_owned(),
+                |proxy| format!("通过代理 {} 访问 GitHub", proxy.endpoint()),
+            ),
+        );
         self.events.info(
             Some(operation_id),
             Some("release"),
@@ -337,6 +356,7 @@ impl ProcessSystemOperations {
             &self.config.github_api_base,
             repository,
             &self.config.version,
+            proxy.as_ref(),
         )
         .await?
         .ok_or_else(|| conflict("当前发行通道没有可用更新"))?;
@@ -352,7 +372,7 @@ impl ProcessSystemOperations {
             Some("prepare"),
             format!("准备更新到 v{target}"),
         );
-        self.install_release(&release, target, operation_id, preflight)
+        self.install_release(&release, target, proxy.as_ref(), operation_id, preflight)
             .await
     }
 
@@ -360,6 +380,7 @@ impl ProcessSystemOperations {
         &self,
         release: &release::GitHubRelease,
         version: &str,
+        proxy: Option<&OutboundProxy>,
         operation_id: &str,
         preflight: &dyn SystemUpdatePreflight,
     ) -> Result<(), OperationError> {
@@ -406,6 +427,7 @@ impl ProcessSystemOperations {
             &archive_path,
             archive.size,
             &self.config.github_api_base,
+            proxy,
             operation_id,
             &self.events,
         )
@@ -420,6 +442,7 @@ impl ProcessSystemOperations {
             &checksum.browser_download_url,
             checksum.size,
             &self.config.github_api_base,
+            proxy,
         )
         .await?;
         self.events
@@ -488,7 +511,12 @@ impl SystemOperations for ProcessSystemOperations {
     }
 
     async fn update_detail(&self, refresh: bool) -> Result<SystemUpdateDetail, OperationError> {
-        match self.release_cache.detail(&self.config, refresh).await {
+        let proxy = self.update_proxy();
+        match self
+            .release_cache
+            .detail(&self.config, proxy.as_ref(), refresh)
+            .await
+        {
             Ok(detail) => Ok(detail),
             Err(error) => Ok(base_update_detail(
                 &self.config,
@@ -640,6 +668,13 @@ impl SystemOperations for ProcessSystemOperations {
             operation_id,
             message: message.to_owned(),
         })
+    }
+
+    fn set_update_proxy(&self, proxy: Option<OutboundProxy>) {
+        *self
+            .update_proxy
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = proxy;
     }
 }
 

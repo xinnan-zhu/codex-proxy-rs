@@ -28,6 +28,7 @@ mod proxies;
 mod retention;
 mod runtime_settings;
 mod snapshot;
+mod system_update_proxy;
 mod usage_facts;
 
 pub use account_groups::*;

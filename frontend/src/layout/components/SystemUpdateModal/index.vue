@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemUpdateDetail } from '@/api'
-import { BaseButton, BaseConfirmModal, BaseEmpty, BaseMarkdown, BaseModal, BaseScrollbar, toast } from '@codex-proxy/ui'
+import { BaseButton, BaseConfirmModal, BaseEmpty, BaseMarkdown, BaseModal, BaseScrollbar, BaseSelect, toast } from '@codex-proxy/ui'
 
 import {
   ArrowUpCircle,
@@ -19,6 +19,7 @@ import {
   resolveSystemUpdateLogClasses,
   resolveSystemUpdatePresentation,
 } from './presenter'
+import { useSystemUpdateProxy } from './useSystemUpdateProxy'
 
 const open = defineModel<boolean>({ default: false })
 
@@ -40,6 +41,8 @@ const {
   canUpdate,
 } = storeToRefs(systemUpdateStore)
 const { loadSystem, checkUpdates, updateNow, restartNow } = systemUpdateStore
+const updateProxy = useSystemUpdateProxy()
+const updateProxySelection = updateProxy.selection
 
 const updateLogScrollbar = useTemplateRef<InstanceType<typeof BaseScrollbar>>('updateLogScrollbar')
 const updateConfirmOpen = shallowRef(false)
@@ -166,6 +169,7 @@ async function handleRestart() {
 watch(open, (visible) => {
   if (visible) {
     void loadSystem(false).catch(() => undefined)
+    void updateProxy.load()
   }
 })
 
@@ -246,6 +250,24 @@ watch(
               {{ item.value }}
             </p>
           </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-cp bg-cp-bg-container px-3 py-2.5">
+          <div class="min-w-0">
+            <p class="m-0 text-cp-xs leading-none font-heavy text-cp-text-quaternary">
+              下载代理
+            </p>
+            <p class="mt-1.5 mb-0 text-cp-sm leading-none font-emphasis text-cp-text-secondary">
+              检查更新与下载更新包使用的出口
+            </p>
+          </div>
+          <BaseSelect
+            v-model="updateProxySelection"
+            class="w-full sm:w-64"
+            :options="updateProxy.options.value"
+            :disabled="updateProxy.busy.value || updating || restarting"
+            aria-label="下载代理"
+          />
         </div>
 
         <p

@@ -1563,6 +1563,8 @@ Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥
 | `GET` | `/api/admin/system/update/events` | 无 | SSE 更新事件流 |
 | `POST` | `/api/admin/system/update` | `{ targetVersion }` | 受理后台在线更新，返回 `202` |
 | `GET` | `/api/admin/system/update/status` | 无 | 查询当前更新或回滚状态 |
+| `GET` | `/api/admin/system/update/proxy` | 无 | 查询更新使用的已保存代理，返回 `{ proxyId }`；`null` 表示直连 |
+| `POST` | `/api/admin/system/update/proxy` | `{ proxyId: string \| null }` | 设置检查 Release 与下载更新包使用的已保存代理；`null` 表示直连，代理被删除后自动回到直连 |
 | `POST` | `/api/admin/system/rollback` | 无 | 回滚到保留的上一版本 |
 | `POST` | `/api/admin/system/restart` | 无 | 请求进程重启 |
 

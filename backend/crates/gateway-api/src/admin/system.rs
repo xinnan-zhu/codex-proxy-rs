@@ -60,6 +60,19 @@ impl UpdateRequest {
     }
 }
 
+/// 系统更新代理选择；`proxyId` 为空表示直连。
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProxyRequest {
+    proxy_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProxyView {
+    proxy_id: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SystemVersionView {
@@ -229,6 +242,10 @@ where
         )
         .route("/api/admin/system/update", post(perform_update::<S>))
         .route("/api/admin/system/update/status", get(update_status::<S>))
+        .route(
+            "/api/admin/system/update/proxy",
+            get(update_proxy::<S>).post(set_update_proxy::<S>),
+        )
         .route("/api/admin/system/rollback", post(rollback::<S>))
         .route("/api/admin/system/restart", post(restart::<S>))
 }
@@ -249,6 +266,45 @@ where
     Ok(AdminResponse::new(
         StatusCode::OK,
         AdminEnvelope::ok(SystemVersionView::from(version)),
+    ))
+}
+
+async fn update_proxy<S>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let proxy_id = state
+        .admin_services()
+        .system()
+        .update_proxy()
+        .await
+        .map_err(map_system_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(UpdateProxyView { proxy_id }),
+    ))
+}
+
+async fn set_update_proxy<S>(
+    auth: AdminAuth,
+    State(state): State<S>,
+    AdminJson(request): AdminJson<UpdateProxyRequest>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let proxy_id = state
+        .admin_services()
+        .system()
+        .set_update_proxy(&auth.context().mutation_context(), request.proxy_id)
+        .await
+        .map_err(map_system_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(UpdateProxyView { proxy_id }),
     ))
 }
 

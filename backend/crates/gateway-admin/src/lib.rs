@@ -416,7 +416,12 @@ async fn initialize_inner(
         store.plugins(),
         plugin_inspector.clone(),
     ));
-    let system = Arc::new(DefaultSystemService::new(system, system_preflight));
+    let system = Arc::new(DefaultSystemService::new(
+        system,
+        system_preflight,
+        store.settings(),
+        store.proxies(),
+    ));
     let key_usage = Arc::new(use_case::key_usage::DefaultKeyUsageService::new(
         auth.clone(),
         client_key_verifier,

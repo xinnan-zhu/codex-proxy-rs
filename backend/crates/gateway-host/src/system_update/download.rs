@@ -6,6 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use futures::StreamExt as _;
+use gateway_core::account::OutboundProxy;
 use sha2::Digest as _;
 
 use super::release::{download_client, validate_download_url};
@@ -19,6 +20,7 @@ pub(crate) async fn download_file(
     destination: &Path,
     expected_size: u64,
     api_base: &str,
+    proxy: Option<&OutboundProxy>,
     operation_id: &str,
     events: &UpdateEvents,
 ) -> Result<(), OperationError> {
@@ -26,7 +28,7 @@ pub(crate) async fn download_file(
     if expected_size == 0 || expected_size > MAX_DOWNLOAD_SIZE {
         return Err(invalid("release archive size is invalid"));
     }
-    let client = download_client(api_base, Duration::from_secs(120))?;
+    let client = download_client(api_base, Duration::from_secs(120), proxy)?;
     let response = client
         .get(url)
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -86,12 +88,13 @@ pub(crate) async fn verify_checksum(
     checksum_url: &str,
     checksum_size: u64,
     api_base: &str,
+    proxy: Option<&OutboundProxy>,
 ) -> Result<(), OperationError> {
     validate_download_url(checksum_url, api_base)?;
     if checksum_size == 0 || checksum_size > MAX_CHECKSUM_SIZE {
         return Err(invalid("release checksum size is invalid"));
     }
-    let client = download_client(api_base, Duration::from_secs(30))?;
+    let client = download_client(api_base, Duration::from_secs(30), proxy)?;
     let response = client
         .get(checksum_url)
         .header(reqwest::header::ACCEPT_ENCODING, "identity")

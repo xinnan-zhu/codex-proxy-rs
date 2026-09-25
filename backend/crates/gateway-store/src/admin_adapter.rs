@@ -170,6 +170,33 @@ impl SettingsStore for AdminSettingsStoreAdapter {
     ) -> AdminStoreResult<AdminApiKeyMutation> {
         self.replace_admin_api_key_value(None, context).await
     }
+
+    async fn load_system_update_proxy_id(&self) -> AdminStoreResult<Option<String>> {
+        self.control_plane
+            .load_system_update_proxy_id()
+            .await
+            .map_err(|error| admin_store_error("system update proxy", error))
+    }
+
+    async fn replace_system_update_proxy_id(
+        &self,
+        proxy_id: Option<String>,
+        context: &MutationContext,
+    ) -> AdminStoreResult<()> {
+        self.control_plane
+            .replace_system_update_proxy_id(
+                proxy_id,
+                mutation_audit(
+                    context,
+                    "system_update_proxy.replace",
+                    "runtime_settings",
+                    "1",
+                    vec!["system_update_proxy_id".to_owned()],
+                ),
+            )
+            .await
+            .map_err(|error| admin_store_error("system update proxy", error))
+    }
 }
 
 impl AdminSettingsStoreAdapter {

@@ -474,6 +474,23 @@ pub trait SettingsStore: Send + Sync {
         &self,
         context: &MutationContext,
     ) -> AdminStoreResult<AdminApiKeyMutation>;
+
+    /// 系统更新使用的已保存代理 ID；`None` 表示直连。
+    async fn load_system_update_proxy_id(&self) -> AdminStoreResult<Option<String>> {
+        Ok(None)
+    }
+
+    async fn replace_system_update_proxy_id(
+        &self,
+        _proxy_id: Option<String>,
+        _context: &MutationContext,
+    ) -> AdminStoreResult<()> {
+        Err(AdminStoreError::new(
+            AdminStoreErrorKind::Unavailable,
+            "system update proxy",
+            "not supported by this store",
+        ))
+    }
 }
 
 /// 账号目录、运行态与分组所需的 Store 能力集合。

@@ -1,18 +1,30 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
 use gateway_admin::{
-    model::system::{
-        SystemOperationAccepted, SystemOperationState, SystemOperationStatus, SystemUpdateDetail,
-        SystemUpdateStatus, SystemVersion,
+    model::{
+        MutationActor, MutationContext, Revision,
+        proxies::ProxyRecord,
+        settings::{AdminApiKey, AdminApiKeyMutation, ReplaceRuntimeSettings, RuntimeSettings},
+        system::{
+            SystemOperationAccepted, SystemOperationState, SystemOperationStatus,
+            SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
+        },
     },
-    ports::system::{SystemOperationError, SystemOperations, SystemUpdateEventStream},
+    ports::{
+        store::{AdminStoreError, AdminStoreErrorKind, AdminStoreResult, SettingsStore},
+        system::{SystemOperationError, SystemOperations, SystemUpdateEventStream},
+    },
 };
+use gateway_core::account::OutboundProxy;
+
+use super::proxies::TestProxies;
 
 #[derive(Default)]
 struct RecordingSystemOperations {
     target: Mutex<Option<Option<String>>>,
+    proxy_endpoint: Mutex<Option<Option<String>>>,
 }
 
 #[async_trait]
@@ -100,6 +112,109 @@ impl SystemOperations for RecordingSystemOperations {
             message: "accepted".to_owned(),
         })
     }
+
+    fn set_update_proxy(&self, proxy: Option<OutboundProxy>) {
+        *self.proxy_endpoint.lock().expect("proxy") =
+            Some(proxy.as_ref().map(OutboundProxy::endpoint));
+    }
+}
+
+#[derive(Default)]
+struct UpdateProxySettingsStore {
+    proxy_id: Mutex<Option<String>>,
+}
+
+fn unused() -> AdminStoreError {
+    AdminStoreError::new(
+        AdminStoreErrorKind::Unavailable,
+        "settings",
+        "unused in this test",
+    )
+}
+
+#[async_trait]
+impl SettingsStore for UpdateProxySettingsStore {
+    async fn load_pricing(&self) -> AdminStoreResult<gateway_admin::model::pricing::StoredPricing> {
+        Err(unused())
+    }
+
+    async fn sync_pricing(
+        &self,
+        _: gateway_admin::model::pricing::PricingSyncChanges,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Revision> {
+        Err(unused())
+    }
+
+    async fn update_pricing(
+        &self,
+        _: gateway_admin::model::pricing::UpdatePricing,
+        _: &MutationContext,
+    ) -> AdminStoreResult<Revision> {
+        Err(unused())
+    }
+
+    async fn load_runtime_settings(&self) -> AdminStoreResult<RuntimeSettings> {
+        Err(unused())
+    }
+
+    async fn admin_api_key_exists(&self) -> AdminStoreResult<bool> {
+        Err(unused())
+    }
+
+    async fn replace_runtime_settings(
+        &self,
+        _: ReplaceRuntimeSettings,
+        _: &MutationContext,
+    ) -> AdminStoreResult<RuntimeSettings> {
+        Err(unused())
+    }
+
+    async fn replace_admin_api_key(
+        &self,
+        _: AdminApiKey,
+        _: &MutationContext,
+    ) -> AdminStoreResult<AdminApiKeyMutation> {
+        Err(unused())
+    }
+
+    async fn delete_admin_api_key(
+        &self,
+        _: &MutationContext,
+    ) -> AdminStoreResult<AdminApiKeyMutation> {
+        Err(unused())
+    }
+
+    async fn load_system_update_proxy_id(&self) -> AdminStoreResult<Option<String>> {
+        Ok(self.proxy_id.lock().expect("proxy id").clone())
+    }
+
+    async fn replace_system_update_proxy_id(
+        &self,
+        proxy_id: Option<String>,
+        _: &MutationContext,
+    ) -> AdminStoreResult<()> {
+        *self.proxy_id.lock().expect("proxy id") = proxy_id;
+        Ok(())
+    }
+}
+
+fn update_proxy_record(id: &str, url: &str) -> ProxyRecord {
+    let now = chrono::Utc::now();
+    ProxyRecord {
+        auto_location: false,
+        detected_location: None,
+        location: None,
+        id: id.to_owned(),
+        name: "更新出口".to_owned(),
+        proxy: OutboundProxy::parse(url).expect("proxy"),
+        revision: Revision::new(1).expect("revision"),
+        account_count: 0,
+        last_test_at: None,
+        last_test: None,
+        created_at: now,
+        updated_at: now,
+    }
 }
 
 #[tokio::test]
@@ -116,4 +231,81 @@ async fn system_update_should_normalize_blank_target_to_latest() {
         .expect("perform update");
 
     assert_eq!(*operations.target.lock().expect("target"), Some(None));
+}
+
+#[tokio::test]
+async fn system_update_proxy_should_persist_and_route_release_checks() {
+    let operations = Arc::new(RecordingSystemOperations::default());
+    let settings = Arc::new(UpdateProxySettingsStore::default());
+    let services = super::AdminHarness::new()
+        .system(operations.clone())
+        .settings(settings.clone())
+        .proxies(Arc::new(TestProxies {
+            record: Some(update_proxy_record(
+                "proxy_update",
+                "socks5h://user:secret@127.0.0.1:1080",
+            )),
+            ..Default::default()
+        }))
+        .build()
+        .await;
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "update-proxy-test".to_owned(),
+    };
+    let expected = OutboundProxy::parse("socks5h://127.0.0.1:1080")
+        .expect("proxy")
+        .endpoint();
+
+    let saved = services
+        .system()
+        .set_update_proxy(&context, Some(" proxy_update ".to_owned()))
+        .await
+        .expect("save proxy");
+    assert_eq!(saved.as_deref(), Some("proxy_update"));
+    assert_eq!(
+        services
+            .system()
+            .update_proxy()
+            .await
+            .expect("load proxy")
+            .as_deref(),
+        Some("proxy_update")
+    );
+
+    *operations.proxy_endpoint.lock().expect("proxy") = None;
+    services
+        .system()
+        .update_detail(true)
+        .await
+        .expect("update detail");
+    assert_eq!(
+        *operations.proxy_endpoint.lock().expect("proxy"),
+        Some(Some(expected.clone()))
+    );
+
+    services
+        .system()
+        .set_update_proxy(&context, Some("proxy_missing".to_owned()))
+        .await
+        .expect_err("unknown proxy must be rejected");
+    assert_eq!(
+        settings.proxy_id.lock().expect("proxy id").as_deref(),
+        Some("proxy_update")
+    );
+
+    services
+        .system()
+        .set_update_proxy(&context, None)
+        .await
+        .expect("switch to direct");
+    services
+        .system()
+        .perform_update(Some("1.0.1".to_owned()))
+        .await
+        .expect("perform update");
+    assert_eq!(
+        *operations.proxy_endpoint.lock().expect("proxy"),
+        Some(None)
+    );
 }
