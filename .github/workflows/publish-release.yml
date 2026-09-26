@@ -106,10 +106,12 @@ jobs:
       - name: Package release assets
         env:
           VERSION: ${{ steps.meta.outputs.version }}
+          GIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           python3 <<'PY'
           import hashlib
+          import json
           import os
           import pathlib
           import shutil
@@ -141,12 +143,33 @@ jobs:
           deploy_dir.mkdir()
           shutil.copy2(config_template, deploy_dir / config_template.name)
 
+          # 在线更新要求更新包内带与本次版本、提交一致的封口插件清单，缺失时拒绝安装。
+          plugin_host_path = pathlib.Path("backend/crates/gateway-plugin/runtime/plugin-host-compatibility.json")
+          plugin_host = json.loads(plugin_host_path.read_text())
+          if plugin_host.get("schema_version") != 1:
+              raise SystemExit(f"Invalid plugin host compatibility declaration: {plugin_host_path}")
+          plugin_manifest_path = release_dir / "plugin-release-manifest.json"
+          plugin_manifest_path.write_text(json.dumps({
+              "schema_version": 1,
+              "sealed": True,
+              "gateway_version": version,
+              "gateway_git_sha": os.environ["GIT_SHA"],
+              "plugin_host": plugin_host,
+              "plugins": [],
+          }, indent=2, sort_keys=True) + "\n")
+          official_dir = package_root / "plugins" / "official"
+          official_dir.mkdir(parents=True)
+          bundled_manifest = official_dir / plugin_manifest_path.name
+          shutil.copy2(plugin_manifest_path, bundled_manifest)
+          bundled_manifest.chmod(0o444)
+          official_dir.chmod(0o555)
+
           archive_name = f"{APP_NAME}_{version}_linux_amd64.tar.gz"
           archive_path = release_dir / archive_name
           with tarfile.open(archive_path, "w:gz") as archive:
               archive.add(package_root, arcname=APP_NAME)
 
-          assets = [archive_path]
+          assets = [archive_path, plugin_manifest_path]
           checksum_path = release_dir / "checksums.txt"
           with checksum_path.open("w", encoding="utf-8") as file:
               for asset in assets:
