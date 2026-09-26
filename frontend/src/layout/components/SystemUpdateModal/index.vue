@@ -34,7 +34,6 @@ const {
   selectedChannel,
   availableChannels,
   canChangeChannel,
-  restartTargetVersion,
   updating,
   restarting,
   updateError,
@@ -286,9 +285,6 @@ watch(
           </div>
         </div>
 
-        <p v-if="needRestart" class="m-0 text-cp-sm font-emphasis text-cp-success">
-          v{{ restartTargetVersion }} 已安装，重启后生效
-        </p>
         <p v-if="updateInfo?.unsupportedReason" class="m-0 text-cp-sm text-cp-text-secondary">
           {{ updateInfo.unsupportedReason }}
         </p>
@@ -355,7 +351,6 @@ watch(
         </header>
 
         <BaseScrollbar
-          v-if="updateLogRows.length"
           ref="updateLogScrollbar"
           height="260px"
         >
