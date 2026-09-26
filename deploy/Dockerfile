@@ -36,6 +36,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/backend/target \
     cargo build --release --locked --bin codex-proxy-rs \
     && cp "${CARGO_TARGET_DIR}/release/codex-proxy-rs" /tmp/codex-proxy-rs
+# 系统更新按安装文件核对运行状态，缺少封口插件清单会被判为安装不完整；
+# 清单版本与提交必须和二进制一致，未注入真实提交的本地构建不生成清单。
+RUN install -d /tmp/official-plugins \
+    && if printf '%s' "${CPR_GIT_SHA}" | grep -Eq '^[0-9a-f]{40}$'; then \
+        version="$(/tmp/codex-proxy-rs --version)"; \
+        { printf '{"gateway_git_sha":"%s","gateway_version":"%s","plugin_host":' "${CPR_GIT_SHA}" "${version}"; \
+          cat crates/gateway-plugin/runtime/plugin-host-compatibility.json; \
+          printf ',"plugins":[],"schema_version":1,"sealed":true}\n'; \
+        } > /tmp/official-plugins/plugin-release-manifest.json; \
+    fi
 
 # 备份客户端来源：与 compose 服务端同一固定镜像，版本一致。
 FROM ${POSTGRES_IMAGE} AS pg-client
@@ -79,6 +89,11 @@ FROM runtime-base AS runtime
 
 COPY --from=backend-builder --chown=cpr:cpr /tmp/codex-proxy-rs /app/bin/codex-proxy-rs
 COPY --from=frontend-builder --chown=cpr:cpr /app/frontend/dist ./web/dist
+COPY --from=backend-builder --chown=cpr:cpr /tmp/official-plugins /app/bin/plugins/official
+RUN chown cpr:cpr /app/bin/plugins \
+    && find /app/bin/plugins/official -type f -exec chmod 0444 '{}' + \
+    && chmod 0555 /app/bin/plugins/official \
+    && chmod 0755 /app/bin/plugins
 USER cpr
 
 FROM runtime-base AS runtime-prebuilt
