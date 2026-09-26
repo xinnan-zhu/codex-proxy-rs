@@ -55,7 +55,7 @@ fn runtime_settings_keep_account_rotation_global() {
 async fn smart_settings_upgrade_preserves_selection_and_publishes_custom_config() {
     use gateway_core::account::SmartSchedulingConfig;
     use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
-    let Some(database) = TestDatabase::create_through("smart_config", 19).await else {
+    let Some(database) = TestDatabase::create_through("smart_config", 18).await else {
         return;
     };
     // 升级前不能用包含新列的 Repository，直接写入旧版本已有字段。
