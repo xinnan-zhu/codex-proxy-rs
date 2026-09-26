@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<{
   authorization: AccountAuthorizationView
 }>(), { saving: false, oauthLoading: false, reauthorizing: false, account: null })
 
-const emit = defineEmits<{ create: [], generateOauth: [], resetAuthorization: [] }>()
+const emit = defineEmits<{ create: [], generateOauth: [] }>()
 const open = defineModel<boolean>({ default: false })
 const form = defineModel<AccountCreateForm>('form', { required: true })
 const callback = defineModel<string>('callback', { required: true })
@@ -156,7 +156,6 @@ function continueToImport() {
           :callback-placeholder="view.oauth.callbackPlaceholder"
           :disabled="busy"
           @regenerate="emit('generateOauth')"
-          @reset="emit('resetAuthorization')"
         />
         <AccountApiKeyFields v-else-if="mode === 'api_key'" v-model="form.apiKey" :disabled="busy" />
         <AccountImportFields

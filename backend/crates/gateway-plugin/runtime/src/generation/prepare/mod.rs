@@ -1,4 +1,5 @@
 mod instance;
+mod maintenance;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -95,6 +96,7 @@ pub struct PluginRuntime {
     log_slots: Arc<Semaphore>,
     pub(super) account_ports: Arc<PluginAccountPortSlot>,
     client_key_ports: Arc<PluginClientKeyPortSlot>,
+    resource_ports: Arc<crate::callback::PluginResourcePorts>,
     model_ports: Arc<PluginModelPortSlot>,
     affinity_ports: Arc<PluginAffinityPortSlot>,
     observers: RequestObserverExtensionIndex,
@@ -125,6 +127,7 @@ pub(super) struct PreparedSet {
     shutting_down: Arc<AtomicBool>,
     commands: Vec<Arc<crate::adapter::command_line::PluginCommand>>,
     management: Vec<crate::adapter::management::ManagementEntry>,
+    model_aliases: Vec<gateway_core::routing::ContributedModelAlias>,
 }
 
 #[derive(Default)]
@@ -136,6 +139,7 @@ struct PreparedContributions {
     policy_entries: Vec<crate::adapter::policy::PolicyEntry>,
     authentication_entries:
         Vec<crate::adapter::frontend_authentication::FrontendAuthenticationEntry>,
+    model_aliases: Vec<gateway_core::routing::ContributedModelAlias>,
 }
 
 impl PreparedContributions {
@@ -144,6 +148,7 @@ impl PreparedContributions {
         self.observer_entries.extend(other.observer_entries);
         self.commands.extend(other.commands);
         self.management.extend(other.management);
+        self.model_aliases.extend(other.model_aliases);
         self.policy_entries.extend(other.policy_entries);
         self.authentication_entries
             .extend(other.authentication_entries);
@@ -156,6 +161,7 @@ struct PreparedInstance {
     revision: Revision,
     session: Arc<RpcSession>,
     private_state: Arc<PluginPrivateState>,
+    maintenance: bool,
 }
 
 impl PreparedSet {
@@ -169,6 +175,10 @@ impl PreparedSet {
 impl ExtensionSetLease for PreparedSet {
     fn is_ready(&self) -> bool {
         self.sessions_ready() && self.can_serve()
+    }
+
+    fn model_aliases(&self) -> &[gateway_core::routing::ContributedModelAlias] {
+        &self.model_aliases
     }
 
     fn can_serve(&self) -> bool {
@@ -221,6 +231,7 @@ impl PluginRuntime {
             validators: Arc::new(Semaphore::new(2)),
             account_ports: Arc::new(PluginAccountPortSlot::new()),
             client_key_ports: Arc::new(PluginClientKeyPortSlot::new()),
+            resource_ports: Arc::new(crate::callback::PluginResourcePorts::new()),
             model_ports: Arc::new(PluginModelPortSlot::new()),
             affinity_ports: Arc::new(PluginAffinityPortSlot::new()),
             observers: RequestObserverExtensionIndex::default(),
@@ -423,6 +434,24 @@ impl PluginRuntime {
                 Ok(candidate) => contributions.append(candidate),
                 Err(error) if required_revision == Some(instance.revision) => return Err(error),
                 Err(error) => {
+                    // 目录没有拒绝请求用的 binding，不能在恢复失败时悄悄撤销仍启用的别名。
+                    // 不复制其他候选的注册结果；让发布事务保留调用方持有的旧有效快照。
+                    let has_retained_catalog = self
+                        .prepared
+                        .lock()
+                        .await
+                        .values()
+                        .filter_map(Weak::upgrade)
+                        .any(|set| {
+                            set.model_aliases
+                                .iter()
+                                .any(|alias| alias.owner == instance.id)
+                        });
+                    if has_retained_catalog {
+                        return Err(AdminError::unavailable(
+                            "已启用的模型目录插件未就绪，请修复或停用后重试",
+                        ));
+                    }
                     // 恢复失败只隔离该实例；绑定的拒绝策略仍保留，不能绕过认证或必需处理。
                     contributions
                         .policy_entries
@@ -443,7 +472,17 @@ impl PluginRuntime {
             management,
             policy_entries,
             authentication_entries,
+            model_aliases,
         } = contributions;
+        let mut alias_owners = BTreeMap::new();
+        for alias in &model_aliases {
+            if let Some(previous) = alias_owners.insert(&alias.id, &alias.owner) {
+                return Err(AdminError::invalid(format!(
+                    "模型别名 {} 在插件实例 {} 与 {} 之间冲突",
+                    alias.id, previous, alias.owner
+                )));
+            }
+        }
         let id = ExtensionSetId::new(uuid::Uuid::new_v4().to_string())
             .map_err(|_| AdminError::internal("插件集合 ID 无效"))?;
         let observers = crate::adapter::observer::PluginObserverPlan::compile(
@@ -501,6 +540,7 @@ impl PluginRuntime {
             commands,
             management,
             failures,
+            model_aliases,
             shutting_down: self.shutting_down.clone(),
         });
         self.prepared
@@ -824,6 +864,7 @@ impl PluginPreparation for PluginRuntime {
             let (_, _, state) = super::configuration::validate(&instance, package.manifest())?;
             crate::adapter::observer::validate_bindings(package.manifest(), &instance.bindings)?;
             crate::adapter::policy::validate_bindings(package.manifest(), &instance.bindings)?;
+            crate::adapter::catalog::validate_bindings(package.manifest(), &instance.bindings)?;
             crate::adapter::frontend_authentication::validate_bindings(
                 package.manifest(),
                 &instance.bindings,
@@ -1181,4 +1222,13 @@ fn instance_fingerprint(
     value.sort_all_objects();
     let bytes = serde_json::to_vec(&value).map_err(|_| AdminError::invalid("插件配置无法编码"))?;
     Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+impl PluginRuntime {
+    pub fn bind_resource_ports(
+        &self,
+        access: &Arc<dyn gateway_admin::ports::plugin_resources::PluginResourceAccess>,
+    ) -> Result<(), AdminError> {
+        self.resource_ports.bind(access)
+    }
 }

@@ -208,6 +208,10 @@ fn callback_allowed(method: &str, stage: Stage, permissions: &[Permission]) -> b
     ) {
         return true;
     }
+    // 失败后的策略不得产生额外出站调用或读取账号凭据。
+    if stage == Stage::Retry {
+        return false;
+    }
     if matches!(
         method,
         gateway_plugin_sdk::call::middleware::NEXT_METHOD
@@ -215,6 +219,18 @@ fn callback_allowed(method: &str, stage: Stage, permissions: &[Permission]) -> b
             | gateway_plugin_sdk::call::middleware::BODY_CLOSE_METHOD
     ) {
         return matches!(stage, Stage::Request | Stage::Attempt);
+    }
+    if stage == Stage::Maintenance
+        && !matches!(
+            method,
+            "host.data.accounts.list"
+                | "host.data.quota.get"
+                | "host.groups.ensure"
+                | "host.groups.change_members"
+                | "host.keys.ensure"
+        )
+    {
+        return false;
     }
     let permission = match method {
         "host.http.do"
@@ -231,6 +247,30 @@ fn callback_allowed(method: &str, stage: Stage, permissions: &[Permission]) -> b
             Permission::Accounts
         }
         "host.affinity.lookup" => Permission::Requests,
+        "host.data.accounts.list" | "host.data.quota.get"
+            if matches!(
+                stage,
+                Stage::Management | Stage::CommandLine | Stage::Maintenance
+            ) =>
+        {
+            Permission::Data
+        }
+        "host.groups.ensure" | "host.groups.change_members"
+            if matches!(
+                stage,
+                Stage::Management | Stage::CommandLine | Stage::Maintenance
+            ) =>
+        {
+            Permission::Groups
+        }
+        "host.keys.ensure"
+            if matches!(
+                stage,
+                Stage::Management | Stage::CommandLine | Stage::Maintenance
+            ) =>
+        {
+            Permission::Keys
+        }
         _ => return false,
     };
     permissions.contains(&permission)

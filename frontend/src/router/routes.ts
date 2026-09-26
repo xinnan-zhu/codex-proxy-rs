@@ -1,18 +1,30 @@
 import type { RouteRecordRaw } from 'vue-router'
+import type { AuthSession } from '@/api'
+
+declare module 'vue-router' {
+  interface RouteMeta {
+    role?: AuthSession['role']
+    defaultEntry?: boolean
+    guestOnly?: boolean
+  }
+}
 
 export const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
+    meta: { guestOnly: true },
     component: () => import('@/views/login/index.vue'),
   },
   {
     path: '/key-usage',
     name: 'key-usage',
+    meta: { role: 'key', defaultEntry: true },
     component: () => import('@/views/key-usage/index.vue'),
   },
   {
     path: '/',
+    meta: { role: 'admin', defaultEntry: true },
     component: () => import('@/layout/index.vue'),
     children: [
       {

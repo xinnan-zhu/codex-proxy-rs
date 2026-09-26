@@ -4,9 +4,8 @@ import { useIntervalFn } from '@vueuse/core'
 import { computed, onMounted, onScopeDispose, shallowRef } from 'vue'
 
 import { getDashboardSummary, getDashboardTrend } from '@/api'
-import { errorMessage, withMinimumDuration } from '@/utils/async'
-import { formatDateTime } from '@/utils/date'
-import { formatCompactNumber, formatInteger } from '@/utils/number'
+import { formatCompactNumber, formatDateTime, formatInteger } from '@/utils/format'
+import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
 export function useDashboard() {
   const activeTrendKind = shallowRef(normalizeDashboardTrendKind('usage'))

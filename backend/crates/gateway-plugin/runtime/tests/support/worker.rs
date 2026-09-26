@@ -81,6 +81,68 @@ struct Peer {
 }
 
 impl Peer {
+    async fn resource_fixture(
+        &self,
+        id: u64,
+        method: &str,
+        value: Value,
+    ) -> Result<Value, PluginFault> {
+        let (result, payload) = self
+            .callback_payload(id, method, json!({}), serde_json::to_vec(&value).unwrap())
+            .await?;
+        assert_eq!(result, json!({}));
+        Ok(serde_json::from_slice(&payload).unwrap())
+    }
+
+    async fn reconcile_fixture(&self, id: u64) -> Result<(), PluginFault> {
+        self.append_observation_marker("maintenance_marker", &json!({"phase":"start"}));
+        let group = self
+            .resource_fixture(
+                id,
+                "host.groups.ensure",
+                json!({"resource_key":"pool", "name":"plugin fixture group", "color":"#2563EBFF"}),
+            )
+            .await?;
+        if let Some(path) = self.configuration["maintenance_fail_once"].as_str()
+            && !std::path::Path::new(path).exists()
+        {
+            std::fs::write(path, "failed").unwrap();
+            return Err(PluginFault::new(ErrorCode::Fault, "fixture retry"));
+        }
+        let mut cursor = Value::Null;
+        loop {
+            let page = self
+                .resource_fixture(
+                    id,
+                    "host.data.accounts.list",
+                    json!({"cursor":cursor, "limit":100}),
+                )
+                .await?;
+            let accounts: Vec<_> = page["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|account| account["account_id"].clone())
+                .collect();
+            self.resource_fixture(
+                id,
+                "host.groups.change_members",
+                json!({"resource_key":"pool", "add":accounts}),
+            )
+            .await?;
+            cursor = page["next_cursor"].clone();
+            if cursor.is_null() {
+                break;
+            }
+        }
+        let key = self.resource_fixture(id, "host.keys.ensure", json!({"resource_key":"key", "name":"plugin fixture key", "group_resource_keys":["pool"], "daily_limit_usd":"1", "weekly_limit_usd":"5"})).await?;
+        self.append_observation_marker(
+            "maintenance_marker",
+            &json!({"phase":"done", "group":group["id"], "key":key["id"]}),
+        );
+        Ok(())
+    }
+
     async fn log_fixture(&self, id: u64) {
         let Some(entries) = self
             .configuration
@@ -297,6 +359,37 @@ impl Peer {
             return;
         }
         match method.as_str() {
+            "plugin.reconcile" => {
+                let result = self.reconcile_fixture(id).await;
+                match result {
+                    Ok(()) => {
+                        self.send(
+                            Message::Result {
+                                id,
+                                result: json!({}),
+                            },
+                            vec![],
+                        )
+                        .await
+                    }
+                    Err(error) => self.send(Message::Error { id, error }, vec![]).await,
+                }
+                return;
+            }
+
+            "policy.retry_decision" => {
+                self.append_observation_marker("retry_marker", &params);
+                if let Some(delay) = self.configuration["retry_delay_ms"].as_u64() {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                }
+                let result = self
+                    .configuration
+                    .get("retry_decision")
+                    .cloned()
+                    .unwrap_or_else(|| json!({"decision":"delegate"}));
+                self.send(Message::Result { id, result }, vec![]).await;
+                return;
+            }
             "frontend_auth.identifier" => {
                 self.send(
                     Message::Result {
@@ -348,6 +441,17 @@ impl Peer {
                 .await;
                 return;
             }
+            "model_catalog.register" => {
+                self.send(
+                    Message::Result {
+                        id,
+                        result: json!({}),
+                    },
+                    serde_json::to_vec(&self.configuration["model_catalog"]).unwrap(),
+                )
+                .await;
+                return;
+            }
             "management.register" => {
                 self.send(
                     Message::Result {
@@ -366,6 +470,35 @@ impl Peer {
                     "management_marker",
                     &json!({"method":request.method,"path":request.path}),
                 );
+                if let Some(queries) = self.configuration["data_queries"].as_array() {
+                    let mut results = vec![];
+                    for query in queries {
+                        let result = self
+                            .callback_payload(
+                                id,
+                                query["method"].as_str().unwrap(),
+                                json!({}),
+                                serde_json::to_vec(&query["query"]).unwrap(),
+                            )
+                            .await;
+                        results.push(match result {
+                            Ok((metadata, payload)) => {
+                                assert_eq!(metadata, json!({}));
+                                serde_json::from_slice::<Value>(&payload).unwrap()
+                            }
+                            Err(error) => json!({"error":error.code}),
+                        });
+                    }
+                    self.send(
+                        Message::Result {
+                            id,
+                            result: json!({"status":200,"content_type":"application/json"}),
+                        },
+                        serde_json::to_vec(&results).unwrap(),
+                    )
+                    .await;
+                    return;
+                }
                 if let Err(error) = self
                     .run_nested_model_fixture(
                         id,
@@ -679,6 +812,7 @@ impl Peer {
                             protocol: None,
                             header_mutations: Vec::new(),
                             body: MiddlewareRequestBody::Preserve,
+                            capabilities: None,
                         })
                         .unwrap(),
                         vec![],

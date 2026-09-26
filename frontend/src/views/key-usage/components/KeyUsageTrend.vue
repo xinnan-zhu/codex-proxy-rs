@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
 import { useChartPalette } from '@/composables/useChartPalette'
-import { formatCompactNumber, formatInteger } from '@/utils/number'
+import { formatCompactNumber, formatInteger } from '@/utils/format'
 import { keyUsageTime, money } from '../utils/format'
 import { keyUsageTokenMetrics, keyUsageTokenValue } from '../utils/metrics'
 

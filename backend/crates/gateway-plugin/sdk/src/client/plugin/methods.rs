@@ -2,7 +2,7 @@
 
 use crate::{
     Capability as C, Stage as S,
-    call::{frontend_authentication as frontend, host, management, observation, policy},
+    call::{catalog, frontend_authentication as frontend, host, management, observation, policy},
 };
 
 use super::{
@@ -12,6 +12,22 @@ use super::{
         encode_metadata_with_payload, encode_payload,
     },
 };
+
+pub const MODEL_CATALOG_REGISTER: Method<Empty, catalog::ModelCatalogRegistration> = Method::new(
+    "model_catalog.register",
+    &[C::ModelCatalog],
+    &[S::Registration],
+    decode_metadata_without_payload,
+    encode_payload,
+);
+
+pub const RETRY_DECISION: Method<policy::RetryDecisionRequest, policy::RetryDecision> = Method::new(
+    "policy.retry_decision",
+    &[C::RetryPolicy],
+    &[S::Retry],
+    decode_metadata_without_payload,
+    encode_metadata,
+);
 
 pub const MANAGEMENT_REGISTER: Method<Empty, management::ManagementRegistration> = Method::new(
     "management.register",
@@ -110,3 +126,12 @@ pub const STATE_MIGRATE: Method<host::StateMigrationRequest, host::StateMigratio
         decode_payload,
         encode_payload,
     );
+
+/// 启用、恢复、配置变化及周期补偿共用的幂等入口；通知不代表逐条事件。
+pub const RECONCILE: Method<Empty, Empty> = Method::new(
+    "plugin.reconcile",
+    &[C::Maintenance],
+    &[S::Maintenance],
+    decode_metadata_without_payload,
+    encode_metadata,
+);

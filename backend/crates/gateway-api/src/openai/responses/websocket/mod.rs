@@ -284,7 +284,7 @@ async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocke
             input,
             Box::new(move |prepared, request| {
                 Box::pin(async move {
-                    let (protocol, headers, body) = request_parts(request)?;
+                    let (protocol, headers, body) = request_parts(request.clone())?;
                     if protocol != "openai" {
                         return Err(MiddlewareError::Rejected);
                     }
@@ -298,7 +298,9 @@ async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocke
                         .map_err(|_| MiddlewareError::Rejected)?
                         .with_client_context(client_ip, user_agent_for_terminal)
                         .with_codex_client(codex_client);
-                    let decoded = replay_for_terminal.prepare(decoded);
+                    let decoded = replay_for_terminal
+                        .prepare(decoded)
+                        .with_middleware_capabilities(&request)?;
                     let started = service_for_terminal
                         .start_prepared_response(
                             prepared,

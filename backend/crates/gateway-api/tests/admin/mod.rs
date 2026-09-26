@@ -169,6 +169,7 @@ impl AdminTestFixture {
             gateway_admin::ports::backup::BackupStorePorts::disabled(),
             plugin_ports.clone(),
             plugin_ports.clone(),
+            plugin_ports.clone(),
         );
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new("openai", Arc::clone(&provider_error))),
@@ -556,6 +557,7 @@ impl SettingsStore for MemorySettingsStore {
             max_waiting_per_account: command.max_waiting_per_account,
             concurrency_wait_timeout_seconds: command.concurrency_wait_timeout_seconds,
             responses_max_decompressed_body_bytes: command.responses_max_decompressed_body_bytes,
+            smart_scheduling: command.smart_scheduling,
             rotation_strategy: command.rotation_strategy,
             min_codex_desktop_version: command.min_codex_desktop_version,
             min_codex_cli_version: command.min_codex_cli_version,
@@ -1457,7 +1459,11 @@ impl SystemOperations for UnusedSystem {
         Err(unavailable_system())
     }
 
-    async fn update_detail(&self, _: bool) -> Result<SystemUpdateDetail, SystemOperationError> {
+    async fn update_detail(
+        &self,
+        _: bool,
+        _: Option<gateway_admin::model::system::SystemUpdateChannel>,
+    ) -> Result<SystemUpdateDetail, SystemOperationError> {
         Err(unavailable_system())
     }
 
@@ -1468,6 +1474,7 @@ impl SystemOperations for UnusedSystem {
     async fn perform_update(
         &self,
         _: Option<String>,
+        _: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
@@ -1514,6 +1521,7 @@ fn test_runtime_settings() -> RuntimeSettings {
         max_waiting_per_account: 0,
         concurrency_wait_timeout_seconds: 30,
         responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
+        smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
         rotation_strategy: RotationStrategy::Smart,
         min_codex_desktop_version: None,
         min_codex_cli_version: None,

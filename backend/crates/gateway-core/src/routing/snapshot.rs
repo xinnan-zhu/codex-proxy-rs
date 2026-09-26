@@ -27,6 +27,8 @@ use super::{
 
 const MAXIMUM_CATALOG_STABILITY_ATTEMPTS: usize = 4;
 
+type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<ProviderAccountId>>>;
+
 /// Store 在一个一致性读取中提供的调度设置事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotSettingsFacts {
@@ -40,6 +42,7 @@ pub struct SnapshotSettingsFacts {
     concurrency_wait_timeout_seconds: u32,
     responses_max_decompressed_body_bytes: u64,
     request_interval_ms: u64,
+    smart_scheduling: crate::account::SmartSchedulingConfig,
     rotation_strategy: String,
     model_mappings: BTreeMap<String, String>,
     min_codex_desktop_version: Option<String>,
@@ -48,6 +51,15 @@ pub struct SnapshotSettingsFacts {
 }
 
 impl SnapshotSettingsFacts {
+    #[must_use]
+    pub const fn with_smart_scheduling(
+        mut self,
+        config: crate::account::SmartSchedulingConfig,
+    ) -> Self {
+        self.smart_scheduling = config;
+        self
+    }
+
     #[must_use]
     pub fn with_pricing(mut self, pricing: crate::metering::PricingOverrides) -> Self {
         self.pricing = Arc::new(pricing);
@@ -120,6 +132,7 @@ impl SnapshotSettingsFacts {
             concurrency_wait_timeout_seconds: 30,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             request_interval_ms,
+            smart_scheduling: crate::account::SmartSchedulingConfig::default(),
             rotation_strategy: rotation_strategy.into(),
             model_mappings,
             min_codex_desktop_version,
@@ -312,6 +325,8 @@ pub enum RuntimeSnapshotCompileError {
     RevisionChanged,
     #[error("runtime snapshot contains invalid frozen data")]
     InvalidData,
+    #[error("extension model aliases conflict with the provider catalog or model mappings")]
+    InvalidExtensionModels,
     #[error("provider model catalog changed while the snapshot was compiling")]
     CatalogChanged,
 }
@@ -429,13 +444,15 @@ impl RuntimeSnapshotCompiler {
                 {
                     return Err(RuntimeSnapshotCompileError::RevisionChanged);
                 }
-                return Ok(snapshot
+                let snapshot = snapshot
                     .with_provider_catalog_generations(if cached.is_some() {
                         BTreeMap::new()
                     } else {
                         observed_generations
                     })
-                    .with_extensions(extensions));
+                    .with_extensions(extensions);
+                snapshot.validate_extension_models()?;
+                return Ok(snapshot);
             }
         }
         Err(RuntimeSnapshotCompileError::CatalogChanged)
@@ -450,9 +467,13 @@ async fn compile_runtime_snapshot(
 ) -> Result<RuntimeSnapshot, RuntimeSnapshotCompileError> {
     // 只有成功取得的完整目录能证明模型缺项；发现型目录和查询失败均交由上游验证。
     let mut provider_models = Vec::new();
+    let mut catalog_accounts = BTreeMap::new();
     let mut exhaustive_provider_catalogs = BTreeSet::new();
     for provider in &provider_kinds {
         if let Some(previous) = previous {
+            if let Some(accounts) = previous.model_catalog_accounts.get(provider) {
+                catalog_accounts.insert(provider.clone(), accounts.clone());
+            }
             if previous.exhaustive_provider_catalogs.contains(provider) {
                 exhaustive_provider_catalogs.insert(provider.clone());
             }
@@ -479,6 +500,12 @@ async fn compile_runtime_snapshot(
             exhaustive_provider_catalogs.insert(provider.clone());
         }
         provider_models.extend(models.into_iter().map(|model| {
+            if let Some(accounts) = model.catalog_accounts() {
+                catalog_accounts
+                    .entry(provider.clone())
+                    .or_default()
+                    .insert(model.upstream_model().as_str().to_owned(), accounts.clone());
+            }
             let compiled = ProviderModel::new(
                 provider.clone(),
                 model.upstream_model().clone(),
@@ -585,6 +612,7 @@ async fn compile_runtime_snapshot(
         AccountConcurrency::new(facts.settings.max_concurrent_per_account),
         Duration::from_millis(facts.settings.request_interval_ms),
     )
+    .with_smart_scheduling(facts.settings.smart_scheduling)
     .with_queue(ConcurrencyQueuePolicy {
         max_waiting: facts.settings.max_waiting_per_account,
         timeout: queue_timeout,
@@ -670,6 +698,7 @@ async fn compile_runtime_snapshot(
             .with_model_mappings(model_mappings)
             .with_account_directory(account_directory)
             .with_exhaustive_provider_catalogs(exhaustive_provider_catalogs)
+            .with_model_catalog_accounts(catalog_accounts)
             .with_min_codex_client_versions(min_client_versions)
             .with_block_degraded_turn_state(facts.settings.block_degraded_turn_state)
     })
@@ -692,6 +721,7 @@ pub struct RuntimeSnapshot {
     model_mappings: Arc<BTreeMap<String, String>>,
     provider_catalog_generations: Arc<BTreeMap<ProviderKind, ProviderCatalogGeneration>>,
     exhaustive_provider_catalogs: Arc<BTreeSet<ProviderKind>>,
+    model_catalog_accounts: Arc<ModelCatalogAccounts>,
     account_directory: Arc<RuntimeAccountDirectory>,
     client_policies: Arc<BTreeMap<ClientApiKeyId, ClientPolicy>>,
     min_codex_client_versions: CodexClientMinVersions,
@@ -711,6 +741,47 @@ impl RuntimeSnapshot {
     #[must_use]
     pub const fn extensions(&self) -> Option<&crate::runtime::extensions::ExtensionSetReference> {
         self.extensions.as_ref()
+    }
+
+    fn model_aliases(&self) -> &[super::ContributedModelAlias] {
+        self.extensions
+            .as_ref()
+            .map_or(&[], |set| set.model_aliases())
+    }
+
+    fn model_alias(&self, model: &str) -> Option<&super::ContributedModelAlias> {
+        self.model_aliases()
+            .iter()
+            .find(|alias| alias.id.as_str() == model)
+    }
+
+    fn validate_extension_models(&self) -> Result<(), RuntimeSnapshotCompileError> {
+        let mut ids = BTreeSet::new();
+        for alias in self.model_aliases() {
+            let valid = ids.insert(&alias.id)
+                && self.providers.contains(&alias.provider)
+                && !self.model_mappings.contains_key(alias.id.as_str())
+                && !self.model_mappings.contains_key(alias.target.as_str())
+                && !self
+                    .model_mappings
+                    .values()
+                    .any(|target| target == alias.id.as_str())
+                && self.model_alias(alias.target.as_str()).is_none()
+                && !self.provider_models.values().any(|models| {
+                    models
+                        .keys()
+                        .any(|model| model.as_str() == alias.id.as_str())
+                })
+                && self
+                    .provider_models
+                    .get(&alias.provider)
+                    .is_some_and(|models| models.contains_key(&alias.target));
+            if !valid {
+                tracing::warn!(owner = %alias.owner, model = %alias.id, "插件模型别名与宿主目录或映射冲突，拒绝发布候选快照");
+                return Err(RuntimeSnapshotCompileError::InvalidExtensionModels);
+            }
+        }
+        Ok(())
     }
     #[must_use]
     pub fn with_pricing(mut self, pricing: Arc<crate::metering::PricingOverrides>) -> Self {
@@ -834,6 +905,7 @@ impl RuntimeSnapshot {
             model_mappings: Arc::new(BTreeMap::new()),
             provider_catalog_generations: Arc::new(BTreeMap::new()),
             exhaustive_provider_catalogs: Arc::new(exhaustive_provider_catalogs),
+            model_catalog_accounts: Arc::default(),
             account_directory: Arc::new(RuntimeAccountDirectory::default()),
             client_policies: Arc::new(client_policy_map),
             min_codex_client_versions: CodexClientMinVersions::default(),
@@ -874,6 +946,11 @@ impl RuntimeSnapshot {
     #[must_use]
     fn with_exhaustive_provider_catalogs(mut self, providers: BTreeSet<ProviderKind>) -> Self {
         self.exhaustive_provider_catalogs = Arc::new(providers);
+        self
+    }
+
+    fn with_model_catalog_accounts(mut self, accounts: ModelCatalogAccounts) -> Self {
+        self.model_catalog_accounts = Arc::new(accounts);
         self
     }
 
@@ -925,6 +1002,12 @@ impl RuntimeSnapshot {
                 .keys()
                 .filter_map(|model| PublicModelId::new(model.clone()).ok()),
         );
+        models.extend(
+            self.model_aliases()
+                .iter()
+                .filter(|alias| &alias.provider == provider)
+                .map(|alias| alias.id.clone()),
+        );
         models.into_iter().collect()
     }
 
@@ -954,6 +1037,15 @@ impl RuntimeSnapshot {
                 profiles.insert(public_model, presentation.clone());
             }
         }
+        for alias in self
+            .model_aliases()
+            .iter()
+            .filter(|alias| &alias.provider == provider)
+        {
+            if let Some(presentation) = presentations.get(&alias.target) {
+                profiles.insert(alias.id.clone(), presentation.clone());
+            }
+        }
         profiles
             .into_iter()
             .map(|(model, presentation)| super::PublicModelProfile::new(model, presentation))
@@ -979,9 +1071,7 @@ impl RuntimeSnapshot {
             .flat_map(|provider| {
                 self.public_models_for_provider(provider)
                     .into_iter()
-                    .filter(|model| {
-                        scope.allows_provider_model(provider, &self.mapped_model(model.as_str()))
-                    })
+                    .filter(|model| self.catalog_model_allowed_for_scope(provider, model, scope))
             })
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -997,9 +1087,7 @@ impl RuntimeSnapshot {
         let mut profiles = BTreeMap::new();
         for provider in scope.provider_kinds() {
             for profile in self.public_model_profiles_for_provider(provider) {
-                if !scope
-                    .allows_provider_model(provider, &self.mapped_model(profile.model().as_str()))
-                {
+                if !self.catalog_model_allowed_for_scope(provider, profile.model(), scope) {
                     continue;
                 }
                 profiles
@@ -1023,6 +1111,12 @@ impl RuntimeSnapshot {
         if !self.providers.contains(provider) {
             return false;
         }
+        if self
+            .model_alias(public_model.as_str())
+            .is_some_and(|alias| &alias.provider != provider)
+        {
+            return false;
+        }
         if !self.exhaustive_provider_catalogs.contains(provider) {
             return true;
         }
@@ -1040,12 +1134,35 @@ impl RuntimeSnapshot {
     ) -> bool {
         scope.provider_kinds().iter().any(|provider| {
             self.contains_public_model_for_provider(public_model, provider)
-                && scope.allows_provider_model(provider, &self.mapped_model(public_model.as_str()))
+                && self.catalog_model_allowed_for_scope(provider, public_model, scope)
         })
+    }
+
+    pub(crate) fn catalog_model_allowed_for_scope(
+        &self,
+        provider: &ProviderKind,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+    ) -> bool {
+        let upstream_model = self.mapped_model(public_model.as_str());
+        match self
+            .model_catalog_accounts
+            .get(provider)
+            .and_then(|models| models.get(&upstream_model))
+        {
+            Some(accounts) => accounts.iter().any(|account| {
+                scope.account_provider(account) == Some(provider)
+                    && scope.allows_model(account, &upstream_model)
+            }),
+            None => scope.allows_provider_model(provider, &upstream_model),
+        }
     }
 
     #[must_use]
     pub fn mapped_model(&self, requested: &str) -> String {
+        if let Some(alias) = self.model_alias(requested) {
+            return alias.target.as_str().to_owned();
+        }
         let original = requested;
         let mut current = original.to_owned();
         let mut seen = BTreeSet::new();
@@ -1146,6 +1263,12 @@ impl RuntimeSnapshot {
             if !self.providers.contains(provider) {
                 continue;
             }
+            if self
+                .model_alias(public_model.as_str())
+                .is_some_and(|alias| &alias.provider != provider)
+            {
+                continue;
+            }
             if context
                 .required_provider
                 .as_ref()
@@ -1156,7 +1279,9 @@ impl RuntimeSnapshot {
             }
             let requested_model = public_model.as_str();
             let mapped_model = self.mapped_model(requested_model);
-            let upstream_model = if self.model_mappings.contains_key(requested_model) {
+            let upstream_model = if self.model_mappings.contains_key(requested_model)
+                || self.model_alias(requested_model).is_some()
+            {
                 UpstreamModelId::new(mapped_model)
             } else {
                 UpstreamModelId::from_client_wire(mapped_model)

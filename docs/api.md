@@ -261,6 +261,17 @@ OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选
 客户端配置的 `supports_websockets` 只控制第一段连接，不是服务端传输策略开关。
 上游在响应终态前发送 Close 1000 仍属于失败，不能按“正常关闭”计为成功。
 
+Codex OAuth backend 的候选上游为 WS 时，无 `previous_response_id` 的普通新链若规范化
+`response.create` 达到 15 MiB，发送前选择 HTTP/SSE；HTTP 和 WS 入站均适用，下游交付协议不变。
+该阈值为已观察到的上游消息大小边界预留余量，不是网关输入长度上限或 OpenAI 公布的统一限制；
+API Key 账号不使用此大小策略。小请求、显式 warmup、未知外部 previous ID 和持久化续接保持原行为。
+
+OAuth 的大 connection-local WS 续接，以及 HTTP `store=false` 成功后标记为 `ReplayRequired`
+的 WS 增量，均在发送前返回 `status: 400 / previous_response_not_found`。客户端应清除旧 ID，
+携带完整历史及工具调用／输出重试。官方 Codex 支持重连 WS 后完整重发，也可能按自身重试预算
+切到 HTTP；其他客户端需要自行实现此合同。代理不缓存 transcript，不把增量输入当作独立新链，
+不自动重放发送结果不确定的请求；HTTP 链后续步骤可能增加一次恢复信号、重连及全量上传。
+
 已建立模型执行的 Responses、Images 和 Search HTTP 响应按以下规则返回关联 ID：
 `x-gateway-request-id` 为模型执行 ID；`x-request-id` 保留有效上游值，只有上游
 `x-oai-request-id` 时复用其值，没有上游 ID 时使用模型执行 ID。`x-oai-request-id` 不是必需字段，
@@ -560,7 +571,8 @@ Pro 使用 `all` 时也能参与 luna 调度。套餐名称不自动生成或修
 限制适用于 Responses HTTP、WebSocket 及其带压缩触发的请求选号，包括重试、亲和和换号；没有合规账号时沿用
 无可用账号错误，不会回退到被禁止的账号。已开始请求使用冻结的政策，新请求使用已发布的新配置。
 Images、独立 Search 及管理员连接测试不受该文本模型限制；连接测试成功只证明指定账号的上游能力。
-`/v1/models` 和单模型查询按当前 Key 范围内账号政策过滤；原生目录保留已有来源选择和完整模型对象。
+普通 `/v1/models` 和单模型查询将已发现的 OpenAI 模型关联到来源账号，至少一个来源账号在当前 Key 范围内且政策允许时才展示；
+同 Provider 中未发现该模型的 `all` 账号不会使它进入列表。原生目录保留已有来源选择和完整模型对象。
 
 ### 独立代理管理 / Managed Proxies
 
@@ -840,6 +852,9 @@ OAuth start 使用：
   在该窗口的 `resetAt + 2 分钟` 后主动复核。后台每 30 秒检查触发条件；同一重置边界复核后仍未更新时
   回到 30 分钟重试，避免旧 reset 持续触发请求。各窗口独立确认恢复，时间到期本身不会直接解除账号
   耗尽或将展示用量归零。
+- 账号 `enabled` 控制是否参与请求调度，不控制 OAuth 凭据续期。OpenAI 与 xAI 的停用账号仍按各自刷新
+  策略维护 Token；刷新结果更新凭据状态，但不会启用调度。无 refresh token 或凭据已进入失效、无效、
+  封禁状态的账号不参加后台自动续期。
 - `POST /accounts/recover` 对停用账号只将 `enabled` 改为 `true`，保留已有额度快照、凭据、错误和 Redis
   cooldown；启用后仍按这些事实投影状态，不会把已有错误或耗尽改成正常。对已启用账号则执行强制恢复：
   清除 Redis cooldown 和已保存的额度/错误，恢复为可调度 credential。两条路径均不访问上游；强制恢复
@@ -1154,6 +1169,7 @@ concurrencyWaitTimeoutSeconds
 responsesMaxDecompressedBodyBytes
 requestIntervalMs
 rotationStrategy
+smartScheduling
 minCodexDesktopVersion
 minCodexCliVersion
 usageRetentionDays
@@ -1206,6 +1222,35 @@ blockDegradedTurnState
 
 `blockDegradedTurnState` 是必填布尔值，默认 `false`。打开后，上游响应的 `x-codex-turn-state` 恰好 312 字节时，不把该响应发给客户端，改为 `403` / `policy_denied`。
 292、其它长度和未返回该头的响应仍照常交付。关闭时上游返回的 312 仍转发给客户端。管理端连接测试不经过该门。保存后通过现有配置发布机制对新请求生效。
+
+`smartScheduling` 是必填的完整对象，仅在内置 `smart` 策略下生效，切换其他策略时仍保存其值：
+
+```json
+{
+  "loadWeight": 1.0,
+  "quotaWeight": 0.8,
+  "healthWeight": 1.0,
+  "latencyWeight": 0.5,
+  "resetWeight": 0.0,
+  "queueWeight": 0.0,
+  "preferHigherWeight": false
+}
+```
+
+六项系数分别调整负载、剩余额度、健康、首个有效输出延迟、额度重置和排队压力的评分偏好，范围 `0～10`、最多一位小数，
+至少一项大于 `0`。`0` 仅关闭对应评分维度，不放宽账号资格、额度或并发限制；系数不表示流量百分比。
+缺字段、`null`、未知字段及无效数值均返回 `422`，不写入配置。读取设置额外返回只读
+`smartSchedulingDefaults`，内容为上述默认对象，用于恢复默认与自定义状态比较，不可提交到更新接口。
+
+`resetWeight` 越大越偏向即将重置额度的账号，复用已有有效重置时间，未知或已过期时不加分。
+`queueWeight` 只在没有可立即使用的账号、需要选择等待队列时参与评分，越大越偏向等待人数少的账号。
+设为 `0` 时沿用最短队列规则；启用后结合其余五项评分选择队列。队列人数限于当前进程，只有开启账号排队才会生效，
+不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`。
+
+`preferHigherWeight` 默认关闭。开启后，更高权重账号恢复可用时，后续允许重新选号的请求优先回切；
+同权重且可用的会话亲和继续保留。没有可用亲和时，在最高可用权重层内按配置评分。
+原生续写账号绑定仍是硬约束，不因回切而主动换号或触发历史重放。配置随运行设置原子保存和发布，
+新请求使用新值，已开始请求及其重试沿用原快照，无需重启。
 
 ### 模型定价
 
@@ -1271,20 +1316,31 @@ models.dev 同步只导入可表示为当前文本 Token 计价的 OpenAI/xAI �
 该配置作用于 Client Key 的 OpenAI 模型请求与原生模型目录，适用于 HTTP/SSE、WebSocket、Images 和 Search。
 不改变 xAI、入站客户端版本门禁、账号认证或后台 Desktop 专属操作。
 
-身份对象字段如下，可选字段省略或 `null` 时使用所选预设参数：
+自定义配置使用 `{ "mode": "custom", "userAgent": "完整 UA" }`。
+已识别的 `Codex Desktop`、`codex-tui`、`codex_exec`、`codex_cli_rs` 前缀由后端解析 `originator` 和 Core `version`，
+显式提供的配套字段必须与识别结果一致。未知前缀须另填 `originator` 和 `codexVersion`，这两个字段与 UA 一起发送。
+UA 须为 1 至 4096 字节的单行可见 ASCII 文本，首尾不能含空白；`originator` 最多 128 字节，
+`codexVersion` 最多 64 字节并须符合 SemVer。自定义配置不要求 Desktop 构建号，也不自动更新。
+
+没有 `mode` 字段的预设配置按以下合同解析，可选字段省略或 `null` 时使用所选预设参数：
 
 | 字段 | 取值与语义 |
 | --- | --- |
 | `client` | 必填，`desktop` 或 `cli` |
 | `platform` | 必填，`macos`、`linux` 或 `windows` |
 | `versionMode` | 必填，`latest` 或 `fixed` |
-| `originator`、`osVersion`、`arch`、`terminal` | 可选自定义参数，非空、最多 128 字节；只接受可见 ASCII，不能包含括号、分号、反斜杠及首尾空白 |
+| `cliEntry` | CLI 可选 `tui` 或 `exec`，省略或 `null` 保留 Core 默认身份；Desktop 不接受此字段 |
+| `originator`、`osType`、`osVersion`、`arch`、`terminal` | 可选自定义参数，非空、最多 128 字节；只接受可见 ASCII，不能包含括号、分号、反斜杠及首尾空白 |
 | `codexVersion` | `fixed` 必填的 Core SemVer；`latest` 必须省略或为 `null` |
 | `desktopVersion`、`desktopBuild` | 仅 Desktop 的 `fixed` 模式必填，分别为数字点分版本和数字构建号；CLI 不接受这些字段 |
 
 ```json
-{ "client": "cli", "platform": "linux", "versionMode": "latest" }
+{ "client": "cli", "platform": "linux", "versionMode": "latest", "cliEntry": "tui", "osType": "Alpine Linux", "osVersion": "3.24.1", "terminal": "xterm-256color" }
 ```
+
+TUI 默认标识为 `codex-tui`，Exec 为 `codex_exec`，入口后缀使用同一次解析的 Core 版本。
+`originator` 覆盖只更改产品名前缀和配套头，后缀仍表示所选入口。省略 `osType` 使用平台名称；
+自定义运行环境在自动更新时保持不变。旧配置未指定 `cliEntry` 时继续使用 `codex_cli_rs` 默认值且不添加入口后缀。
 
 六套预设均支持自动更新：macOS Desktop 支持 arm64，Windows/Linux Desktop 及三套 CLI 支持 arm64、x86_64。
 预设接口的 `automaticAvailable`、`reason` 表示当前组合的可用性；自定义架构可能使自动解析不可用。
@@ -1294,7 +1350,9 @@ Windows/Linux 通过 ETag 检查更新，未变化时复用已核验版本；CLI
 
 预览返回 `configuration`、`source`（`global` / `override`）、`userAgent`、解析后的环境和版本字段，
 以及 `versionSource`（`official` / `custom`）、`verifiedAt`、`checkedAt`、`error`。
+自定义预览中的 `recognized` 表示是否识别出配套请求头。
 `verifiedAt` 只表示版本资料核验，不能代表自定义运行环境或 TLS 已核验；固定版本返回 `null`。
+完整自定义配置不携带官方制品核验时间。
 客户端画像配置控制应用层请求字段，不切换操作系统的 TLS 实现。默认 HTTP 使用 native TLS，
 WebSocket 使用 rustls；配置自定义 CA 时 HTTP 也使用 rustls。TLS 指纹需按实际部署平台与传输路径核验。
 未完成本次启动检查时 `checkedAt` 为 `null`。非法或当前不可用的选择返回 `400`，保存失败不提交其他修改。
@@ -1469,7 +1527,8 @@ Dashboard 的 `capacityInfo.maxConcurrentPerAccount` 为默认账号并发上限
 
 用量查询可组合页码/游标、时间范围、Provider、Client Key、账号、模型、route、transport、状态码、
 request/response/upstream ID、outcome 与搜索文本。诊断 `dimension` 可取 `model`、`account`、
-`apiKey`、`provider`、`transport`、`failureClass`、`status`。
+`apiKey`、`provider`、`transport`、`failureClass`、`status`。诊断按请求量降序返回最多 100 项，
+同请求量按维度标识稳定排列。
 
 管理端请求列表及 Dashboard 最近请求中的 `accountNotes` 为账号当前备注，按内部账号 ID 关联。
 备注不写入请求历史快照；无备注或账号已删除时返回 `null`，修改备注不改变历史请求的账号归属。
@@ -1559,9 +1618,9 @@ Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥
 | 方法 | 路由 | 主要 query/body | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/admin/system/version` | 无 | 当前构建、部署模式和可用更新 |
-| `GET` | `/api/admin/system/update/detail` | `refresh=true|false` | 读取或强制刷新 Release 详情 |
+| `GET` | `/api/admin/system/update/detail` | `refresh=true|false`、`channel?` | 按临时通道读取或刷新 Release 详情 |
 | `GET` | `/api/admin/system/update/events` | 无 | SSE 更新事件流 |
-| `POST` | `/api/admin/system/update` | `{ targetVersion }` | 受理后台在线更新，返回 `202` |
+| `POST` | `/api/admin/system/update` | `{ targetVersion, channel? }` | 受理后台在线更新，返回 `202` |
 | `GET` | `/api/admin/system/update/status` | 无 | 查询当前更新或回滚状态 |
 | `GET` | `/api/admin/system/update/proxy` | 无 | 查询更新使用的已保存代理，返回 `{ proxyId }`；`null` 表示直连 |
 | `POST` | `/api/admin/system/update/proxy` | `{ proxyId: string \| null }` | 设置检查 Release 与下载更新包使用的已保存代理；`null` 表示直连，代理被删除后自动回到直连 |
@@ -1570,6 +1629,11 @@ Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥
 
 在线更新遵循[版本命名与升级规则](../deploy/README.md#版本命名与升级规则)。版本接口的
 `updateChannel` 由当前版本推导，取值为 `stable`、`alpha`、`beta`、`rc`、`exp`，无法识别时为 `unknown`。
+详情接口的可选 `channel` 仅作用于本次查询，不保存实例偏好；省略时按当前运行版本推导。
+响应的 `policy` 包含本次 `channel` 与 `availableChannels`，普通实例可选 `stable`、`rc`、`beta`、`alpha`，
+实验实例仅允许 `exp`。不可用通道返回 `40901`，未知枚举值返回参数错误。
+执行时应同时发送页面确认的 `channel` 与 `targetVersion`，服务端冻结该通道并重新复核远端目标；
+旧客户端省略通道时按运行版本推导。版本摘要接口始终检查运行通道，不受临时查询影响。
 检查与执行使用同一规则，禁止的通道转换、跨实验线、跨大版本、降级或同版本重装均以 `40901` 拒绝。
 `hasUpdate=true` 仅表示当前构建支持在线更新，且存在允许的更高版本；`latestVersion`、`releaseUrl` 和
 `notes` 对应这个候选。没有可升级候选时，`hasUpdate=false`、`latestVersion` 为当前版本，
@@ -1577,7 +1641,7 @@ Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥
 当前构建不支持在线更新时不查询 Release，`hasUpdate=false`、`latestVersion` 为当前版本，
 `releaseUrl` 和 `notes` 为空，不支持原因通过 `updateSupported=false`、`unsupportedReason` 返回。
 强制检查失败时通过 `warning` 返回错误，`hasUpdate=false`，不以旧缓存或“没有更新”掩盖失败。
-普通查询可复用 20 分钟内的结果。下载时仍会校验目标资产、校验和及归档。
+普通查询可复用 20 分钟内的结果，缓存按通道隔离，较慢的旧检查不能覆盖新检查结果。下载时仍会校验目标资产、校验和及归档。
 
 更新 POST 在本地校验目标版本并持久化任务后返回 `202`，数据包含 `operationId`、`targetVersion`、
 `deploymentMode` 和 `message`，只表示已受理。Release 查询、远端目标复核、下载、校验及文件替换在后台
@@ -1590,7 +1654,10 @@ Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥
 版本或增加权限。
 
 状态响应的 `currentVersion` 表示已安装文件的版本，运行中的版本仍以 `/version` 为准。
-`needRestart=true` 表示成功安装的版本尚未在当前进程生效，此时应调用重启接口，不能重复发起更新。
+`needRestart=true` 表示已验证的安装文件尚未在当前进程生效，此时应调用重启接口，不能重复发起更新或切换通道。
+最近一次 `operation` 仅表示操作历史，成功记录不等于待重启，也不改变远端 `hasUpdate`。
+手动部署后按实际文件校准 `currentVersion`；无法核实的回滚备份不再返回 `previousVersion`。
+运行期间的外部文件变动或不完整安装返回错误，不伪装成安装成功。
 Host 关闭或任务取消会记录失败终态；状态查询会收敛无执行锁的遗留 `running`。
 异常退出留下的锁仍遵循 30 分钟过期规则，未过期前不会抢占其他进程的操作。
 实例升级和仓库发版见 [部署文档](../deploy/README.md#镜像升级与源码构建)。
@@ -1715,7 +1782,7 @@ GitHub 的 `location` 使用 `kind: "github"`、`repository: "owner/repo"`、`ta
 
 查询请求为 `{ "query": { "repository": "owner/repo", "tag": null, "allowPrerelease": false }, "credentialIds": [], "outboundProxyId": null }`。
 `tag: null` 查询最新稳定版；预发行版须指定 tag 并允许预发行。响应包含固定 tag、产物列表、`queriedAt`
-和 `expiresAt`。成功缓存 1 小时，失败缓存 30 秒，同一查询合并并发；限流返回错误，不转换成空列表。
+和 `expiresAt`。显式查询刷新成功结果，同一批并发查询共享结果；下载固定 tag 的产物可复用 1 小时内的元数据，失败缓存 30 秒；限流返回错误，不转换成空列表。
 
 #### 下载认证与代理
 
@@ -1798,13 +1865,14 @@ GitHub 的 `location` 使用 `kind: "github"`、`repository: "owner/repo"`、`ta
 
 #### 访问域与受管资源
 
-清单的 `requestedPermissions` 只接受五个稳定访问域，确认结果以制品摘要为边界；实例输入没有单独授权字段。
+清单的 `requestedPermissions` 接受 `network`、`models`、`accounts`、`data`、`requests`、`public_endpoints`，确认结果以制品摘要为边界；实例输入没有单独授权字段。
 
 | 标识 | 含义 |
 | --- | --- |
 | `network` | 访问网络 |
 | `models` | 查询模型和 Client Key 基本信息并调用模型，可能产生消耗 |
 | `accounts` | 读取和修改账号，包括访问原始凭据 |
+| `data` | 仅在管理或命令入口只读全部账号的基础信息和已有额度观测，不含凭据或预测 |
 | `requests` | 查看和处理请求、响应、路由及账号选择 |
 | `public_endpoints` | 提供无需登录即可访问的资源与回调入口 |
 

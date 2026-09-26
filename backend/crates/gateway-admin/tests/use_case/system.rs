@@ -25,6 +25,7 @@ use super::proxies::TestProxies;
 struct RecordingSystemOperations {
     target: Mutex<Option<Option<String>>>,
     proxy_endpoint: Mutex<Option<Option<String>>>,
+    channel: Mutex<Option<gateway_admin::model::system::SystemUpdateChannel>>,
 }
 
 #[async_trait]
@@ -36,6 +37,7 @@ impl SystemOperations for RecordingSystemOperations {
             build_time: "unknown".to_owned(),
             deployment_mode: "source".to_owned(),
             update_channel: "stable".to_owned(),
+
             latest_version: "1.0.0".to_owned(),
             has_update: false,
             update_cached: false,
@@ -43,8 +45,16 @@ impl SystemOperations for RecordingSystemOperations {
         })
     }
 
-    async fn update_detail(&self, _: bool) -> Result<SystemUpdateDetail, SystemOperationError> {
+    async fn update_detail(
+        &self,
+        _: bool,
+        _: Option<gateway_admin::model::system::SystemUpdateChannel>,
+    ) -> Result<SystemUpdateDetail, SystemOperationError> {
         Ok(SystemUpdateDetail {
+            policy: gateway_admin::model::system::SystemUpdatePolicy {
+                channel: gateway_admin::model::system::SystemUpdateChannel::Stable,
+                available_channels: vec![gateway_admin::model::system::SystemUpdateChannel::Stable],
+            },
             current_version: "1.0.0".to_owned(),
             latest_version: "1.0.0".to_owned(),
             has_update: false,
@@ -66,9 +76,11 @@ impl SystemOperations for RecordingSystemOperations {
     async fn perform_update(
         &self,
         target_version: Option<String>,
+        channel: Option<gateway_admin::model::system::SystemUpdateChannel>,
         _: std::sync::Arc<dyn gateway_admin::ports::system::SystemUpdatePreflight>,
     ) -> Result<SystemOperationAccepted, SystemOperationError> {
         *self.target.lock().expect("target") = Some(target_version.clone());
+        *self.channel.lock().expect("channel") = channel;
         Ok(SystemOperationAccepted::Update {
             operation_id: "operation-update".to_owned(),
             deployment_mode: "source".to_owned(),
@@ -226,7 +238,7 @@ async fn system_update_should_normalize_blank_target_to_latest() {
         .await;
     services
         .system()
-        .perform_update(Some("   ".to_owned()))
+        .perform_update(Some("   ".to_owned()), None)
         .await
         .expect("perform update");
 
@@ -276,7 +288,7 @@ async fn system_update_proxy_should_persist_and_route_release_checks() {
     *operations.proxy_endpoint.lock().expect("proxy") = None;
     services
         .system()
-        .update_detail(true)
+        .update_detail(true, None)
         .await
         .expect("update detail");
     assert_eq!(
@@ -301,11 +313,31 @@ async fn system_update_proxy_should_persist_and_route_release_checks() {
         .expect("switch to direct");
     services
         .system()
-        .perform_update(Some("1.0.1".to_owned()))
+        .perform_update(Some("1.0.1".to_owned()), None)
         .await
         .expect("perform update");
     assert_eq!(
         *operations.proxy_endpoint.lock().expect("proxy"),
         Some(None)
     );
+}
+
+#[tokio::test]
+async fn system_update_should_forward_the_confirmed_channel() {
+    let operations = std::sync::Arc::new(RecordingSystemOperations::default());
+    let services = super::AdminHarness::new()
+        .system(operations.clone())
+        .build()
+        .await;
+    let channel = gateway_admin::model::system::SystemUpdateChannel::Beta;
+    services
+        .system()
+        .perform_update(Some(" 1.2.0-beta.1 ".into()), Some(channel))
+        .await
+        .expect("accepted");
+    assert_eq!(
+        *operations.target.lock().expect("target"),
+        Some(Some("1.2.0-beta.1".into()))
+    );
+    assert_eq!(*operations.channel.lock().expect("channel"), Some(channel));
 }

@@ -85,7 +85,6 @@ const {
   authorizingOAuth,
   authorization,
   authorizationCallback,
-  resetAuthorization,
   batchDeleting,
   exportingAccounts,
   exportDisabledReason,
@@ -413,7 +412,6 @@ const {
       :saving="creatingAccount"
       @create="handleCreate"
       @generate-oauth="handleAuthorizeOAuth"
-      @reset-authorization="resetAuthorization"
     />
 
     <AccountEditModal

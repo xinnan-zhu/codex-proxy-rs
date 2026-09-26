@@ -2,7 +2,7 @@ import { toast } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import { getSystemUpdateProxy, updateSystemUpdateProxy } from '@/api'
 import { useProxyCatalog } from '@/composables/useProxyCatalog'
-import { errorMessage } from '@/utils/async'
+import { errorMessage } from '@/utils/operation'
 
 const DIRECT = 'direct'
 

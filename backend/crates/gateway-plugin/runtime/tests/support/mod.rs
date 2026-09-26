@@ -42,12 +42,15 @@ pub fn contribution_for_id(
         Capability::FrontendAuthentication => "frontendAuthentication",
         Capability::Scheduler => "scheduler",
         Capability::ModelRouter => "modelRouter",
+        Capability::ModelCatalog => "modelCatalog",
+        Capability::RetryPolicy => "retryPolicy",
         Capability::Middleware => "middleware",
         Capability::RequestLifecycle => "requestLifecycle",
         Capability::WebSocketObserver => "webSocketObserver",
         Capability::Usage => "usage",
         Capability::CommandLine => "commandLine",
         Capability::Management => "management",
+        Capability::Maintenance => "maintenance",
     };
     (
         capability,

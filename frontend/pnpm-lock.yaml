@@ -170,8 +170,8 @@ importers:
         specifier: 1.0.1
         version: 1.0.1(vue@3.5.43(typescript@6.0.3))
       '@codex-proxy/ui':
-        specifier: github:zyycn/codex-proxy-ui#v0.1.1
-        version: https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/fe4373db3239e81b56cb448c46f3cd395799c4f7(axios@1.20.0(debug@4.4.3))(change-case@5.4.4)(vue@3.5.43(typescript@6.0.3))
+        specifier: github:zyycn/codex-proxy-ui#v0.3.0
+        version: https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/e1d4a164e7cfe72272301ebcb1b1d9c54b786522(axios@1.20.0(debug@4.4.3))(change-case@5.4.4)(vite@8.3.0(@types/node@26.6.2)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.43(typescript@6.0.3))
       '@fontsource-variable/inter':
         specifier: ^5.3.0
         version: 5.3.0
@@ -208,6 +208,9 @@ importers:
       pinia-plugin-persistedstate:
         specifier: ^4.7.1
         version: 4.7.1(pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@6.0.3)(vue@3.5.43(typescript@6.0.3)))
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       vue:
         specifier: ^3.5.43
         version: 3.5.43(typescript@6.0.3)
@@ -227,6 +230,9 @@ importers:
       '@types/node':
         specifier: ^26.6.2
         version: 26.6.2
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.9
         version: 6.0.9(vite@8.3.0(@types/node@26.6.2)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.43(typescript@6.0.3))
@@ -378,12 +384,16 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
-  '@codex-proxy/ui@https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/fe4373db3239e81b56cb448c46f3cd395799c4f7':
-    resolution: {gitHosted: true, integrity: sha512-i20i8AsYJlP1ThwZQlrwUw5rK5R6TG8VY5VWhsikEGuDXqzm7WixUVdZ2BLLBJV5LbDY7LMmmv/HD8EIwwb5cw==, tarball: https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/fe4373db3239e81b56cb448c46f3cd395799c4f7}
-    version: 0.1.1
+  '@codex-proxy/ui@https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/e1d4a164e7cfe72272301ebcb1b1d9c54b786522':
+    resolution: {gitHosted: true, integrity: sha512-I2h13qjmqABk4IviUXdiZXPU9o//qO6WGbBBvav9rXKXyEjfFXvwvz0ofa/4UWOmTRBhmcRFmEIE0qUTzHZThQ==, tarball: https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/e1d4a164e7cfe72272301ebcb1b1d9c54b786522}
+    version: 0.3.0
     engines: {node: '>=24'}
     peerDependencies:
+      vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
       vue: ^3.5.0
+    peerDependenciesMeta:
+      vite:
+        optional: true
 
   '@dprint/formatter@0.5.1':
     resolution: {integrity: sha512-cdZUrm0iv/FnnY3CKE2dEcVhNEzrC551aE2h2mTFwQCRBrqyARLDnb7D+3PlXTUVp3s34ftlnGOVCmhLT9DeKA==}
@@ -895,6 +905,9 @@ packages:
 
   '@types/node@26.6.2':
     resolution: {integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
@@ -2770,7 +2783,7 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@codex-proxy/ui@https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/fe4373db3239e81b56cb448c46f3cd395799c4f7(axios@1.20.0(debug@4.4.3))(change-case@5.4.4)(vue@3.5.43(typescript@6.0.3))':
+  '@codex-proxy/ui@https://codeload.github.com/zyycn/codex-proxy-ui/tar.gz/e1d4a164e7cfe72272301ebcb1b1d9c54b786522(axios@1.20.0(debug@4.4.3))(change-case@5.4.4)(vite@8.3.0(@types/node@26.6.2)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.43(typescript@6.0.3))':
     dependencies:
       '@ant-design/colors': 8.0.1
       '@ant-design/fast-color': 3.0.1
@@ -2783,6 +2796,8 @@ snapshots:
       marked: 18.0.14
       sortablejs: 1.15.7
       vue: 3.5.43(typescript@6.0.3)
+    optionalDependencies:
+      vite: 8.3.0(@types/node@26.6.2)(jiti@2.7.0)(yaml@2.9.0)
     transitivePeerDependencies:
       - async-validator
       - axios
@@ -3163,6 +3178,8 @@ snapshots:
   '@types/node@26.6.2':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/semver@7.8.0': {}
 
   '@types/trusted-types@2.0.7':
     optional: true

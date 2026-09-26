@@ -53,6 +53,7 @@ const {
   resetSettings,
   error,
   form,
+  smartSchedulingDefaults,
   mappings,
   addMapping,
   updateMapping,
@@ -107,7 +108,7 @@ watch(section, (value) => {
       />
       <div v-if="isBasicSection || hasChanges" class="ml-auto flex items-center justify-end gap-2">
         <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
-        <BaseIconButton v-if="hasChanges" label="撤销全部基础设置更改" variant="filled" :disabled="saving || loading" @click="resetSettings">
+        <BaseIconButton v-if="hasChanges" label="撤销全部基础设置更改" variant="secondary" :disabled="saving || loading" @click="resetSettings">
           <Undo2 class="size-4" />
         </BaseIconButton>
         <BaseButton variant="primary" :loading="saving" :disabled="loading || !hasChanges || !!error" @click="saveSettings">
@@ -148,7 +149,13 @@ watch(section, (value) => {
             v-model:max-concurrent-per-account="maxConcurrentPerAccountValue"
             v-model:request-interval-ms="requestIntervalMsValue"
           />
-          <RotationStrategyCard v-model="form.rotationStrategy" :options="rotationOptions" />
+          <RotationStrategyCard
+            v-model="form.rotationStrategy"
+            v-model:smart-scheduling="form.smartScheduling"
+            :smart-defaults="smartSchedulingDefaults"
+            :disabled="disabled"
+            :options="rotationOptions"
+          />
           <RequestQueueCard
             v-model:max-waiting-per-key="maxWaitingPerKeyValue"
             v-model:max-waiting-per-account="maxWaitingPerAccountValue"

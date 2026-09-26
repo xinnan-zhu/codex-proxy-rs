@@ -2,7 +2,7 @@
 import type { ApiKey } from '@/api'
 import { BasePopover } from '@codex-proxy/ui'
 import { computed } from 'vue'
-import { formatDateTime } from '@/utils/date'
+import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{ apiKey: ApiKey }>()
 const windows = computed(() => [

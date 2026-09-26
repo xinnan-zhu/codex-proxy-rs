@@ -2,7 +2,7 @@
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护 fork，不是官方仓库。
 
-- 当前基线：官方 `main` **v3.14.1**
+- 当前基线：官方 `main` **v3.16.0**（含其后的更新进度布局修复）
 - 远程：`origin` 为本仓库，`upstream` 为官方仓库
 
 官方功能、部署方式和客户端接入仍以官方 README / 文档为准。这里只记录本 fork **多出来的**、以及**明确不再保留**的差异。
@@ -92,7 +92,7 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 ## 数据库迁移
 
-本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.14.1 止于 `0018`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
+本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.16.0 止于 `0019`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
 
 | 编号 | 作用 |
 |------|------|

@@ -31,7 +31,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId,
 import { useRoute, useRouter } from 'vue-router'
 import AppBrandMark from '@/components/AppBrandMark.vue'
 import { useAuthStore } from '@/stores/modules/auth'
-import { usePluginManagementViewsStore } from '@/stores/modules/plugin-management-views'
+import { usePluginViewsStore } from '@/stores/modules/plugin-views'
 import { useSystemUpdateStore } from '@/stores/modules/system-update'
 import { useThemeStore } from '@/stores/modules/theme'
 import { pluginPageLocation, shortPluginInstanceId } from '@/views/plugins/utils/navigation'
@@ -56,7 +56,7 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const pluginViewsStore = usePluginManagementViewsStore()
+const pluginViewsStore = usePluginViewsStore()
 const systemUpdateStore = useSystemUpdateStore()
 const themeStore = useThemeStore()
 const { pageViews: pluginPageViews } = storeToRefs(pluginViewsStore)
@@ -460,11 +460,16 @@ onBeforeUnmount(() => {
                 >
                   {{ item.label }}
                 </span>
-                <ChevronDown
+                <span
                   v-if="!isCollapsed"
-                  class="sidebar-label size-4 shrink-0 transition-transform duration-200 motion-reduce:transition-none"
-                  :class="pluginGroupExpanded ? undefined : '-rotate-90'"
-                />
+                  class="sidebar-label inline-flex size-4 shrink-0"
+                  aria-hidden="true"
+                >
+                  <ChevronDown
+                    class="size-4 transition-transform duration-200 motion-reduce:transition-none"
+                    :class="pluginGroupExpanded ? undefined : '-rotate-90'"
+                  />
+                </span>
               </button>
 
               <div

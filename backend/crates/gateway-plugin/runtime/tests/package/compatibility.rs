@@ -75,12 +75,15 @@ fn assert_exhaustive_capability(capability: Capability) {
         Capability::FrontendAuthentication
         | Capability::Scheduler
         | Capability::ModelRouter
+        | Capability::ModelCatalog
+        | Capability::RetryPolicy
         | Capability::Middleware
         | Capability::RequestLifecycle
         | Capability::WebSocketObserver
         | Capability::Usage
         | Capability::CommandLine
-        | Capability::Management => {}
+        | Capability::Management
+        | Capability::Maintenance => {}
     }
 }
 
@@ -90,20 +93,26 @@ fn assert_exhaustive_permission(permission: Permission) {
         | Permission::Requests
         | Permission::Models
         | Permission::Accounts
-        | Permission::PublicEndpoints => {}
+        | Permission::Data
+        | Permission::PublicEndpoints
+        | Permission::Groups
+        | Permission::Keys => {}
     }
 }
 
-fn all_capabilities() -> [Capability; 9] {
+fn all_capabilities() -> [Capability; 12] {
     [
         Capability::FrontendAuthentication,
         Capability::Scheduler,
         Capability::ModelRouter,
+        Capability::ModelCatalog,
+        Capability::RetryPolicy,
         Capability::Middleware,
         Capability::RequestLifecycle,
         Capability::WebSocketObserver,
         Capability::Usage,
         Capability::CommandLine,
         Capability::Management,
+        Capability::Maintenance,
     ]
 }

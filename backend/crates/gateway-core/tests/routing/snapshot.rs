@@ -13,9 +13,9 @@ use gateway_core::routing::snapshot::{
     SnapshotProviderAccountFacts, SnapshotSettingsFacts, SnapshotStoreError, SnapshotStorePort,
 };
 use gateway_core::routing::{
-    ConfigRevision, ModelCapabilities, ModelPresentation, ProviderCatalogGeneration,
-    ProviderCatalogPort, ProviderCatalogUnavailable, ProviderKind, ProviderModelCapabilities,
-    PublicModelId, UpstreamModelId,
+    ConfigRevision, ContributedModelAlias, ModelCapabilities, ModelPresentation,
+    ProviderCatalogGeneration, ProviderCatalogPort, ProviderCatalogUnavailable, ProviderKind,
+    ProviderModelCapabilities, PublicModelId, UpstreamModelId,
 };
 use gateway_core::runtime::extensions::{
     ExtensionPreparationError, ExtensionPreparationPort, ExtensionSetId, ExtensionSetLease,
@@ -91,6 +91,134 @@ impl ExtensionSetLease for TestExtensionLease {
 struct CountingExtensionPreparation {
     prepares: AtomicUsize,
     drops: Arc<AtomicUsize>,
+}
+
+struct AliasLease(Vec<ContributedModelAlias>);
+
+impl ExtensionSetLease for AliasLease {
+    fn is_ready(&self) -> bool {
+        true
+    }
+    fn model_aliases(&self) -> &[ContributedModelAlias] {
+        &self.0
+    }
+}
+
+struct AliasPreparation(ExtensionSetReference);
+
+impl ExtensionPreparationPort for AliasPreparation {
+    fn prepare(
+        &self,
+        _: ConfigRevision,
+    ) -> BoxFuture<'_, Result<ExtensionSetReference, ExtensionPreparationError>> {
+        Box::pin(async move { Ok(self.0.clone()) })
+    }
+}
+
+fn alias(id: &str, target: &str) -> ContributedModelAlias {
+    ContributedModelAlias {
+        owner: "test-plugin".into(),
+        id: PublicModelId::new(id).unwrap(),
+        provider: ProviderKind::new("alpha").unwrap(),
+        target: UpstreamModelId::new(target).unwrap(),
+    }
+}
+
+fn compile_aliases(
+    aliases: Vec<ContributedModelAlias>,
+) -> Result<gateway_core::routing::RuntimeSnapshot, RuntimeSnapshotCompileError> {
+    let facts = SnapshotFacts::new(
+        revision(1),
+        revision(1),
+        SnapshotSettingsFacts::new(
+            3,
+            50,
+            "smart",
+            BTreeMap::from([("configured".into(), "upstream-model".into())]),
+            None,
+            None,
+        ),
+        vec![],
+        vec![],
+        vec![SnapshotProviderAccountFacts::new(
+            gateway_core::account::ProviderAccountId::new("acct_alias").unwrap(),
+            "alpha",
+        )],
+        vec![],
+    );
+    block_on(
+        RuntimeSnapshotCompiler::new(
+            Arc::new(TestSnapshotStore::new(Ok(facts))),
+            Arc::new(PublishingCatalog {
+                generation: AtomicU64::new(1),
+                queries: AtomicUsize::new(1),
+            }),
+        )
+        .with_extensions(Arc::new(AliasPreparation(ExtensionSetReference::new(
+            ExtensionSetId::new("alias-generation".into()).unwrap(),
+            Arc::new(AliasLease(aliases)),
+        ))))
+        .compile(),
+    )
+}
+
+#[test]
+fn contributed_alias_uses_the_same_target_for_listing_profiles_and_routing() {
+    let snapshot = compile_aliases(vec![alias("plugin-model", "upstream-model")]).unwrap();
+    let model = PublicModelId::new("plugin-model").unwrap();
+    let provider = ProviderKind::new("alpha").unwrap();
+    assert!(
+        snapshot
+            .public_models_for_scope(&snapshot.all_account_scope())
+            .contains(&model)
+    );
+    assert!(snapshot.contains_public_model_for_scope(&model, &snapshot.all_account_scope()));
+    let profiles = snapshot.public_model_profiles_for_provider(&provider);
+    let alias_profile = profiles
+        .iter()
+        .find(|profile| profile.model() == &model)
+        .unwrap();
+    let native_profile = profiles
+        .iter()
+        .find(|profile| profile.model().as_str() == "upstream-model")
+        .unwrap();
+    assert_eq!(alias_profile.presentation(), native_profile.presentation());
+    let plan = snapshot
+        .plan(
+            &model,
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(plan.candidates()[0].provider(), &provider);
+    assert_eq!(
+        plan.candidates()[0].upstream_model().unwrap().as_str(),
+        "upstream-model"
+    );
+}
+
+#[test]
+fn contributed_alias_rejects_collisions_chains_and_missing_targets_before_publication() {
+    for aliases in [
+        vec![alias("upstream-model", "upstream-model")],
+        vec![alias("configured", "upstream-model")],
+        vec![alias("plugin-model", "configured")],
+        vec![alias("plugin-model", "missing")],
+        vec![
+            alias("plugin-model", "other"),
+            alias("other", "plugin-model"),
+        ],
+        vec![
+            alias("plugin-model", "upstream-model"),
+            alias("plugin-model", "upstream-model"),
+        ],
+    ] {
+        assert_eq!(
+            compile_aliases(aliases).unwrap_err(),
+            RuntimeSnapshotCompileError::InvalidExtensionModels
+        );
+    }
 }
 
 impl ExtensionPreparationPort for CountingExtensionPreparation {
@@ -232,6 +360,49 @@ fn compiler_accepts_unlimited_default_account_concurrency() {
         plan.account_selection_policy().request_interval(),
         std::time::Duration::from_millis(50)
     );
+}
+
+#[test]
+fn compiled_plans_keep_their_smart_config_after_a_new_snapshot_is_built() {
+    use gateway_core::account::SmartSchedulingConfig;
+    let configs = [
+        SmartSchedulingConfig::default(),
+        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3], true).unwrap(),
+    ];
+    let mut plans = Vec::new();
+    for (index, config) in configs.into_iter().enumerate() {
+        let facts = SnapshotFacts::new(
+            revision(index as u64 + 1),
+            revision(index as u64 + 1),
+            SnapshotSettingsFacts::new(3, 0, "smart", BTreeMap::new(), None, None)
+                .with_smart_scheduling(config),
+            vec![],
+            vec![],
+            vec![SnapshotProviderAccountFacts::new(
+                gateway_core::account::ProviderAccountId::new("acct_config").unwrap(),
+                "alpha",
+            )],
+            vec![],
+        );
+        let compiler = RuntimeSnapshotCompiler::new(
+            Arc::new(TestSnapshotStore::new(Ok(facts))),
+            Arc::new(TestCatalog::Unavailable),
+        );
+        let snapshot = block_on(compiler.compile()).unwrap();
+        plans.push(
+            snapshot
+                .plan(
+                    &PublicModelId::new("any-model").unwrap(),
+                    &super::operation(),
+                    snapshot.all_account_scope(),
+                    &Default::default(),
+                )
+                .unwrap(),
+        );
+    }
+    for (plan, config) in plans.iter().zip(configs) {
+        assert_eq!(plan.account_selection_policy().smart_scheduling(), config);
+    }
 }
 
 #[test]

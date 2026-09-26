@@ -3,9 +3,8 @@ import { toast } from '@codex-proxy/ui'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { createAccountImportTask, importAccounts } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
-import { errorMessage } from '@/utils/async'
+import { errorMessage, generateRequestId } from '@/utils/operation'
 import { formatProviderLabel, isSupportedProvider } from '@/utils/providers'
-import { generateRequestId } from '@/utils/uuid'
 import { accountCreateProvider, accountCreateSourceKey, accountImportSettings, accountProxyError, emptyAccountCreateForm } from '../components/AccountCreateModal/model'
 import { accountImportModes } from '../components/AccountCreateModal/presenter'
 import { accountImportDocuments, MAX_ACCOUNT_IMPORT_COUNT, mixedImportDocuments } from '../utils/accountImport'
@@ -138,6 +137,7 @@ export function useAccountOnboarding(options: {
     reauthorizingAccount.value = account
     createForm.value = { ...emptyAccountCreateForm(), source: { kind: 'provider', id: account.provider }, step: 'import' }
     showCreateModal.value = true
+    void handleAuthorizeOAuth()
   }
 
   async function finishCreate(message: string) {
@@ -172,7 +172,6 @@ export function useAccountOnboarding(options: {
     authorizingOAuth: authorization.busy,
     authorization: authorization.view,
     authorizationCallback: authorization.callback,
-    resetAuthorization: authorization.reset,
     createForm,
     handleCreate,
     handleAuthorizeOAuth,

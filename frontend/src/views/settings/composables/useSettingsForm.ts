@@ -1,5 +1,5 @@
 import type { rotationOptions } from '../constants'
-import type { RequestLocation } from '@/api'
+import type { RequestLocation, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/client-profiles'
 import { toast } from '@codex-proxy/ui'
 import { isEqual } from 'es-toolkit'
@@ -8,8 +8,8 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import { getSettings, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
-import { errorMessage } from '@/utils/async'
-import { normalizeRequestLocation, requestLocationError } from '@/utils/request-location'
+import { normalizeRequestLocation, requestLocationError } from '@/utils/data'
+import { errorMessage } from '@/utils/operation'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']
 
@@ -22,7 +22,9 @@ export function useSettingsForm() {
   const error = shallowRef('')
   const mappings = ref<Array<{ requestedModel: string, upstreamModel: string }>>([])
   const savedRequestLocation = shallowRef<RequestLocation>()
+  const smartSchedulingDefaults = shallowRef<SmartSchedulingConfig>()
   const form = reactive({
+    smartScheduling: undefined as SmartSchedulingConfig | undefined,
     providerRequestProfiles: {} as ProviderRequestProfiles,
     requestLocationEnabled: false,
     requestLocation: { country: '', region: '', city: '', timezone: '' },
@@ -59,6 +61,7 @@ export function useSettingsForm() {
     return {
       form: {
         ...form,
+        smartScheduling: form.smartScheduling ? { ...form.smartScheduling } : undefined,
         providerRequestProfiles: cloneProfiles(form.providerRequestProfiles),
         requestLocation: { ...form.requestLocation },
       },
@@ -68,12 +71,13 @@ export function useSettingsForm() {
 
   const saved = shallowRef<ReturnType<typeof snapshot>>()
   const loaded = computed(() => saved.value !== undefined)
-  const hasChanges = computed(() => loaded.value && JSON.stringify(snapshot()) !== JSON.stringify(saved.value))
+  const hasChanges = computed(() => loaded.value && !isEqual(snapshot(), saved.value))
 
   function resetSettings() {
     if (!saved.value || saving.value)
       return
     Object.assign(form, saved.value.form, {
+      smartScheduling: saved.value.form.smartScheduling ? { ...saved.value.form.smartScheduling } : undefined,
       providerRequestProfiles: cloneProfiles(saved.value.form.providerRequestProfiles),
       requestLocation: { ...saved.value.form.requestLocation },
     })
@@ -127,6 +131,8 @@ export function useSettingsForm() {
     form.concurrencyWaitTimeoutSeconds = data.concurrencyWaitTimeoutSeconds
     form.responsesMaxDecompressedBodyMiB = data.responsesMaxDecompressedBodyBytes / MIB
 
+    form.smartScheduling = { ...data.smartScheduling }
+    smartSchedulingDefaults.value = { ...data.smartSchedulingDefaults }
     form.rotationStrategy = data.rotationStrategy
     form.minCodexDesktopVersion = data.minCodexDesktopVersion ?? ''
     form.providerRequestProfiles = cloneProfiles(data.providerRequestProfiles)
@@ -199,6 +205,9 @@ export function useSettingsForm() {
   }
 
   async function saveSettings() {
+    const smartScheduling = form.smartScheduling
+    if (!smartScheduling)
+      return
     const savedSettings = saved.value
     if (saving.value || loading.value || !savedRequestLocation.value || !savedSettings)
       return
@@ -282,6 +291,7 @@ export function useSettingsForm() {
         concurrencyWaitTimeoutSeconds,
         responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB * MIB,
         rotationStrategy,
+        smartScheduling: { ...smartScheduling },
         minCodexDesktopVersion: form.minCodexDesktopVersion.trim() || null,
         minCodexCliVersion: form.minCodexCliVersion.trim() || null,
         usageRetentionDays: form.usageRetentionDays,
@@ -316,6 +326,7 @@ export function useSettingsForm() {
     resetSettings,
     error,
     form,
+    smartSchedulingDefaults,
     mappings,
     addMapping,
     updateMapping,
