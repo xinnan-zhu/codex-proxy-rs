@@ -32,8 +32,8 @@ import {
   updatePluginInstance,
 } from '@/api'
 import { ApiError } from '@/api/request'
-import { usePluginManagementViewsStore } from '@/stores/modules/plugin-management-views'
-import { errorMessage } from '@/utils/async'
+import { usePluginViewsStore } from '@/stores/modules/plugin-views'
+import { errorMessage } from '@/utils/operation'
 import { configurationStatus, currentPluginInstance, groupInstalledPlugins } from '../utils/catalog'
 import { usePluginInstallation } from './usePluginInstallation'
 import { usePluginUninstall } from './usePluginUninstall'
@@ -44,7 +44,7 @@ export function usePluginManagement() {
   const instances = shallowRef<PluginInstance[]>([])
   const sources = shallowRef<PluginUpdateSourceBinding[]>([])
   const credentials = shallowRef<PluginSourceCredential[]>([])
-  const extensionDirectory = usePluginManagementViewsStore()
+  const extensionDirectory = usePluginViewsStore()
   const { views: extensions } = storeToRefs(extensionDirectory)
   const loading = shallowRef(false)
   const catalog = computed(() => groupInstalledPlugins(artifacts.value, instances.value, sources.value))

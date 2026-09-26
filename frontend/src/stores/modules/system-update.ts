@@ -13,7 +13,7 @@ import {
 } from '@/api'
 import { API_BASE_URL } from '@/api/constants'
 import { ApiError } from '@/api/request'
-import { errorMessage } from '@/utils/async'
+import { errorMessage } from '@/utils/operation'
 
 const maxUpdateLogs = 200
 const updateEventReadyTimeoutMs = 3_000

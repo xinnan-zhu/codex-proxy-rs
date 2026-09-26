@@ -8,8 +8,8 @@ import { computed, reactive, ref, shallowRef } from 'vue'
 import { getSettings, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
-import { errorMessage } from '@/utils/async'
-import { normalizeRequestLocation, requestLocationError } from '@/utils/request-location'
+import { normalizeRequestLocation, requestLocationError } from '@/utils/data'
+import { errorMessage } from '@/utils/operation'
 
 type RotationStrategy = (typeof rotationOptions)[number]['value']
 

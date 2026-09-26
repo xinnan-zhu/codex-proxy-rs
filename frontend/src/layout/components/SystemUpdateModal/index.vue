@@ -15,8 +15,8 @@ import {
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
-import { errorMessage } from '@/utils/async'
-import { formatTime } from '@/utils/date'
+import { formatTime } from '@/utils/format'
+import { errorMessage } from '@/utils/operation'
 import {
   resolveSystemUpdateLogClasses,
   resolveSystemUpdatePresentation,
