@@ -460,11 +460,16 @@ onBeforeUnmount(() => {
                 >
                   {{ item.label }}
                 </span>
-                <ChevronDown
+                <span
                   v-if="!isCollapsed"
-                  class="sidebar-label size-4 shrink-0 transition-transform duration-200 motion-reduce:transition-none"
-                  :class="pluginGroupExpanded ? undefined : '-rotate-90'"
-                />
+                  class="sidebar-label inline-flex size-4 shrink-0"
+                  aria-hidden="true"
+                >
+                  <ChevronDown
+                    class="size-4 transition-transform duration-200 motion-reduce:transition-none"
+                    :class="pluginGroupExpanded ? undefined : '-rotate-90'"
+                  />
+                </span>
               </button>
 
               <div

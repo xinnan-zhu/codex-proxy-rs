@@ -502,7 +502,31 @@ async fn observability_services_should_calculate_usage_insights_and_diagnostic_s
     );
     assert_eq!(diagnostics.items[0].request_share, 0.75);
     assert_eq!(diagnostics.items[1].request_share, 0.25);
-    assert!((diagnostics.items[0].impact_score - 0.075).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn diagnostics_should_preserve_request_order_when_a_small_sample_fails() {
+    let now = Utc::now();
+    let range = observation_range(now);
+    let store = Arc::new(FixtureObservabilityStore::new(range));
+    let success = diagnostic("popular", 100);
+    let mut failure = diagnostic("single_failure", 1);
+    failure.success_count = 0;
+    failure.failure_count = 1;
+    store.replace_diagnostics(vec![success, failure]);
+    let services = observability_services_with_calculated_billing(store).await;
+
+    let result = services
+        .observability()
+        .diagnostics(range, UsageFilter::default(), DiagnosticDimension::Model)
+        .await
+        .expect("diagnostics");
+
+    assert_eq!(result.items[0].key, "popular");
+    assert_eq!(result.items[1].key, "single_failure");
+    assert_eq!(result.items[0].error_count, 0);
+    assert_eq!(result.items[1].error_count, 1);
+    assert_eq!(result.items[1].error_rate, 1.0);
 }
 
 #[tokio::test]

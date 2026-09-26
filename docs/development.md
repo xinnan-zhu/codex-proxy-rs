@@ -41,7 +41,7 @@ pnpm --dir modules/ui dev                                 # 组件库交互示�
 
 管理端沿用 `frontend/vite.config.ts` 的后端代理，需按原有方式启动网关。插件独立预览的宿主桥使用模拟数据；已安装插件读取包内静态资源，修改后仍需重新构建、打包和安装。
 
-`dev:source` 使用 Vite 的 `source` 模式，在各自配置中将 UI 的公开入口解析到 `modules/ui`，由 Vite 热更新。插件单独检出时仍用普通 `dev`；`source` 模式需要上述子模块目录结构。
+`dev:source` 使用 Vite 的 `source` 模式，由 `@codex-proxy/ui/vite` 的 `CodexProxyUI` 适配器将公开入口解析到 `modules/ui`，并统一处理共享依赖、源码预构建排除与开发服务的文件访问范围。入口映射以 UI 包 `exports` 中的 `codex-proxy-source` 条件为准，由 Vite 热更新。插件单独检出时仍用普通 `dev`；`source` 模式需要上述子模块目录结构。
 
 ```bash
 pnpm --dir frontend build:source

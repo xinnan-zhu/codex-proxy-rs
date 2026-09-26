@@ -595,6 +595,7 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
         .await
         .expect("diagnostics body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("diagnostics JSON");
+    assert!(value["data"]["items"][0].get("impactScore").is_none());
     assert_eq!(
         (
             &value["data"]["items"][0]["key"],
