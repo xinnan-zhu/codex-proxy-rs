@@ -77,11 +77,6 @@ jobs:
           pnpm --dir frontend install --frozen-lockfile
           pnpm --dir frontend build
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1a3a6d54512beeaffd394f8d516ca16f2c506a20 # 1.97
-        with:
-          components: rustfmt
-
       - name: Cache Cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -89,10 +84,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             backend/target
-          key: cargo-release-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-${{ github.sha }}
+          key: cargo-release-bookworm-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-${{ github.sha }}
           restore-keys: |
-            cargo-release-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-
-            cargo-release-amd64-
+            cargo-release-bookworm-amd64-${{ hashFiles('backend/Cargo.lock', 'backend/rust-toolchain.toml', 'backend/**/Cargo.toml') }}-
+            cargo-release-bookworm-amd64-
 
       - name: Build linux amd64 binary
         working-directory: backend
@@ -101,7 +96,29 @@ jobs:
           CPR_GIT_SHA: ${{ github.sha }}
           CPR_BUILD_TIME: ${{ steps.meta.outputs.build_time }}
           CPR_BUILD_TYPE: release
-        run: cargo build --release --locked --bin codex-proxy-rs
+        # 在线更新会把二进制放进 bookworm 运行镜像，必须在同一 glibc 基线上编译。
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cargo"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e CARGO_HOME=/cargo \
+            -e HOME=/tmp \
+            -e CPR_VERSION \
+            -e CPR_GIT_SHA \
+            -e CPR_BUILD_TIME \
+            -e CPR_BUILD_TYPE \
+            -v "$HOME/.cargo:/cargo" \
+            -v "$PWD/..:/workspace" \
+            -w /workspace/backend \
+            rust:1.97-bookworm@sha256:77fac8b98f9f46062bb680b6d25d5bcaabfc400143952ebc572e924bcbedc3fa \
+            cargo build --release --locked --bin codex-proxy-rs
+          required="$(objdump -T target/release/codex-proxy-rs | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -n 1)"
+          echo "binary requires glibc ${required}"
+          if [ "$(printf '%s\n' "${required}" 2.36 | sort -V | tail -n 1)" != "2.36" ]; then
+            echo "binary requires glibc ${required}, newer than bookworm 2.36" >&2
+            exit 1
+          fi
 
       - name: Package release assets
         env:
