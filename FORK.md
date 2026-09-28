@@ -133,6 +133,11 @@ checksums.txt
 
 不要改官方的 `release.yml`：它绑定官方仓库名和发版脚本，合入上游时会冲突。本 fork 只用 `publish-release.yml`。
 
+在线更新对更新包和运行镜像有两条硬要求，缺一条就会失败：
+
+- 更新包与镜像都必须带 `plugins/official/plugin-release-manifest.json`（版本、提交与二进制一致）。缺少时更新报 `release archive does not contain the official plugin manifest`，镜像里则被判为「安装文件不完整」，更新弹窗显示「系统当前状态不允许执行该操作」。`publish-release.yml` 负责更新包；源码构建的镜像由 `deploy/Dockerfile` 的 `runtime` 阶段生成（本 fork 对官方 Dockerfile 的唯一改动）。
+- 更新包二进制必须在 bookworm（glibc 2.36）上编译，否则放进运行镜像后因 `GLIBC_2.38/2.39 not found` 无法启动。`publish-release.yml` 在固定的 `rust:1.97-bookworm` 容器里编译并校验 glibc 需求。
+
 ## 同步官方更新
 
 ```bash
