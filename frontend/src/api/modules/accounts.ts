@@ -145,6 +145,10 @@ export interface Account {
   errorMessage: string | null
   enabled: boolean
   concurrencyLimit: number | null
+  capacity: {
+    usedSlots: number | null
+    totalSlots: number | null
+  }
   weight: number
   modelAccess: AccountModelAccess
   accessTokenExpiresAt: string | null

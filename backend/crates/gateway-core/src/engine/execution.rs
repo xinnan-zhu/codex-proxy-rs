@@ -159,6 +159,7 @@ pub struct StartExecution {
 /// 中间件短路时本值直接释放；调用 `next` 后必须原样交回
 /// [`ExecutionService::start_prepared`]，不能重新认证为另一个 Key。
 pub struct PreparedRootExecution {
+    response_control: super::response_control::ResponseControl,
     client: AuthenticatedClient,
     request_id: ModelRequestId,
     started_at: SystemTime,
@@ -169,6 +170,11 @@ pub struct PreparedRootExecution {
 }
 
 impl PreparedRootExecution {
+    #[must_use]
+    pub fn response_control(&self) -> super::response_control::ResponseControl {
+        self.response_control.clone()
+    }
+
     fn new(client: AuthenticatedClient) -> Result<Self, GatewayError> {
         let started_at = SystemTime::now();
         let deadline_at = started_at
@@ -180,6 +186,7 @@ impl PreparedRootExecution {
         let execution_effects_baseline = execution_effects.epoch();
         Ok(Self {
             client,
+            response_control: super::response_control::ResponseControl::default(),
             request_id: new_request_id()?,
             started_at,
             deadline_at,
@@ -294,6 +301,7 @@ struct PendingStartExecution {
 }
 
 struct AuthorizedExecution {
+    response_control: Option<super::response_control::ResponseControl>,
     account_scope: Arc<FrozenAccountScope>,
     deadline_at: SystemTime,
     cancellation: CancellationToken,
@@ -896,6 +904,7 @@ impl DefaultExecutionService {
     ) -> Result<StartedExecution, GatewayError> {
         let PreparedRootExecution {
             client,
+            response_control,
             request_id,
             started_at,
             deadline_at,
@@ -904,6 +913,7 @@ impl DefaultExecutionService {
             execution_effects_baseline,
         } = prepared;
         let authorization = AuthorizedExecution {
+            response_control: Some(response_control),
             account_scope: Arc::clone(client.policy.account_scope()),
             deadline_at,
             cancellation,
@@ -1157,6 +1167,7 @@ impl DefaultExecutionService {
                 .map(|graph| Arc::clone(&graph.effects));
             let extensions =
                 CoordinationExtensions::new(continuation, request_observation.clone())
+                    .with_response_control(authorization.response_control.clone())
                     .with_request_policy(request_policy)
                     .with_execution_effects(
                         execution_effects,
@@ -1515,6 +1526,7 @@ impl DefaultExecutionService {
         metadata.user_agent = None;
         let authorization = AuthorizedExecution {
             account_scope,
+            response_control: None,
             deadline_at: parent.deadline_at,
             cancellation: parent.cancellation.child_token(),
             extension_scope,
@@ -1680,6 +1692,7 @@ impl DefaultExecutionService {
             },
             AuthorizedExecution {
                 account_scope,
+                response_control: None,
                 deadline_at: authority.deadline_at,
                 cancellation: authority.cancellation.child_token(),
                 extension_scope: authority.extension_scope.clone(),

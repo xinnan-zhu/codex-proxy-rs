@@ -44,10 +44,21 @@ const trackGridStyle = computed(() => ({
 </script>
 
 <template>
-  <div class="grid min-w-0 gap-1.5">
-    <div class="flex min-w-0 items-baseline justify-between gap-1 text-[10px] leading-3 font-bold">
-      <span class="min-w-0 truncate text-cp-text-quaternary" :title="label">
-        {{ label }}
+  <div class="col-span-full grid min-w-0 grid-cols-subgrid gap-y-1.5">
+    <div class="col-span-full grid min-w-0 grid-cols-subgrid items-baseline text-[10px] leading-3 font-bold">
+      <!-- 右侧列轨道留给百分比或账号容量标记，重置倒计时放在标签列内靠右 -->
+      <span class="flex min-w-0 items-baseline justify-between gap-1">
+        <span class="min-w-0 truncate text-cp-text-quaternary" :title="label">
+          {{ label }}
+        </span>
+        <span
+          v-if="!showPercentage && highestUsageCycle"
+          class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary"
+          :title="`${highestUsageWindow?.labelDisplay ?? ''}重置时间：${highestUsageWindow?.resetAtDisplay ?? '—'}`"
+        >
+          距重置
+          <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
+        </span>
       </span>
       <strong
         v-if="showPercentage"
@@ -56,17 +67,9 @@ const trackGridStyle = computed(() => ({
       >
         {{ highestUsageDisplay }}
       </strong>
-      <span
-        v-else-if="highestUsageCycle"
-        class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary"
-        :title="`${highestUsageWindow?.labelDisplay ?? ''}重置时间：${highestUsageWindow?.resetAtDisplay ?? '—'}`"
-      >
-        距重置
-        <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
-      </span>
     </div>
 
-    <div class="grid min-w-0 gap-x-1" :style="trackGridStyle">
+    <div class="col-span-full grid min-w-0 gap-x-1" :style="trackGridStyle">
       <div v-for="item in windowItems" :key="item.key" class="grid min-w-0 gap-0.5">
         <div
           class="h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"

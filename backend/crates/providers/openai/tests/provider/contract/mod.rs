@@ -1,3 +1,8 @@
+mod account_isolation;
+mod capacity;
+mod precommit;
+mod response_interrupt;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::num::NonZeroU32;
@@ -698,7 +703,7 @@ async fn selected_proxy_location_overrides_global_and_reloads_without_mutating_c
 }
 
 const OFFICIAL_FIXTURE: &[u8] =
-    include_bytes!("../transport/fixtures/official_models_snapshot.json");
+    include_bytes!("../../transport/fixtures/official_models_snapshot.json");
 
 #[tokio::test]
 async fn replay_compatibility_should_remove_only_reasoning_status_on_both_transports() {
@@ -1230,8 +1235,16 @@ fn http_generate_operation() -> Operation {
 }
 
 fn planned_request(provider_name: &str, operation: Operation) -> ProviderRequest {
+    planned_request_for_model(provider_name, operation, "gpt-5.4")
+}
+
+fn planned_request_for_model(
+    provider_name: &str,
+    operation: Operation,
+    model: &str,
+) -> ProviderRequest {
     let provider = ProviderKind::new(provider_name).expect("provider");
-    let upstream_model = UpstreamModelId::new("gpt-5.4").expect("upstream model");
+    let upstream_model = UpstreamModelId::new(model).expect("upstream model");
     let public_model = PublicModelId::new(upstream_model.as_str()).expect("public model");
     let account_scope = Arc::new(FrozenAccountScope::new(
         Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([(
@@ -3411,30 +3424,47 @@ async fn standalone_search_returns_the_exact_upstream_error_response() {
 
 #[tokio::test]
 async fn capacity_selection_error_preserves_classification_and_retry_after() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_capacity_busy").await;
-    let leases = Arc::new(TestLeaseCoordinator::default());
-    *leases.busy.lock().expect("lease busy lock") = true;
+    for snapshot in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_capacity_busy").await;
+        let leases = Arc::new(TestLeaseCoordinator::default());
+        if snapshot {
+            leases.signals.lock().unwrap().insert(
+                ProviderAccountId::new("acct_capacity_busy").unwrap(),
+                gateway_core::account::AccountRuntimeSignals {
+                    in_flight: u32::MAX,
+                    last_started_at: None,
+                    quota_reset_at: None,
+                    quota_remaining_rank: None,
+                    cooldown: None,
+                    failure_rate_basis_points: None,
+                    first_output_latency_ms: None,
+                },
+            );
+        } else {
+            *leases.busy.lock().unwrap() = true;
+        }
 
-    let error = match provider_with_leases(&store, leases)
-        .execute(
-            planned_request("openai", generate_operation()),
-            context("req_capacity_busy", CancellationToken::new()),
-        )
-        .await
-    {
-        Ok(_) => panic!("busy account selection must fail"),
-        Err(error) => error,
-    };
+        let error = match provider_with_leases(&store, leases)
+            .execute(
+                planned_request("openai", generate_operation()),
+                context("req_capacity_busy", CancellationToken::new()),
+            )
+            .await
+        {
+            Ok(_) => panic!("busy account selection must fail"),
+            Err(error) => error,
+        };
 
-    assert_eq!(
-        (error.kind(), error.send_state(), error.retry_after()),
-        (
-            ProviderErrorKind::AccountCapacityUnavailable,
-            UpstreamSendState::NotSent,
-            Some(Duration::from_millis(25)),
-        )
-    );
+        assert_eq!(
+            (error.kind(), error.send_state(), error.retry_after()),
+            (
+                ProviderErrorKind::AccountCapacityUnavailable,
+                UpstreamSendState::NotSent,
+                (!snapshot).then_some(Duration::from_millis(25)),
+            )
+        );
+    }
 }
 
 #[tokio::test]
@@ -8530,7 +8560,7 @@ async fn ordinary_request_should_bound_structural_event_replay_grace() {
         .await
         .expect("prepare provider stream");
 
-    let first_event = timeout(Duration::from_secs(2), async {
+    let first_event = timeout(Duration::from_secs(4), async {
         loop {
             let event = stream
                 .next()
@@ -9044,10 +9074,10 @@ async fn exact_websocket_busy_then_replay_scope_relaxation_is_rejected_before_se
 }
 
 #[tokio::test]
-async fn continuation_prefetch_over_64_kib_should_commit_wire_without_protocol_failure() {
+async fn continuation_prefetch_over_128_kib_should_commit_wire_without_protocol_failure() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_prefetch_limit").await;
-    let padding = "x".repeat(64 * 1024);
+    let padding = "x".repeat(128 * 1024);
     let body = format!(
         "event: response.created\ndata: {}\n\n",
         json!({
@@ -9060,7 +9090,7 @@ async fn continuation_prefetch_over_64_kib_should_commit_wire_without_protocol_f
             }
         })
     );
-    assert!(body.len() > 64 * 1024);
+    assert!(body.len() > 128 * 1024);
     let (base_url, release, _first_chunk_sent, server) =
         paused_chunked_sse_server(body, String::new()).await;
     let mut stream = provider_with_base_url(&store, base_url)

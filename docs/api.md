@@ -217,6 +217,8 @@ API Key 与 OAuth 共用模拟客户端画像（`User-Agent`、`originator`、`v
 包括会话、线程、Lite 和其他业务扩展头。
 上游认证只来自选中的账号；API Key 不携带 OAuth Cookie、ChatGPT 账号身份或下游的
 `X-OpenAI-Actor-Authorization` 托管认证声明。
+下游的 `x-openai-account-routing-override`、`x-openai-fedramp` 也不透传，
+工作区路由与合规属性不能从原账号继承；请求中间件不能重新注入这些托管身份头。
 
 Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和 `sec-fetch-*`
 携带的下游 SDK/浏览器环境或页面来源。过滤规则适用于所有下游客户端，与 User-Agent 无关；
@@ -250,10 +252,20 @@ Codex/OAuth 上游的历史回填按字段形状兼容，不以 User-Agent 品�
 
 请求头过滤不提供客户端匿名化；系统提示词、工具定义、工具结果、工作目录及其他业务 metadata
 保持原有语义，可能包含客户端环境信息。
+`client_metadata.parent_response_id` 是 Guardian 的账号内响应引用，只有归属可信且仍为同一账号时保留；
+切号或归属未知时移除。`x-codex-guardian`、`guardian_credits_requested` 和序列化
+`x-codex-turn-metadata` 内普通扩展的同名 `parent_response_id` 保持原样。
 
-Responses WebSocket 仅接受文本 `response.create`，同一连接串行执行。当前响应期间收到的后续业务帧
+Responses WebSocket 接受文本 `response.create` 和 `response.interrupt`，创建请求在同一连接串行执行。当前响应期间收到的后续业务帧
 留在有界接收队列中，待当前响应完成终结和写出后再逐条校验、准入与执行，不因请求提前到达而断开。
 接收队列容量为 32 个事件，超载仍关闭连接；Ping/Pong、客户端关闭和服务关闭不等待队列中的请求执行。
+活动响应期间会即时处理 `{"type":"response.interrupt","response_id":"当前响应 ID","mode":"discard_partial_items"}`。
+中断只能发送到该执行占用的原上游 WS，不重新选号或创建推理 attempt；重复中断合并为一次发送。
+ID 不匹配、没有可中断响应、实际走 HTTP 或 Provider 不支持控制时返回 `400` 协议错误，原执行继续；
+客户端需要终止这类执行时可关闭连接，后续按既有续接合同恢复。
+中断后继续转发上游事件与终态；只有 `response.incomplete` 的 `incomplete_details.reason` 为
+`interrupted` 时，才按官方中断语义保留原连接续接能力。部分输出是否被丢弃以上游终态为准。
+控制帧发送成功不等于上游已确认中断；若上游仍返回 `response.completed`，按正常完成处理。
 
 OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选择上游 WebSocket；
 可将账号上游传输方式设为 `http`，固定使用 HTTP/SSE。API Key 账号默认使用 HTTP/SSE，
@@ -514,6 +526,10 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 - `sortDirection`: `asc`、`desc`。
 
 账号与用量页面使用固定的 OpenAI/xAI 平台选项，省略 `provider` 表示不过滤。
+
+账号视图的 `capacity` 返回查询时的网关并发容量：`usedSlots` 是正在执行的请求占用数，不含排队请求，
+读取运行态失败时为 `null`；`totalSlots` 是应用账号独立配置或全局默认值后的上限，`null` 表示不限。
+该上限不代表上游实际允许的并发数。管理端标记随账号列表查询刷新。
 
 模型目录导出保留上游原生模型对象和能力字段，不包含账号凭据；不支持 Codex 原生目录的账号不能导出。
 管理端下载文件名为 `cpr-model-catalog-<套餐>-<账号名称>.json`，文件正文为 `catalog`，可用于
@@ -1122,8 +1138,12 @@ HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造�
 `response.create`；空闲连接不占名额，内部重试不重复占用。
 修改 Key 策略对既有 WebSocket 连接的下一次请求同样生效，已开始的请求保持原有快照。
 
-运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；账号先使用其它可调度候选，
-适用账号均暂时满载后按账号等待。RPM、金额限额、失效账号和上游冷却不通过排队绕过。
+运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；OpenAI 已绑定的会话账号仅因
+本地并发、请求间隔或已有等待者暂忙时，开启账号排队后优先等待原账号，队列满或超时不因此迁移绑定。
+原账号失效、额度耗尽或进入上游冷却时重新选择；显式调度策略选号与智能调度高权重回切仍按各自规则执行。
+没有适用亲和时先使用其它可调度候选，适用账号均暂时满载后按账号等待。
+关闭账号排队时，OpenAI 本地容量不足返回 `503` / `account_capacity_unavailable`，
+与无候选账号的 `no_available_provider` 区分。RPM、金额限额、失效账号和上游冷却不通过排队绕过。
 队列满返回 `429` / `concurrency_queue_full`，排队超时返回 `429` / `concurrency_queue_timeout`；
 WebSocket 使用对应错误事件。等待期间不发送上游请求，取消后释放等待位置，排队重查不重复计入 RPM。
 SSE 在取得有效执行前不发送保活帧，因此此阶段保留 HTTP 错误状态；已开始交付的失败沿用流内错误合同。
