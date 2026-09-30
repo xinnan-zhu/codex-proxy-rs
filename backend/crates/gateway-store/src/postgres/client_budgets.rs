@@ -1,5 +1,6 @@
 //! 按 Key 串行检查限额，并幂等累计已取得的 USD 费用。
 
+use gateway_admin::model::audit::MutationAuditOperation;
 use std::{collections::BTreeMap, sync::Mutex, time::Duration};
 
 use chrono::{DateTime, Utc};
@@ -36,7 +37,7 @@ pub(super) async fn reset_client_key_budget(
             )
         })?,
         ClientKeyBudgetMutationOrigin::Plugin(owner) => {
-            super::plugins::begin_authorized_mutation(pool, owner, "key_budgets").await?
+            super::plugins::begin_plugin_mutation(pool, owner).await?
         }
     };
     reset_client_key_budget_in_transaction(&mut tx, &command, context)
@@ -104,8 +105,7 @@ async fn reset_client_key_budget_in_transaction(
         tx,
         mutation_audit(
             context,
-            "reset_budget",
-            "client_api_key",
+            MutationAuditOperation::ClientApiKeyResetBudget,
             command.id.as_str(),
             fields,
         ),

@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 
+use super::plugin_update::{ConfirmedPluginRestart, PluginSystemUpdatePreflight};
+use crate::model::{MutationContext, system::SystemRestartPlan};
 use async_trait::async_trait;
 
 use crate::{
     model::{
-        AdminError, AdminErrorKind, MutationContext,
+        AdminError, AdminErrorKind,
         system::{
             SystemOperationAccepted, SystemUpdateChannel, SystemUpdateDetail, SystemUpdateStatus,
             SystemVersion,
@@ -17,7 +19,7 @@ use crate::{
         store::{AdminStoreErrorKind, SettingsStore},
         system::{
             SystemOperationError, SystemOperationErrorKind, SystemOperations,
-            SystemUpdateEventStream, SystemUpdatePreflight,
+            SystemUpdateEventStream,
         },
     },
 };
@@ -41,7 +43,12 @@ pub trait SystemService: Send + Sync {
     ) -> Result<SystemOperationAccepted, AdminError>;
     async fn update_status(&self) -> Result<SystemUpdateStatus, AdminError>;
     async fn rollback(&self) -> Result<SystemOperationAccepted, AdminError>;
-    async fn restart(&self) -> Result<SystemOperationAccepted, AdminError>;
+    async fn restart_plan(&self) -> Result<SystemRestartPlan, AdminError>;
+    async fn restart(
+        &self,
+        confirmation: Option<SystemRestartPlan>,
+        context: &MutationContext,
+    ) -> Result<SystemOperationAccepted, AdminError>;
     async fn update_proxy(&self) -> Result<Option<String>, AdminError>;
     async fn set_update_proxy(
         &self,
@@ -53,7 +60,7 @@ pub trait SystemService: Send + Sync {
 /// 保持 Host 能力窄边界的默认系统用例。
 pub(crate) struct DefaultSystemService {
     operations: Arc<dyn SystemOperations>,
-    preflight: Arc<dyn SystemUpdatePreflight>,
+    preflight: Arc<PluginSystemUpdatePreflight>,
     settings: Arc<dyn SettingsStore>,
     proxies: Arc<dyn ProxyStore>,
 }
@@ -62,7 +69,7 @@ impl DefaultSystemService {
     #[must_use]
     pub(crate) fn new(
         operations: Arc<dyn SystemOperations>,
-        preflight: Arc<dyn SystemUpdatePreflight>,
+        preflight: Arc<PluginSystemUpdatePreflight>,
         settings: Arc<dyn SettingsStore>,
         proxies: Arc<dyn ProxyStore>,
     ) -> Self {
@@ -130,7 +137,7 @@ impl SystemService for DefaultSystemService {
             .filter(|version| !version.is_empty());
         self.sync_update_proxy().await?;
         self.operations
-            .perform_update(target_version, channel, Arc::clone(&self.preflight))
+            .perform_update(target_version, channel, self.preflight.clone())
             .await
             .map_err(map_system_error)
     }
@@ -144,13 +151,36 @@ impl SystemService for DefaultSystemService {
 
     async fn rollback(&self) -> Result<SystemOperationAccepted, AdminError> {
         self.operations
-            .rollback(Arc::clone(&self.preflight))
+            .rollback(self.preflight.clone())
             .await
             .map_err(map_system_error)
     }
 
-    async fn restart(&self) -> Result<SystemOperationAccepted, AdminError> {
-        self.operations.restart().await.map_err(map_system_error)
+    async fn restart_plan(&self) -> Result<SystemRestartPlan, AdminError> {
+        let candidate = self
+            .operations
+            .restart_candidate()
+            .await
+            .map_err(map_system_error)?;
+        self.preflight
+            .plan(candidate)
+            .await
+            .map_err(map_system_error)
+    }
+
+    async fn restart(
+        &self,
+        confirmation: Option<SystemRestartPlan>,
+        context: &MutationContext,
+    ) -> Result<SystemOperationAccepted, AdminError> {
+        self.operations
+            .restart(Arc::new(ConfirmedPluginRestart {
+                preflight: self.preflight.clone(),
+                confirmation,
+                context: context.clone(),
+            }))
+            .await
+            .map_err(map_system_error)
     }
 
     async fn update_proxy(&self) -> Result<Option<String>, AdminError> {
@@ -192,7 +222,7 @@ fn map_system_error(error: SystemOperationError) -> AdminError {
     };
     let message = match kind {
         AdminErrorKind::Invalid => "系统操作请求不合法",
-        AdminErrorKind::Conflict => "系统当前状态不允许执行该操作",
+        AdminErrorKind::Conflict => error.message(),
         AdminErrorKind::BadGateway => "系统更新服务请求失败",
         AdminErrorKind::Internal => "系统操作失败",
         _ => "系统操作失败",

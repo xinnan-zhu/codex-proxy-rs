@@ -491,6 +491,7 @@ pub struct UsageListRecord {
     pub provider_account_name: Option<String>,
     pub provider_account_email: Option<String>,
     pub provider_account_notes: Option<String>,
+    pub provider_account_plan_type: Option<String>,
     pub provider_account_authentication_kind: Option<String>,
     pub upstream_model_id: Option<String>,
     pub upstream_transport: Option<String>,
@@ -683,10 +684,18 @@ pub struct UsageOverview {
     pub providers: Vec<ProviderObservation>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiagnosticsObservation {
+    pub total_request_count: u64,
+    pub items: Vec<DiagnosticObservation>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticObservation {
     pub key: String,
     pub name: String,
+    pub account_provider_kind: Option<String>,
+    pub account_plan_type: Option<String>,
     pub request_count: u64,
     pub success_count: u64,
     pub failure_count: u64,
@@ -697,6 +706,7 @@ pub struct DiagnosticObservation {
     pub first_token_p95_ms: Option<u64>,
     pub non_completion_count: u64,
     pub retry_count: u64,
+    pub retried_request_count: u64,
     pub cost_coverage: CostCoverage,
     pub costs: Vec<CurrencyCostTotal>,
 }
@@ -801,6 +811,6 @@ pub trait ObservabilityRepository: Send + Sync {
         range: ObservabilityRange,
         filter: UsageRecordFilter,
         dimension: DiagnosticDimension,
-    ) -> StoreResult<Vec<DiagnosticObservation>>;
+    ) -> StoreResult<DiagnosticsObservation>;
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> StoreResult<OpsErrorPage>;
 }

@@ -196,10 +196,6 @@ export interface AccountQuotaForecast {
   estimatedTokensDisplay: string
   estimatedUsd: number | null
   estimatedUsdDisplay: string
-  remainingTokens: number | null
-  remainingTokensDisplay: string
-  remainingUsd: number | null
-  remainingUsdDisplay: string
 }
 
 export interface AccountQuotaForecastResponse {

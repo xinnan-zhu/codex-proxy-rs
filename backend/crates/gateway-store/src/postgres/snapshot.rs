@@ -8,10 +8,10 @@ use gateway_core::routing::{
     AccountGroupId, ConfigRevision,
     snapshot::{
         SnapshotAccountGroupFacts, SnapshotAccountGroupMemberFacts, SnapshotClientPolicyFacts,
-        SnapshotFacts, SnapshotProviderAccountFacts, SnapshotSettingsFacts, SnapshotStoreError,
-        SnapshotStorePort,
+        SnapshotFacts, SnapshotProviderAccountFacts, SnapshotStoreError, SnapshotStorePort,
     },
 };
+use gateway_core::settings::SettingsValues;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::{Revision, StoreError, StoreResult, postgres_unavailable};
@@ -153,7 +153,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 .map_err(|_| SnapshotStoreError::unavailable())?;
             let config_revision = core_revision(data.config_revision)?;
             let observed_current_revision = core_revision(data.observed_current_revision)?;
-            let settings = SnapshotSettingsFacts::new(
+            let settings = SettingsValues::new(
                 data.settings.max_concurrent_per_account,
                 data.settings.request_interval_ms,
                 data.settings.rotation_strategy,
@@ -175,8 +175,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 data.settings.max_waiting_per_key,
                 data.settings.max_waiting_per_account,
                 data.settings.concurrency_wait_timeout_seconds,
-            )
-            .with_block_degraded_turn_state(data.settings.block_degraded_turn_state);
+            );
             let client_policies = data
                 .client_api_keys
                 .into_iter()
@@ -229,7 +228,8 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 account_groups,
                 provider_accounts,
                 group_memberships,
-            ))
+            )
+            .with_block_degraded_turn_state(data.settings.block_degraded_turn_state))
         })
     }
 

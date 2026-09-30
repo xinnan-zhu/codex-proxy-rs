@@ -35,7 +35,7 @@ use gateway_admin::{
             NewClientKey, SetClientKeyEnabled, UpdateClientKey,
         },
         observability::{
-            DashboardObservation, DecimalAmount, DiagnosticDimension, DiagnosticObservation,
+            DashboardObservation, DecimalAmount, DiagnosticDimension, DiagnosticsObservation,
             OpsError, OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange, UsageDetail,
             UsageFilter, UsageListRecord, UsageOverview, UsagePage, UsageQuery,
         },
@@ -100,7 +100,7 @@ pub(super) struct AdminTestFixture {
     pub settings: Arc<MemorySettingsStore>,
     pub usage_records: Arc<Mutex<Vec<UsageListRecord>>>,
     pub usage_detail: Arc<Mutex<Option<UsageDetail>>>,
-    pub diagnostics: Arc<Mutex<Vec<DiagnosticObservation>>>,
+    pub diagnostics: Arc<Mutex<DiagnosticsObservation>>,
     pub ops_errors: Arc<Mutex<Vec<OpsError>>>,
     pub dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     pub dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
@@ -137,7 +137,7 @@ impl AdminTestFixture {
         let account_groups = Arc::new(MemoryAccountGroupStore::new());
         let usage_records = Arc::new(Mutex::new(Vec::new()));
         let usage_detail = Arc::new(Mutex::new(None));
-        let diagnostics = Arc::new(Mutex::new(Vec::new()));
+        let diagnostics = Arc::new(Mutex::new(DiagnosticsObservation::default()));
         let ops_errors = Arc::new(Mutex::new(Vec::new()));
         let dashboard_observation = Arc::new(Mutex::new(None));
         let dashboard_summary_range = Arc::new(Mutex::new(None));
@@ -184,6 +184,7 @@ impl AdminTestFixture {
             ClientConfig::default(),
             stores,
             gateway_admin::AdminRuntimePorts {
+                service_middleware: std::sync::Arc::new(|| None),
                 plugin_preparation: plugin_ports.clone(),
                 plugin_management: plugin_ports.clone(),
                 published_snapshot: published_snapshot.clone(),
@@ -535,6 +536,13 @@ impl SettingsStore for MemorySettingsStore {
         _: &MutationContext,
     ) -> AdminStoreResult<RuntimeSettings> {
         let mut settings = self.settings.lock().expect("settings");
+        if command.expected_revision != settings.config_revision {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Conflict,
+                "runtime settings",
+                "settings revision changed",
+            ));
+        }
         let mut request_profiles = settings.request_profiles.clone();
         for (provider, profile) in command.request_profile_updates {
             if let Some(profile) = profile {
@@ -993,7 +1001,7 @@ struct UnusedStore {
     observations: Arc<Mutex<MemoryObservations>>,
     usage_records: Arc<Mutex<Vec<UsageListRecord>>>,
     usage_detail: Arc<Mutex<Option<UsageDetail>>>,
-    diagnostics: Arc<Mutex<Vec<DiagnosticObservation>>>,
+    diagnostics: Arc<Mutex<DiagnosticsObservation>>,
     ops_errors: Arc<Mutex<Vec<OpsError>>>,
     dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
@@ -1305,7 +1313,7 @@ impl ObservabilityStore for UnusedStore {
         _: TimeRange,
         _: UsageFilter,
         _: DiagnosticDimension,
-    ) -> AdminStoreResult<Vec<DiagnosticObservation>> {
+    ) -> AdminStoreResult<DiagnosticsObservation> {
         Ok(self.diagnostics.lock().expect("diagnostics").clone())
     }
 
@@ -1513,7 +1521,10 @@ impl SystemOperations for UnusedSystem {
         Err(unavailable_system())
     }
 
-    async fn restart(&self) -> Result<SystemOperationAccepted, SystemOperationError> {
+    async fn restart(
+        &self,
+        _preflight: Arc<dyn gateway_admin::ports::system::SystemRestartPreflight>,
+    ) -> Result<SystemOperationAccepted, SystemOperationError> {
         Err(unavailable_system())
     }
 }
