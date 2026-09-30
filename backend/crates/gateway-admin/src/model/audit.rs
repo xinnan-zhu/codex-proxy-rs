@@ -49,6 +49,7 @@ pub enum MutationAuditOperation {
     ProviderAccountRefreshCredential,
     ProviderAccountAuthorize,
     ProviderAccountReauthorize,
+    SystemUpdateProxyReplace,
 }
 
 impl MutationAuditOperation {
@@ -108,6 +109,7 @@ impl MutationAuditOperation {
             Self::ProviderAccountRefreshCredential => ("refresh_credential", "provider_account"),
             Self::ProviderAccountAuthorize => ("authorize", "provider_account"),
             Self::ProviderAccountReauthorize => ("reauthorize", "provider_account"),
+            Self::SystemUpdateProxyReplace => ("system_update_proxy.replace", "runtime_settings"),
         }
     }
 }

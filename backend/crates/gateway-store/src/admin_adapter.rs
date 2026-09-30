@@ -185,8 +185,7 @@ impl SettingsStore for AdminSettingsStoreAdapter {
                 proxy_id,
                 mutation_audit(
                     context,
-                    "system_update_proxy.replace",
-                    "runtime_settings",
+                    MutationAuditOperation::SystemUpdateProxyReplace,
                     "1",
                     vec!["system_update_proxy_id".to_owned()],
                 ),
