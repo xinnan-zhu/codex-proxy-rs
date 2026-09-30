@@ -203,6 +203,7 @@ impl From<RuntimeSettings> for ReplaceRuntimeSettings {
             account_warmup_enabled: settings.account_warmup_enabled,
             account_warmup_schedule_time: settings.account_warmup_schedule_time,
             account_warmup_model: settings.account_warmup_model,
+            block_degraded_turn_state: settings.block_degraded_turn_state,
         }
     }
 }
