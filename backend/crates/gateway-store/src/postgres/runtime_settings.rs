@@ -30,6 +30,7 @@ pub struct RuntimeSettings {
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
+    pub openai_guardian_reserved_concurrency: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
@@ -51,8 +52,6 @@ pub struct RuntimeSettings {
     pub account_warmup_enabled: bool,
     pub account_warmup_schedule_time: String,
     pub account_warmup_model: Option<String>,
-    /// 拒绝客户端头 `x-codex-turn-state` 恰好 312 字节的对话。默认关闭。
-    pub block_degraded_turn_state: bool,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -116,7 +115,6 @@ impl fmt::Debug for RuntimeSettings {
                 &self.account_warmup_schedule_time,
             )
             .field("account_warmup_model", &self.account_warmup_model)
-            .field("block_degraded_turn_state", &self.block_degraded_turn_state)
             .field("updated_at", &self.updated_at)
             .finish()
     }
@@ -135,6 +133,7 @@ pub struct RuntimeSettingsUpdate {
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
+    pub openai_guardian_reserved_concurrency: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: gateway_core::account::SmartSchedulingConfig,
     pub rotation_strategy: String,
@@ -156,7 +155,6 @@ pub struct RuntimeSettingsUpdate {
     pub account_warmup_enabled: bool,
     pub account_warmup_schedule_time: String,
     pub account_warmup_model: Option<String>,
-    pub block_degraded_turn_state: bool,
 }
 
 impl fmt::Debug for RuntimeSettingsUpdate {
@@ -266,12 +264,12 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
                     refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                     rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
-                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds,
+                    min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency,
                     account_auto_freeze_enabled, account_auto_freeze_threshold,
                     account_auto_freeze_window_seconds, account_auto_freeze_duration_seconds,
                     account_auto_freeze_probe_enabled, account_auto_freeze_probe_model,
                     account_auto_freeze_adaptive_concurrency,
-                    account_warmup_enabled, account_warmup_schedule_time, account_warmup_model, block_degraded_turn_state
+                    account_warmup_enabled, account_warmup_schedule_time, account_warmup_model
              from runtime_settings where id = 1",
         )
     .fetch_optional(pool)
@@ -285,6 +283,29 @@ pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResul
 }
 
 impl ProviderRuntimePolicyPort for PgRuntimeSettingsRepository {
+    fn claim_warmup_slot<'a>(
+        &'a self,
+        timezone: gateway_core::time::DeploymentTimeZone,
+        slot: chrono::NaiveDateTime,
+    ) -> futures::future::BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async move {
+            let slot = timezone.resolve_local(slot).ok_or_else(|| {
+                ProviderStoreError::new(ProviderStoreErrorKind::InvalidData, "resolve warmup slot")
+            })?;
+            // 执行游标只向前推进；设置保存不覆盖它，领取也不发布新的配置版本。
+            let claimed = sqlx::query(
+                "update runtime_settings set account_warmup_cursor = $1
+                 where id = 1 and (account_warmup_cursor is null or account_warmup_cursor < $1)",
+            )
+            .bind(slot)
+            .execute(&self.pool)
+            .await
+            .map_err(|_| provider_unavailable("claim warmup slot"))?
+            .rows_affected()
+                == 1;
+            Ok(claimed)
+        })
+    }
     fn initialize_request_profile<'a>(
         &'a self,
         provider: &'a gateway_core::routing::ProviderKind,
@@ -418,12 +439,12 @@ pub(crate) async fn load_runtime_settings_in_transaction(
                 refresh_concurrency, max_concurrent_per_account, request_interval_ms,
                 rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
-                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds,
+                min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency,
                 account_auto_freeze_enabled, account_auto_freeze_threshold,
                 account_auto_freeze_window_seconds, account_auto_freeze_duration_seconds,
                 account_auto_freeze_probe_enabled, account_auto_freeze_probe_model,
                 account_auto_freeze_adaptive_concurrency,
-                account_warmup_enabled, account_warmup_schedule_time, account_warmup_model, block_degraded_turn_state
+                account_warmup_enabled, account_warmup_schedule_time, account_warmup_model
          from runtime_settings where id = 1",
     )
     .fetch_optional(&mut **transaction)
@@ -493,7 +514,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
                      account_warmup_schedule_time = $28,
                      account_warmup_model = $29,
                      smart_scheduling_json = $30,
-                     block_degraded_turn_state = $31,
+                     openai_guardian_reserved_concurrency = $31,
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -540,7 +561,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(&update.account_warmup_schedule_time)
     .bind(update.account_warmup_model.as_deref())
     .bind(sqlx::types::Json(update.smart_scheduling))
-    .bind(update.block_degraded_turn_state)
+    .bind(i64::from(update.openai_guardian_reserved_concurrency))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|_| postgres_unavailable("update runtime settings in transaction"))?
@@ -613,6 +634,7 @@ struct RuntimeSettingsRow {
     max_waiting_per_key: i64,
     max_waiting_per_account: i64,
     concurrency_wait_timeout_seconds: i64,
+    openai_guardian_reserved_concurrency: i64,
     responses_max_decompressed_body_bytes: i64,
     account_auto_freeze_enabled: bool,
     account_auto_freeze_threshold: i64,
@@ -624,7 +646,6 @@ struct RuntimeSettingsRow {
     account_warmup_enabled: bool,
     account_warmup_schedule_time: String,
     account_warmup_model: Option<String>,
-    block_degraded_turn_state: bool,
 }
 
 fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSettings> {
@@ -667,6 +688,7 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
         max_waiting_per_key: to_u32(row.max_waiting_per_key)?,
         max_waiting_per_account: to_u32(row.max_waiting_per_account)?,
         concurrency_wait_timeout_seconds: to_u32(row.concurrency_wait_timeout_seconds)?,
+        openai_guardian_reserved_concurrency: to_u32(row.openai_guardian_reserved_concurrency)?,
         responses_max_decompressed_body_bytes: to_u64(row.responses_max_decompressed_body_bytes)?,
         account_auto_freeze_enabled: row.account_auto_freeze_enabled,
         account_auto_freeze_threshold: to_u32(row.account_auto_freeze_threshold)?,
@@ -678,7 +700,6 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
         account_warmup_enabled: row.account_warmup_enabled,
         account_warmup_schedule_time: row.account_warmup_schedule_time,
         account_warmup_model: row.account_warmup_model,
-        block_degraded_turn_state: row.block_degraded_turn_state,
     })
 }
 

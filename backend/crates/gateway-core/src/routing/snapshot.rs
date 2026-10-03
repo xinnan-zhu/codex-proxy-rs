@@ -144,7 +144,6 @@ pub struct SnapshotFacts {
     account_groups: Vec<SnapshotAccountGroupFacts>,
     provider_accounts: Vec<SnapshotProviderAccountFacts>,
     group_memberships: Vec<SnapshotAccountGroupMemberFacts>,
-    block_degraded_turn_state: bool,
 }
 
 impl SnapshotFacts {
@@ -166,15 +165,7 @@ impl SnapshotFacts {
             account_groups,
             provider_accounts,
             group_memberships,
-            block_degraded_turn_state: false,
         }
-    }
-
-    /// 打开后拒绝客户端头恰好 312 字节的对话。宿主策略，不进入插件可改写的设置值。
-    #[must_use]
-    pub const fn with_block_degraded_turn_state(mut self, enabled: bool) -> Self {
-        self.block_degraded_turn_state = enabled;
-        self
     }
 
     #[must_use]
@@ -513,7 +504,6 @@ async fn compile_runtime_snapshot(
         ));
     }
 
-    let block_degraded_turn_state = facts.block_degraded_turn_state;
     RuntimeSnapshot::new(
         facts.config_revision,
         facts.settings,
@@ -527,7 +517,6 @@ async fn compile_runtime_snapshot(
             .with_account_directory(account_directory)
             .with_exhaustive_provider_catalogs(exhaustive_provider_catalogs)
             .with_model_catalog_accounts(catalog_accounts)
-            .with_block_degraded_turn_state(block_degraded_turn_state)
     })
 }
 
@@ -546,7 +535,6 @@ pub struct RuntimeSnapshot {
     model_catalog_accounts: Arc<ModelCatalogAccounts>,
     account_directory: Arc<RuntimeAccountDirectory>,
     client_policies: Arc<BTreeMap<ClientApiKeyId, ClientPolicy>>,
-    block_degraded_turn_state: bool,
 }
 
 impl RuntimeSnapshot {
@@ -734,20 +722,7 @@ impl RuntimeSnapshot {
             model_catalog_accounts: Arc::default(),
             account_directory: Arc::new(RuntimeAccountDirectory::default()),
             client_policies: Arc::new(client_policy_map),
-            block_degraded_turn_state: false,
         })
-    }
-
-    /// 是否拒绝客户端头 `x-codex-turn-state` 恰好 312 字节的对话。
-    #[must_use]
-    pub const fn block_degraded_turn_state(&self) -> bool {
-        self.block_degraded_turn_state
-    }
-
-    #[must_use]
-    pub const fn with_block_degraded_turn_state(mut self, enabled: bool) -> Self {
-        self.block_degraded_turn_state = enabled;
-        self
     }
 
     #[must_use]
@@ -1163,7 +1138,6 @@ impl RuntimeSnapshot {
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
-            block_degraded_turn_state: self.block_degraded_turn_state,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)
@@ -1231,7 +1205,6 @@ impl RuntimeSnapshot {
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
-            block_degraded_turn_state: self.block_degraded_turn_state,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)

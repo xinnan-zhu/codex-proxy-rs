@@ -27,6 +27,7 @@ pub struct RuntimeSettings {
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
+    pub openai_guardian_reserved_concurrency: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: SmartSchedulingConfig,
     pub rotation_strategy: RotationStrategy,
@@ -45,7 +46,6 @@ pub struct RuntimeSettings {
     pub account_warmup_enabled: bool,
     pub account_warmup_schedule_time: String,
     pub account_warmup_model: Option<String>,
-    pub block_degraded_turn_state: bool,
     pub updated_at: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -65,6 +65,7 @@ pub struct ReplaceRuntimeSettings {
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
+    pub openai_guardian_reserved_concurrency: u32,
     pub responses_max_decompressed_body_bytes: u64,
     pub smart_scheduling: SmartSchedulingConfig,
     pub rotation_strategy: RotationStrategy,
@@ -83,7 +84,6 @@ pub struct ReplaceRuntimeSettings {
     pub account_warmup_enabled: bool,
     pub account_warmup_schedule_time: String,
     pub account_warmup_model: Option<String>,
-    pub block_degraded_turn_state: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -260,6 +260,7 @@ impl From<RuntimeSettings> for ReplaceRuntimeSettings {
             max_waiting_per_key: settings.max_waiting_per_key,
             max_waiting_per_account: settings.max_waiting_per_account,
             concurrency_wait_timeout_seconds: settings.concurrency_wait_timeout_seconds,
+            openai_guardian_reserved_concurrency: settings.openai_guardian_reserved_concurrency,
             responses_max_decompressed_body_bytes: settings.responses_max_decompressed_body_bytes,
             smart_scheduling: settings.smart_scheduling,
             rotation_strategy: settings.rotation_strategy,
@@ -279,7 +280,6 @@ impl From<RuntimeSettings> for ReplaceRuntimeSettings {
             account_warmup_enabled: settings.account_warmup_enabled,
             account_warmup_schedule_time: settings.account_warmup_schedule_time,
             account_warmup_model: settings.account_warmup_model,
-            block_degraded_turn_state: settings.block_degraded_turn_state,
         }
     }
 }

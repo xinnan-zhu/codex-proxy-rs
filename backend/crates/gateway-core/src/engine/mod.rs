@@ -17,6 +17,8 @@ pub mod provider;
 pub mod response_control;
 pub mod upstream_adapter;
 
+use crate::lifecycle::{Deadline, LeaseGuard};
+
 pub use coordinator::{AttemptCoordinator, ResponseExecutionSession};
 
 use std::collections::BTreeSet;
@@ -294,7 +296,6 @@ pub struct RequestAttemptContext {
     pricing: Arc<crate::metering::PricingOverrides>,
     request_profile: Option<crate::account::OpaqueProviderData>,
     disable_fast: bool,
-    block_degraded_turn_state: bool,
     request_location: Option<crate::account::RequestLocation>,
     request_id: ModelRequestId,
     client_api_key_ref: ClientApiKeyId,
@@ -360,13 +361,6 @@ impl RequestAttemptContext {
         self
     }
 
-    /// 打开后，上游返回 312 字节 turn-state 时不把该响应交给客户端。
-    #[must_use]
-    pub const fn with_block_degraded_turn_state(mut self, enabled: bool) -> Self {
-        self.block_degraded_turn_state = enabled;
-        self
-    }
-
     #[must_use]
     pub fn with_request_location(
         mut self,
@@ -395,7 +389,6 @@ impl RequestAttemptContext {
             request_profile: None,
             pricing: Arc::default(),
             disable_fast: false,
-            block_degraded_turn_state: false,
             request_location: None,
             codex_client: None,
             timing_started_at: Instant::now(),
@@ -535,7 +528,7 @@ impl RequestAttemptContext {
 pub struct AttemptContext {
     request: RequestAttemptContext,
     attempt_index: NonZeroU32,
-    deadline: SystemTime,
+    deadline: Deadline,
     account_selection_policy: AccountSelectionPolicy,
     account: AccountAttemptContext,
     continuation: Option<ContinuationBinding>,
@@ -599,11 +592,6 @@ impl AttemptContext {
     }
 
     #[must_use]
-    pub const fn block_degraded_turn_state(&self) -> bool {
-        self.request.block_degraded_turn_state
-    }
-
-    #[must_use]
     pub const fn request_location(&self) -> Option<&crate::account::RequestLocation> {
         self.request.request_location.as_ref()
     }
@@ -621,10 +609,10 @@ impl AttemptContext {
     }
 
     #[must_use]
-    pub const fn new(
+    pub fn new(
         request: RequestAttemptContext,
         attempt_index: NonZeroU32,
-        deadline: SystemTime,
+        deadline: impl Into<Deadline>,
         account_selection_policy: AccountSelectionPolicy,
         account: AccountAttemptContext,
         continuation: Option<ContinuationBinding>,
@@ -638,7 +626,7 @@ impl AttemptContext {
         Self {
             request,
             attempt_index,
-            deadline,
+            deadline: deadline.into(),
             account_selection_policy,
             account,
             continuation,
@@ -742,7 +730,7 @@ impl AttemptContext {
     }
 
     #[must_use]
-    pub const fn deadline(&self) -> SystemTime {
+    pub const fn deadline(&self) -> Deadline {
         self.deadline
     }
 
@@ -863,7 +851,8 @@ pub struct NewModelRequest {
     /// Client Key 准入判定的完整耗时；内部探测不经过该阶段。
     pub admission_decision_ms: Option<u64>,
     pub started_at: SystemTime,
-    pub deadline_at: SystemTime,
+    /// 可选执行截止；Store 将其投影为可续期的异常回收期限。
+    pub deadline_at: Deadline,
 }
 
 /// 每次真实上游发送前对同一 `model_requests` 行的更新。
@@ -975,7 +964,7 @@ pub struct ModelRequestFinalization {
     pub completed_at: SystemTime,
 }
 
-/// 进程崩溃后按冻结 deadline 收敛的 running 请求数。
+/// 按过期恢复租约收敛的 running 请求数。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RecoveryReport {
     pub requests: u64,
@@ -984,6 +973,15 @@ pub struct RecoveryReport {
 /// `model_requests` 与必要 `ops_events` 的唯一 Core port。
 #[async_trait]
 pub trait ExecutionStore: Send + Sync {
+    /// 会话持有期间刷新异常回收期限，结束或 Drop 后停止；观测失败不取消执行。
+    fn maintain_request(
+        &self,
+        _request_id: &ModelRequestId,
+        _deadline: Deadline,
+    ) -> Box<dyn LeaseGuard> {
+        Box::new(())
+    }
+
     async fn create_model_request(&self, request: NewModelRequest) -> Result<(), StoreError>;
     async fn record_attempt(&self, attempt: AttemptRecord) -> Result<(), StoreError>;
     /// 请求插入与首次 attempt 合并持久化；两者写同一行，支持合并写的

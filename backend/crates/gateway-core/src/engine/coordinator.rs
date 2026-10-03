@@ -32,7 +32,7 @@ use crate::error::{
 use crate::event::{
     GatewayEvent, ProviderEvent, ProviderResponseHeader, ProviderResponseObservation,
 };
-use crate::lifecycle::CancellationToken;
+use crate::lifecycle::{CancellationToken, Deadline, LeaseGuard};
 use crate::metering::Decimal;
 use crate::operation::{Operation, ProviderSessionState};
 use crate::routing::RoutingPlan;
@@ -311,12 +311,8 @@ where
             budget_attempt_already_counted: false,
             trace,
             deadline,
-            deadline_timer: Delay::new(
-                deadline
-                    .duration_since(SystemTime::now())
-                    .unwrap_or(Duration::ZERO),
-            )
-            .fuse(),
+            deadline_timer: deadline.wait().fuse(),
+            lease: Some(self.engine.store.maintain_request(&request.id, deadline)),
             requested_model: request.requested_model.clone(),
             pending_request: Some(request),
             request_persisted: false,
@@ -366,7 +362,7 @@ where
             session.finish_interruption(&EngineError::Cancelled).await?;
             return Err(EngineError::Cancelled);
         }
-        if SystemTime::now() >= deadline {
+        if deadline.is_elapsed() {
             session.finish_interruption(&EngineError::Deadline).await?;
             return Err(EngineError::Deadline);
         }
@@ -432,9 +428,10 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     budget_prior_attempts_usd: Decimal,
     budget_attempt_already_counted: bool,
     trace: TraceContext,
-    deadline: SystemTime,
+    deadline: Deadline,
+    lease: Option<Box<dyn LeaseGuard>>,
     /// 会话级 deadline 计时器；deadline 固定，帧循环内复用而非逐事件新建。
-    deadline_timer: Fuse<Delay>,
+    deadline_timer: Fuse<BoxFuture<'static, ()>>,
     pending_request: Option<NewModelRequest>,
     requested_model: Option<crate::routing::PublicModelId>,
     request_persisted: bool,
@@ -1031,7 +1028,6 @@ where
                 .with_response_control(self.response_control.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
                 .with_disable_fast(self.plan.disable_fast())
-                .with_block_degraded_turn_state(self.plan.block_degraded_turn_state())
                 .with_pricing(self.plan.pricing())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_codex_client(self.codex_client)
@@ -1163,17 +1159,15 @@ where
                         self.finish_provider_error(&last_failure).await?;
                         return Err(provider_engine_error(last_failure));
                     }
-                    // 降智阻断是交付策略，上游调用本身成功，不计入 Provider 熔断。
-                    if error.kind() != ProviderErrorKind::PolicyDenied
-                        && !(matches!(
-                            error.kind(),
-                            ProviderErrorKind::AccountCapacityUnavailable
-                                | ProviderErrorKind::NoEligibleAccount
-                                | ProviderErrorKind::QuotaExhausted
-                                | ProviderErrorKind::ProviderInfrastructureUnavailable
-                                | ProviderErrorKind::ConcurrencyQueueFull
-                                | ProviderErrorKind::ConcurrencyQueueTimeout
-                        ) && error.send_state() == UpstreamSendState::NotSent)
+                    if !(matches!(
+                        error.kind(),
+                        ProviderErrorKind::AccountCapacityUnavailable
+                            | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::QuotaExhausted
+                            | ProviderErrorKind::ProviderInfrastructureUnavailable
+                            | ProviderErrorKind::ConcurrencyQueueFull
+                            | ProviderErrorKind::ConcurrencyQueueTimeout
+                    ) && error.send_state() == UpstreamSendState::NotSent)
                     {
                         self.record_provider_failure(candidate.provider().clone());
                     }
@@ -1703,10 +1697,7 @@ where
         let Some(policy) = self.request_policy.clone() else {
             return Ok(facts.retry_allowed);
         };
-        facts.remaining_deadline = self
-            .deadline
-            .duration_since(SystemTime::now())
-            .unwrap_or_default();
+        facts.remaining_deadline = self.deadline.remaining().unwrap_or(Duration::MAX);
         facts.retry_allowed &= !facts.remaining_deadline.is_zero()
             && !self.cancellation.is_cancelled()
             && !self.execution_effect_observed();
@@ -1728,7 +1719,7 @@ where
             && decision != super::policy::RetryDecision::Stop
             && !self.execution_effect_observed()
             && !self.cancellation.is_cancelled()
-            && SystemTime::now() < self.deadline)
+            && !self.deadline.is_elapsed())
     }
 
     fn observe_atomic_terminal_events(&mut self, events: &mut [ProviderEvent]) {
@@ -2154,6 +2145,7 @@ where
         if let Some(RequestFinalization::Pending(write)) = self.finalization.as_mut() {
             self.request_persisted = write.await;
             self.finalization = Some(RequestFinalization::Complete);
+            self.lease.take();
         }
     }
 
@@ -2317,10 +2309,10 @@ enum PollBoundary {
 async fn poll_stream_item(
     stream: &mut ProviderStream,
     cancellation: CancellationToken,
-    deadline: SystemTime,
-    mut deadline_timer: &mut Fuse<Delay>,
+    deadline: Deadline,
+    mut deadline_timer: &mut Fuse<BoxFuture<'static, ()>>,
 ) -> PollBoundary {
-    if SystemTime::now() >= deadline {
+    if deadline.is_elapsed() {
         return PollBoundary::Deadline;
     }
     let next = stream.next().fuse();
@@ -2348,14 +2340,14 @@ enum RetryDelayBoundary {
 async fn poll_retry_delay(
     delay: Duration,
     cancellation: CancellationToken,
-    deadline: SystemTime,
+    deadline: Deadline,
 ) -> RetryDelayBoundary {
-    let Ok(remaining) = deadline.duration_since(SystemTime::now()) else {
+    if deadline.is_elapsed() {
         return RetryDelayBoundary::Deadline;
-    };
+    }
     let retry_delay = Delay::new(delay).fuse();
     let cancelled = cancellation.cancelled().fuse();
-    let timeout = Delay::new(remaining).fuse();
+    let timeout = deadline.wait().fuse();
     pin_mut!(retry_delay, cancelled, timeout);
     select_biased! {
         _ = cancelled => RetryDelayBoundary::Cancelled,
@@ -2369,14 +2361,14 @@ async fn poll_provider(
     request: ProviderRequest,
     context: AttemptContext,
     cancellation: CancellationToken,
-    deadline: SystemTime,
+    deadline: Deadline,
 ) -> ProviderBoundary {
-    let Ok(remaining) = deadline.duration_since(SystemTime::now()) else {
+    if deadline.is_elapsed() {
         return ProviderBoundary::Deadline;
-    };
+    }
     let execution = provider.execute(request, context).fuse();
     let cancelled = cancellation.cancelled().fuse();
-    let timeout = Delay::new(remaining).fuse();
+    let timeout = deadline.wait().fuse();
     pin_mut!(execution, cancelled, timeout);
     select_biased! {
         _ = cancelled => ProviderBoundary::Cancelled,

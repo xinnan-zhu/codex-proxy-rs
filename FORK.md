@@ -2,8 +2,8 @@
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护 fork，不是官方仓库。
 
-- 当前基线：官方 `main` **v3.18.2**（含其后的使用统计诊断列宽调整）
-- 远程：`origin` 为本仓库，`upstream` 为官方仓库
+- 当前基线：官方 `main` **v3.19.0**（含其后的 Fast 标记、图表时间标签和默认请求超时修复）
+- 远程：本地 `fork` 为本仓库，`origin` 为官方仓库，`prfork` 为独立 PR 仓库
 
 官方功能、部署方式和客户端接入仍以官方 README / 文档为准。这里只记录本 fork **多出来的**、以及**明确不再保留**的差异。
 
@@ -31,7 +31,7 @@
 
 详情里「客户端与上游」区有「Turn State」行：小于 1024 显示 `B`，否则一位小数 `KB`。
 
-实际观察：`292` 字节对应满血模型，`312` 字节对应降智。
+字节数仅作请求观测，不用于判断模型能力或拦截响应。
 
 实现要点：迁移 `900003`，列 `model_requests.client_turn_state_bytes`。
 
@@ -48,23 +48,7 @@
 
 密钥名称列用官方 v3.12.0 起的 `clientApiKeyName`（「密钥名称」），账号列也保留。详情弹窗标题和「账号」行与官方一致；详情内仍显示 Turn State 原始字节数。
 
-### 4. 阻断降智对话
-
-管理端「安全与访问」有全局开关 `block_degraded_turn_state`（默认关）。312 是上游响应里的 `x-codex-turn-state`，不是客户端先发明的。打开后，上游响应头或 WebSocket metadata 里的该值恰好 312 字节时，这次响应不发给客户端，改为英文 403。292、其它长度、没返回该头的响应照常交付。管理端「连接测试」走诊断路径，不受此开关拦截。
-
-关闭时与未加此门时一致：上游返回的 312 仍转给客户端，使用记录智商列照常显示客户端回带的请求头长度。
-
-不改写发往上游的 `X-Codex-Turn-State`，也不按账号跳过再换号。判定只看上游返回值的字节数，不读 body `turnState`。
-
-拒绝为 HTTP 403，`error.code` 为 `policy_denied`，英文 message 固定为：
-
-```text
-This conversation triggered upstream degraded-intelligence risk control and was blocked.
-```
-
-实现要点：迁移 `900005`，列 `runtime_settings.block_degraded_turn_state`。
-
-### 5. 账号额度的周期费用与重置进度
+### 4. 账号额度的周期费用与重置进度
 
 账号管理的额度面板和列表额度单元格，在每个额度窗口下显示：
 
@@ -74,12 +58,12 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 实现要点：`quota_forecast::window_quota_usd_estimate`；账号额度窗口接口多了 `estimatedQuotaUsd`、`estimatedQuotaUsdDisplay`、`resetAt`，窗口本地用量多了 `billingAmountUsd`、`costEstimateStatus`。
 
-### 6. 使用统计的模型筛选与总费用
+### 5. 使用统计的模型筛选与总费用
 
 - 使用统计页右上角可按模型筛选；选项只包含筛选范围内有成功调用的模型，错误请求里的模型名不出现。筛选同时作用于使用记录、洞察图表与错误面板。
 - 顶部概览卡片增加「总费用」，副标题显示每次成功请求的平均费用；存在计费不完整的请求时改为提示实际可能更高。
 
-### 7. 系统更新走代理
+### 6. 系统更新走代理
 
 系统更新弹窗有「下载代理」下拉框：可选「直连」（默认）或代理管理里已保存的任一代理。选择会保存到服务端，检查 Release、下载更新包和 checksum 都走同一出口；更新日志的「获取 Release」一行会注明本次是直连还是经由哪个代理（不含认证信息）。删除被选中的代理后自动回到直连。
 
@@ -92,7 +76,7 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 
 ## 数据库迁移
 
-本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.18.2 止于 `0020`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
+本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.19.0 止于 `0021`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
 
 | 编号 | 作用 |
 |------|------|
@@ -100,8 +84,9 @@ This conversation triggered upstream degraded-intelligence risk control and was 
 | `900002` | `provider_accounts.codex_only` |
 | `900003` | `model_requests.client_turn_state_bytes` |
 | `900004` | 删除 turn_state 覆盖列 |
-| `900005` | `runtime_settings.block_degraded_turn_state` |
+| `900005` | 已冻结的 turn-state 阻断字段迁移 |
 | `900006` | `runtime_settings.system_update_proxy_id` |
+| `900007` | 删除 turn-state 阻断字段 |
 
 ## 预编译镜像
 
@@ -141,9 +126,9 @@ checksums.txt
 ## 同步官方更新
 
 ```bash
-git fetch upstream
-git merge upstream/main
-git push origin
+git fetch origin
+git merge origin/main
+git push fork HEAD:main
 ```
 
 冲突时：额度重置和官方 UI 改动优先上游；上面各项 fork 功能保留。若官方新迁移号与 `90000N` 撞号，重编号本 fork 迁移，并同步 `_sqlx_migrations` 与 `.frozen-sha256`。

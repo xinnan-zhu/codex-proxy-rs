@@ -4,7 +4,6 @@ import { onMounted } from 'vue'
 import { useAdminApiKey } from '../composables/useAdminApiKey'
 import AdminApiKeyCard from './AdminApiKeyCard.vue'
 import AdminPasswordCard from './AdminPasswordCard.vue'
-import BlockDegradedTurnStateCard from './BlockDegradedTurnStateCard.vue'
 import ClientVersionSettings from './client-version/index.vue'
 import ResponseBodyLimitCard from './ResponseBodyLimitCard.vue'
 
@@ -18,7 +17,6 @@ defineProps<{
 const minCodexDesktopVersion = defineModel<string>('minCodexDesktopVersion', { required: true })
 const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required: true })
 const responsesMaxDecompressedBodyMiB = defineModel<string>('responsesMaxDecompressedBodyMiB', { required: true })
-const blockDegradedTurnState = defineModel<boolean>('blockDegradedTurnState', { required: true })
 
 const {
   loading: adminKeyLoading,
@@ -60,7 +58,6 @@ onMounted(loadStatus)
         :cli-error="cliError"
       />
       <ResponseBodyLimitCard v-model="responsesMaxDecompressedBodyMiB" />
-      <BlockDegradedTurnStateCard v-model="blockDegradedTurnState" />
     </fieldset>
 
     <BaseConfirmModal

@@ -32,14 +32,22 @@ export interface AccountQuotaWindow {
   resetAtDisplay: string
 }
 
+export interface AccountQuotaCredits {
+  hasCredits: boolean
+  unlimited: boolean
+  balance: string | null
+}
+
 export interface AccountQuota {
   refreshedAtDisplay: string
   limitReached: boolean
   // 429 临时限流（Redis 冷却）到期时间；非限流中为 null。
   rateLimitedUntil: string | null
+  rateLimitRecoveryDisplay: string | null
   rateLimitReason: 'upstream_rate_limit' | 'capacity_freeze' | null
   recoveryProbeRequired: boolean
   windows: AccountQuotaWindow[]
+  credits: AccountQuotaCredits | null
 }
 
 export interface AccountCurrencyCost {
@@ -79,6 +87,7 @@ export interface AccountModelUsage {
   costs: AccountCurrencyCost[]
   lastUsedAt: string
   lastUsedAtDisplay: string
+  lastUsedAtFullDisplay: string | null
 }
 
 export interface AccountUsage {
@@ -109,6 +118,7 @@ export interface AccountUsage {
   readTokensDisplay: string
   lastUsedAt: string | null
   lastUsedAtDisplay: string
+  lastUsedAtFullDisplay: string | null
   costEstimateStatus: string
   knownCostCount: number | null
   partialCostCount: number | null
@@ -155,6 +165,7 @@ export interface Account {
   accessTokenExpiresAtDisplay: string | null
   refreshTokenExpiresAt: string | null
   nextRefreshAt: string | null
+  nextRefreshAtDisplay: string | null
   addedAt: string
   addedAtDisplay: string
   updatedAt: string
@@ -270,14 +281,23 @@ export interface AccountProfileActivityInsights {
 
 export interface AccountSubscription {
   startsAt: string | null
+  startsAtDisplay: string | null
   expiresAt: string
+  expiresAtDisplay: string
   willRenew: boolean | null
   billingPeriod: string | null
   billingCurrency: string | null
   observedAt: string
+  observedAtDisplay: string
+}
+
+export interface ProfileActivityCalendar {
+  rangeLabel: string
+  weeks: Array<{ key: string, monthLabel: string | null, cells: Array<{ date: string, dateDisplay: string, tokens: number, isFuture: boolean }> }>
 }
 
 export interface AccountProfileStatisticsResponse {
+  activityCalendar: ProfileActivityCalendar | null
   displayName: string | null
   username: string | null
   imageUrl: string | null
@@ -298,6 +318,7 @@ export interface AccountResetCredit {
   status: string | null
   title: string | null
   expiresAt: string | null
+  expiresAtDisplay: string | null
   resetType: string | null
 }
 
@@ -332,7 +353,9 @@ export type ImportItemStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 
 export interface AccountImportTask {
   taskId: string
   createdAt: string
+  createdAtDisplay: string
   finishedAt: string | null
+  finishedAtDisplay: string | null
   stopRequested: boolean
   total: number
   counts: Record<ImportItemStatus, number> & { importedAccounts: number }
@@ -486,7 +509,7 @@ export function getAccounts(data: AccountListParams, options: RequestOptions = {
 }
 
 export function exportAccounts(data: AccountExportParam) {
-  return request<unknown>({
+  return request<{ exportedAt: string, fileName: string, documents: unknown[] }>({
     url: '/api/admin/accounts/export',
     method: 'GET',
     params: data,

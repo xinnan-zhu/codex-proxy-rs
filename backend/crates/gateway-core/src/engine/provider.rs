@@ -283,9 +283,7 @@ impl ProviderStreamAccountFeedback {
             || error.send_state() != UpstreamSendState::Sent
             || matches!(
                 error.kind(),
-                ProviderErrorKind::Cancelled
-                    | ProviderErrorKind::ProcessTerminated
-                    | ProviderErrorKind::PolicyDenied
+                ProviderErrorKind::Cancelled | ProviderErrorKind::ProcessTerminated
             )
             || matches!(
                 error.pre_delivery_retry(),
