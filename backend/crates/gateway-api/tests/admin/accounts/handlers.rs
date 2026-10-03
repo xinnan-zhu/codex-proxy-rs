@@ -70,6 +70,7 @@ async fn account_cooldown_returns_an_instant_and_server_formatted_recovery() {
                     groups: Vec::new(),
                     name: "synthetic cooldown account".to_owned(),
                     notes: None,
+                    codex_only: false,
                     email: None,
                     upstream_user_id: None,
                     upstream_account_id: None,
