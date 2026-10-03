@@ -4,7 +4,7 @@ import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
 
 import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
 import { computed } from 'vue'
-import { formatUsd } from '../utils/format'
+import { decimalDisplayNumber, formatUsd } from '../utils/format'
 
 const props = defineProps<{
   summary: Awaited<ReturnType<typeof getUsageRecordSummary>>
@@ -19,7 +19,11 @@ const costDetail = computed(() => {
   const { partial, unknown } = props.cost.coverage
   if (partial + unknown > 0)
     return `${partial + unknown} 次请求计费不完整，实际可能更高`
-  return `每次成功 ${formatUsd(props.cost.costPerSuccessfulRequest, true)}`
+  const estimatedCost = decimalDisplayNumber(props.cost.estimatedCost)
+  const costPerMillionTokens = estimatedCost != null && props.cost.totalTokens > 0
+    ? estimatedCost / props.cost.totalTokens * 1_000_000
+    : null
+  return `每 1M Token ${formatUsd(costPerMillionTokens, true)}`
 })
 
 const items = computed(() => [
