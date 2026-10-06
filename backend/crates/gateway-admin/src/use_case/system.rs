@@ -1,4 +1,4 @@
-//! 系统管理用例。
+//! 系统管理用例
 
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ use crate::{
 
 use super::map_store_error;
 
-/// API 消费的系统管理服务。
+/// API 消费的系统管理服务
 #[async_trait]
 pub trait SystemService: Send + Sync {
     async fn version(&self) -> Result<SystemVersion, AdminError>;
@@ -57,7 +57,7 @@ pub trait SystemService: Send + Sync {
     ) -> Result<Option<String>, AdminError>;
 }
 
-/// 保持 Host 能力窄边界的默认系统用例。
+/// 保持 Host 能力窄边界的默认系统用例
 pub(crate) struct DefaultSystemService {
     operations: Arc<dyn SystemOperations>,
     preflight: Arc<PluginSystemUpdatePreflight>,
@@ -171,13 +171,12 @@ impl SystemService for DefaultSystemService {
     async fn restart(
         &self,
         confirmation: Option<SystemRestartPlan>,
-        context: &MutationContext,
+        _context: &MutationContext,
     ) -> Result<SystemOperationAccepted, AdminError> {
         self.operations
             .restart(Arc::new(ConfirmedPluginRestart {
                 preflight: self.preflight.clone(),
                 confirmation,
-                context: context.clone(),
             }))
             .await
             .map_err(map_system_error)

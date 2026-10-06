@@ -1,4 +1,4 @@
-//! OpenAI wire adapter 到 Core 执行用例的唯一映射。
+//! OpenAI wire adapter 到 Core 执行用例的唯一映射
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -13,14 +13,14 @@ use gateway_core::engine::execution::{
 use gateway_core::error::{GatewayError, GatewayErrorKind};
 use gateway_core::lifecycle::{ConnectionDraining, ConnectionGuard, ConnectionLifecycle};
 use gateway_core::routing::{
-    ProviderCatalogUnavailable, ProviderKind, PublicModelDescriptor, PublicModelId,
+    ProviderCatalogUnavailable, ProviderKind, PublicModelDescriptor, PublicModelId, UpstreamModelId,
 };
 use uuid::Uuid;
 
 use super::auth::ClientApiKeyAuthError;
 use super::responses::{ContinuationIntent, DecodedResponsesRequest};
 
-/// OpenAI HTTP/WS adapter 共享的 Core 与连接生命周期能力。
+/// OpenAI HTTP/WS adapter 共享的 Core 与连接生命周期能力
 #[derive(Clone)]
 pub(crate) struct OpenAiService {
     execution: Arc<dyn ExecutionService>,
@@ -136,10 +136,15 @@ impl OpenAiService {
         &self,
         prepared: PreparedRootExecution,
         operation: gateway_core::operation::Operation,
-        client_ip: Option<IpAddr>,
-        user_agent: Option<String>,
+        upstream_model: Option<UpstreamModelId>,
+        client_context: (
+            Option<IpAddr>,
+            Option<String>,
+            Option<gateway_core::policy::CodexClientKind>,
+        ),
         endpoint: String,
     ) -> Result<StartedExecution, GatewayError> {
+        let (client_ip, user_agent, codex_client) = client_context;
         let provider = ProviderKind::new("openai").map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::Internal,
@@ -150,7 +155,7 @@ impl OpenAiService {
             .start_prepared_provider_endpoint(
                 prepared,
                 provider,
-                None,
+                upstream_model,
                 operation,
                 ExecutionRequestMetadata {
                     protocol: "openai".to_owned(),
@@ -159,7 +164,7 @@ impl OpenAiService {
                     stream: false,
                     client_ip,
                     user_agent,
-                    codex_client: None,
+                    codex_client,
                     client_turn_state_bytes: None,
                     previous_response_id: None,
                 },
@@ -172,6 +177,12 @@ impl OpenAiService {
         request: StartProviderExecution,
     ) -> Result<StartedExecution, GatewayError> {
         self.execution.start_provider_endpoint(request).await
+    }
+
+    /// Live 语音 sideband 能力；组合未提供时协议层回退到稳定 501。
+    #[must_use]
+    pub(crate) fn live_gateway(&self) -> Option<Arc<dyn gateway_core::live::LiveGateway>> {
+        self.execution.live_gateway()
     }
 
     pub(crate) fn try_register_connection(

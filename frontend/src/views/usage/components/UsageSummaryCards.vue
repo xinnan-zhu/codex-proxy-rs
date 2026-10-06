@@ -4,7 +4,7 @@ import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
 
 import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
 import { computed } from 'vue'
-import { decimalDisplayNumber, formatUsd } from '../utils/format'
+import { decimalDisplayNumber, formatUsd } from '@/utils/format'
 
 const props = defineProps<{
   summary: Awaited<ReturnType<typeof getUsageRecordSummary>>
