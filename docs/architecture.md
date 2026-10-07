@@ -250,16 +250,22 @@ HTTP 字段见 [插件 API](api.md#12-插件管理)，更新与数据恢复见 [
 | `account` | Provider 账号/credential/quota 值对象、持久化端口与请求级账号选择；`scope` 持有分组、账号目录和冻结账号范围 |
 | `policy` | Client API Key 准入、原始 Key 设置与客户端版本策略；只使用账号范围、Provider 身份和基础校验 |
 | `metering` | 标准化 Usage、金额、费用估算与费用明细；不表示账号或开票系统 |
-| `upstream` | 跨 Engine、Event、Error 与 Provider 共用的 transport 名称、发送状态和不透明上游值 |
+| `upstream` | 跨 Engine、Event、Error 与 Provider 共用的 transport 名称、尝试传输档位、发送状态和不透明上游值 |
 | `lifecycle` | 取消信号、可选执行截止与租约生命周期、连接注册与 drain 合同 |
-| `engine` | attempt、发送/提交屏障、执行编排和持久化调用时序 |
-| `routing` | 冻结路由事实、请求计划、Provider 只读目录合同以及运行时快照的表示与编译 |
+| `middleware` | 与领域无关的类型化组合器及单次续体 |
+| `engine` | attempt、发送/提交屏障、执行编排、具体中间件与上游适配计划、持久化调用时序 |
+| `routing` | 冻结路由事实、请求计划、Provider 只读目录合同、扩展集合身份与保活合同、运行时快照及请求设置派生 |
 | `runtime` | 当前快照的发布、读取、revision 订阅与周期对账任务 |
-| `settings` | 请求设置事实及其编译、宿主与 Key 默认值解析、显式覆盖来源；由 `routing` 快照组合并冻结 |
+| `settings` | 设置值及纯编译规则；由 `routing` 快照组合并冻结 |
 
 `event` 通过 `validation` / `upstream` 使用基础值，不依赖承载原始事件的执行错误；账号值对象和
 选择策略通过 `identity` / `account::scope` 使用身份与范围，不依赖路由计划。`routing` 和 `error` 的
-相关公开类型通过 re-export 引用上述定义，类型所有权和 Core 内部依赖归属定义模块。架构测试约束这些叶子依赖
+相关公开类型通过 re-export 引用上述定义，类型所有权和 Core 内部依赖归属定义模块。架构测试约束这些叶子依赖，
+并检查一级 owner 的显式 `crate` / `self` / `super` 路径与重导出形成的依赖图；它不替代 Rust 名称解析和行为测试
+
+`routing::request_settings` 统一解析宿主与 Key 默认值、显式覆盖来源及请求快照重算，不向全局发布请求改写。
+`routing::extensions` 只表达扩展集合的中立身份、静态目录和租约；`engine::extensions` 按冻结身份弱引用索引
+具体执行计划，插件 Runtime（`gateway-plugin/runtime`）的 `PreparedSet` 负责强持有计划。请求取得的冻结计划同时保活该集合，旧代次随最后一个使用者退出
 
 Provider 模型能力、目录代次与 `ProviderCatalogPort` 由 `routing::catalog` 定义。快照编译和对账只消费
 该只读合同，不反向依赖执行注册表；`ProviderRegistry` 实现目录端口，维护唯一的 Provider
@@ -618,12 +624,14 @@ OpenAI Provider 解释官方逻辑 `session_id` 与 `thread_id`，按 Client Key
 - 宽松：会话内请求直接按调度策略选号，不使用主账号偏好，成功准入后更新当前账号
 - 优先：会话内所有可关联请求优先使用主账号，并发已满、请求间隔未到、模型权限或可用性不允许时按调度策略临时分流；
   首次成功准入认领会话主账号，分流只改变本次租约，不改写绑定，后续请求继续优先主账号
-- 严格：根线程及后代共享当前账号，后代没有绑定时等待根线程认领，账号不可用时只排队，根迁移后重读共享绑定
+- 严格：根线程及后代共享当前账号；绑定缺失时任意会话请求均可按调度策略首次认领，
+  已有绑定的后代只跟随当前账号，账号不可用时排队，根迁移后重读共享绑定
 
 可关联的 Search、Images、Live 创建请求共用会话绑定，宽松和优先模式不依赖线程身份分流；严格模式下后代请求保留跟随约束。
 需要选号时统一使用配置的调度策略；插件显式选号沿用原有裁决，native continuation 仍受独立的状态 owner 与安全重放边界约束
 
 Store 只保存带版本的绑定事实，Provider 在取得租约后、发送前原子认领、续期或按模式迁移；快照冲突释放租约并重新选择。
+首次认领不依赖根线程先发请求，独立后台任务也使用自身会话绑定；没有可靠会话身份时正常选号，不推测会话关系。
 响应完成不写回账号，迁移前已准入的请求可以完成，不能把绑定改回旧账号。绑定存储不可用时不绕过绑定发送
 
 官方独立 Images 仅携带 `turn_id`，通过已观测 Responses 轮次关联到会话，关联同时保留根线程或后代线程的调度权限。
