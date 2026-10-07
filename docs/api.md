@@ -1239,11 +1239,11 @@ HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造�
 `response.create`；空闲连接不占名额，内部重试不重复占用。
 修改 Key 策略对既有 WebSocket 连接的下一次请求同样生效，已开始的请求保持原有快照
 
-运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；OpenAI 根线程按配置等待当前账号，
-或沿既有调度策略重选账号并迁移会话绑定。内置调度中的后代线程只等待当前会话账号，不自行换号；
-根线程迁移后，后代线程跟随新账号。没有绑定的后代线程等待根线程首次认领
+运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；OpenAI 优先亲和下会话请求优先主账号，
+繁忙时先按调度策略选择可用账号，临时分流不改写会话绑定；没有可立即使用的账号时才按配置排队。严格亲和下后代线程只等待当前会话账号，
+根线程迁移后跟随新账号，没有绑定时等待根线程首次认领
 
-后代线程始终排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
+严格亲和下的后代线程始终排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
 `maxWaitingPerAccount` 为 0 时使用每队列 1,000 人上限，否则沿用配置的上限。
 可识别来源的 Search、Images、Live 创建请求采用同样规则，身份与轮次关联见[会话绑定](architecture.md#6-路由账号范围与-continuation)。
 插件显式选号保留原有行为。普通请求关闭账号排队且没有可用容量时返回 `503` / `account_capacity_unavailable`，
@@ -1296,6 +1296,9 @@ maxConcurrentPerAccount
 maxWaitingPerKey
 maxWaitingPerAccount
 openaiGuardianReservedConcurrency
+openaiAccountAffinity
+openaiSessionAffinityTtlHours
+maxAccountRotations
 concurrencyWaitTimeoutSeconds
 responsesMaxDecompressedBodyBytes
 requestIntervalMs
@@ -1339,7 +1342,7 @@ accountWarmupModel
 `maxWaitingPerKey` 与 `maxWaitingPerAccount` 是全局统一的普通排队容量，取值 0～1,000，默认 0（关闭）；
 每个 Key、每个账号各自独立计数，没有单对象覆盖字段。执行并发为 5、最大排队数为 5 时，
 该对象最多容纳 5 个执行请求与 5 个等待请求。Key 并发为 0（不限）时跳过 Key 排队。
-OpenAI 后代线程的会话账号等待不随普通账号排队关闭，见 [Client Key 等待规则](#7-client-key)。
+OpenAI 严格亲和下后代线程的会话账号等待不随普通账号排队关闭，见 [Client Key 等待规则](#7-client-key)。
 `concurrencyWaitTimeoutSeconds` 取值 1～120，默认 30，从首次入队开始计时，密钥与账号两层共享该等待时限；
 切换账号或内部重试不重新计时；若插件设置了请求总时限，等待也计入该时限。排队超时不用于中断已开始的上游生成。
 设置更新请求须包含这三个字段，新请求使用更新后的快照
@@ -1350,6 +1353,24 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 开启账号排队后，Guardian 排在同账号已有 Guardian 之后、全部普通等待者之前，不受单账号排队上限约束，
 仍受总等待容量与等待时限约束。不限并发的账号和关闭排队时的其余行为不变。
 设置更新请求须包含该字段
+
+`openaiAccountAffinity` 控制 OpenAI 账号亲和，默认 `strict`（严格），已有保存的模式保持不变：
+
+- `relaxed`（宽松）：会话内请求直接按 `rotationStrategy` 选号，不优先主账号
+- `preferred`（优先）：会话内所有可关联请求优先主账号，并发已满、请求间隔未到、额度耗尽、停用、限流冷却或不支持当前模型时临时分流，保留会话绑定，后续请求仍优先主账号
+- `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
+
+插件显式选号及原生续写的状态归属约束在三种模式下仍然生效
+
+`openaiSessionAffinityTtlHours` 是账号绑定及其会话关联的滑动保留时长，单位小时，默认 24，取值 1～720。
+各类请求统一在发送前成功准入时按请求冻结值续期。
+响应完成不回写或续期。调整时长不扫描已有 Redis 键，已有记录保留原到期时间，下一次成功准入时使用新值；
+真正过期或丢失后按缺失绑定处理，存储读取错误不会被当作过期
+
+`maxAccountRotations` 是单请求最大换号次数，默认 3，取值 0～31；0 表示不换号。
+首次选号、同账号重试和选号时过滤不可用候选不计入换号次数，总路由尝试仍最多 32 次。
+提高该值允许请求尝试更多账号，但不放宽安全重放或交付后的重试限制。
+设置更新请求须包含账号亲和、亲和时长与最大换号次数，保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 `responsesMaxDecompressedBodyBytes` 是压缩 Responses HTTP 请求的解压输出上限，单位字节，默认
 67108864（64 MiB）。必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑。
@@ -1384,7 +1405,8 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`
 
 `preferHigherWeight` 默认关闭。开启后，更高权重账号恢复可用时，后续允许重新选号的请求优先回切；
-同权重且可用的会话亲和继续保留。没有可用亲和时，在最高可用权重层内按配置评分。
+同权重且可用的会话亲和继续保留。OpenAI 优先模式沿用可用的会话主账号，不因权重回切而分流。
+没有可用亲和时，在最高可用权重层内按配置评分。
 原生续写账号绑定仍是硬约束，不因回切而主动换号或触发历史重放。配置随运行设置原子保存和发布，
 新请求使用新值，已开始请求及其重试沿用原快照，无需重启
 
@@ -1708,6 +1730,13 @@ request/response/upstream ID、outcome 与搜索文本。诊断 `dimension` 可�
 
 Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥原文
 
+运维错误记录的 `errorDetails` 为受控诊断文本，无详情时为 `null`。
+错误来源快照以 JSON 文本保存：`causes.messages` 按外层到内层排列本地原因，`causes.truncated`
+标记来源链截断；存在附属清理失败时，`causes.cleanup` 保存各自的原因快照。
+`upstream` 保存上游正文，`redacted` 标记令牌等敏感上下文的移除；没有对应来源时为 `null`。
+稳定错误分类、原始上游 code 和该详情分别保留，不以公共错误文案代替原始原因。
+详情不出现在 Key 用量接口、普通错误信封和诊断包导出中；记录仍受异步观测写入与保留周期约束
+
 管理端请求列表与详情分别保留 `requestedModel`（客户端请求）、`upstreamModel`（网关发送）与
 `upstreamResponseModel`（上游返回）。返回模型缺失时为 `null`，不使用请求或映射模型补齐。
 OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内报告可覆盖初始响应头），
@@ -1743,13 +1772,15 @@ client_metadata 载体不计入。
 不能仅凭客户端的同名 metadata 或输出 Token 为零排除普通推理；其他 Provider 不套用该规则
 
 `latencyMs` 从模型执行会话开始计到终结，包含账号选择、重试及流交付等待，不包含此前的入口解析、路由和准入。
-`firstTokenLatencyMs` 与它使用同一计时起点，表示首个语义输出到达网关的时间；文本、推理和工具输出均可触发，
-空增量、空结构帧和无输出的终态帧不算首字。`latencyDetails` 的首事件、首推理和首正文时间也使用请求级起点，
+`firstTokenLatencyMs` 与它使用同一计时起点，首字边界由 Provider 协议定义。
+OpenAI Responses 采用首个非前导输出事件，包含 `response.output_item.added` 等结构事件，
+跳过 `response.created`、`response.in_progress`、心跳、额度控制和失败事件；xAI 采用首个语义输出。
+`latencyDetails` 的首事件、首推理和首正文时间也使用请求级起点，首推理与首正文仍要求实际内容，
 连接、响应头等传输阶段耗时独立计量，不能直接相加作为总耗时
 
-列表与性能统计的输出速率为 `outputTokens × 1000 / (latencyMs − firstTokenLatencyMs)`，
-只在输出 Token 为正、首字已采集且总耗时大于首字时间时计算。该值是网关观测到的平均输出速率，
-生成区间仍包含流传输与交付等待，不表示模型内部的纯解码速度
+列表与性能统计的输出速率为 `outputTokens × 1000 / latencyMs`，只在输出 Token 和总耗时为正时计算，
+不依赖首字是否采集。输出 Token 保留上游用量口径，OpenAI 的输出已包含推理 Token，不重复相加或扣除。
+该值表示完整请求期间的平均输出速率，包含选号、重试、推理与流交付等待，不表示模型内部的纯解码速度
 
 ### 诊断与恢复关联
 
@@ -1761,9 +1792,13 @@ client_metadata 载体不计入。
 未知名称的 `{ bytes, sha256 }` 摘要，或缺失时的 `null`。已保存的 trace 不自动清理或回填，
 其中的 `sanitized` 标记不能作为可直接公开的保证
 
-管理端下载的诊断包 `schemaVersion: 2` 用于人工反馈，不是备份或导入格式。它包含关联 ID、错误分类摘要、
-请求与错误事件各自的状态、attempt、时间线阶段和计时；不自动导出 message/raw error、任意 metadata、
-trace event data、请求响应正文和头部。`availability` 与 `omitted` 明示未采集、不完整或主动省略的内容，
+`attempt.failed.data` 的 `kind / sendState / upstreamStatus` 与 `diagnostic.stage / diagnostic.code`
+由 Core 错误类型与 Provider 静态诊断生成；`diagnostic.message` 保存安全摘要。展示与导出共用这些字段，
+`sendState` 为 `not_sent / sent / ambiguous`，摘要被截断时带有 `truncated` 标记
+
+管理端下载的诊断包 `schemaVersion: 3` 用于人工反馈，不是备份或导入格式。它包含关联 ID、错误分类摘要、
+请求与错误事件各自的状态、attempt、时间线阶段、计时和上述失败分类；不自动导出 message/raw error、任意 metadata、
+其他 trace event data、请求响应正文和头部。`availability` 与 `omitted` 明示未采集、不完整或主动省略的内容，
 `null` 不代表没有发生错误。版本、环境及原始错误片段仍需操作者另行补充并审阅脱敏
 
 错误记录中的“已自动恢复”表示系统关联到了后续成功请求，不会把原来的失败记录改为成功。

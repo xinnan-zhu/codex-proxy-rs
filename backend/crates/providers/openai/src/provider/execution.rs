@@ -97,9 +97,12 @@ impl CodexProvider {
         }
         let follow_only = inferred
             .as_ref()
-            .is_some_and(CodexSessionAffinity::follow_only);
-        Ok(explicit
-            .or(inferred)
+            .is_some_and(CodexSessionAffinity::follow_only)
+            || explicit
+                .as_ref()
+                .is_some_and(CodexSessionAffinity::follow_only);
+        Ok(inferred
+            .or(explicit)
             .map(|affinity| affinity.with_follow_only(follow_only)))
     }
 
@@ -216,7 +219,12 @@ impl CodexProvider {
         };
         if !context.is_diagnostic_required_account() {
             self.selector
-                .validate_translated_selection(&mut lease, affinity.as_ref(), None)
+                .validate_translated_selection(
+                    &mut lease,
+                    affinity.as_ref(),
+                    None,
+                    context.account_selection_policy(),
+                )
                 .await
                 .map_err(map_selection_error)?;
         }
@@ -267,6 +275,21 @@ impl CodexProvider {
                 ));
             }
         }
+        if !context.is_diagnostic_required_account()
+            && let Some(affinity) = affinity.as_ref()
+            && let Some(turn) = affinity.turn_alias()
+        {
+            self.selector
+                .remember_turn(
+                    turn,
+                    affinity,
+                    context
+                        .account_selection_policy()
+                        .openai_session_affinity_ttl(),
+                )
+                .await
+                .map_err(map_selection_error)?;
+        }
         let allows_account_state_mutation = lease.allows_account_state_mutation();
         let provider_kind = ProviderKind::new(PROVIDER_NAME)
             .map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent))?;
@@ -290,9 +313,7 @@ impl CodexProvider {
             client: self
                 .client_for_request(&context)?
                 .for_account(lease.account())
-                .map_err(|_| {
-                    provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
-                })?
+                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_authentication(lease.authentication())
                 .with_middleware_headers(middleware_headers),
             response_origin: request.response_origin,

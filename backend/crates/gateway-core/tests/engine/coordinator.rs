@@ -65,6 +65,7 @@ struct FinalState {
     image_output_tokens: Option<u64>,
     image_generation_succeeded: Option<bool>,
     provider_error_code: Option<String>,
+    error_details: Option<String>,
     retry_after_ms: Option<u64>,
     latency_ms: Option<u64>,
     client_response_id: Option<String>,
@@ -232,6 +233,7 @@ impl ExecutionStore for FakeStore {
                 image_output_tokens: finalization.usage.image_output_tokens,
                 image_generation_succeeded: finalization.image_generation_succeeded,
                 provider_error_code: finalization.provider_error_code,
+                error_details: finalization.error_details,
                 retry_after_ms: finalization.retry_after_ms,
                 latency_ms: finalization.timings.latency_ms,
                 client_response_id: finalization.client_response_id,
@@ -297,6 +299,7 @@ struct ScriptedProvider {
     profile_generation: AtomicUsize,
     default_profile_calls: AtomicUsize,
     default_profile: Mutex<Option<gateway_core::account::OpaqueProviderData>>,
+    default_profile_error: Mutex<Option<ProviderError>>,
     scripts: Mutex<VecDeque<Script>>,
     contexts: Mutex<Vec<AttemptContext>>,
     operations: Mutex<Vec<Operation>>,
@@ -323,6 +326,7 @@ impl ScriptedProvider {
             profile_generation: AtomicUsize::new(1),
             default_profile_calls: AtomicUsize::new(0),
             default_profile: Mutex::new(None),
+            default_profile_error: Mutex::new(None),
             scripts: Mutex::new(scripts.into()),
             contexts: Mutex::new(Vec::new()),
             operations: Mutex::new(Vec::new()),
@@ -349,6 +353,9 @@ impl Provider for ScriptedProvider {
         &self,
     ) -> Result<Option<gateway_core::account::OpaqueProviderData>, ProviderError> {
         self.default_profile_calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(error) = self.default_profile_error.lock().unwrap().take() {
+            return Err(error);
+        }
         Ok(self.default_profile.lock().unwrap().clone())
     }
 
@@ -606,6 +613,42 @@ fn image_stream(image_output_tokens: Option<u64>) -> Vec<Result<GatewayEvent, Pr
     ]
 }
 
+const ROTATION_TEST_ACCOUNTS: [&str; 33] = [
+    "acct_rotation_0",
+    "acct_rotation_1",
+    "acct_rotation_2",
+    "acct_rotation_3",
+    "acct_rotation_4",
+    "acct_rotation_5",
+    "acct_rotation_6",
+    "acct_rotation_7",
+    "acct_rotation_8",
+    "acct_rotation_9",
+    "acct_rotation_10",
+    "acct_rotation_11",
+    "acct_rotation_12",
+    "acct_rotation_13",
+    "acct_rotation_14",
+    "acct_rotation_15",
+    "acct_rotation_16",
+    "acct_rotation_17",
+    "acct_rotation_18",
+    "acct_rotation_19",
+    "acct_rotation_20",
+    "acct_rotation_21",
+    "acct_rotation_22",
+    "acct_rotation_23",
+    "acct_rotation_24",
+    "acct_rotation_25",
+    "acct_rotation_26",
+    "acct_rotation_27",
+    "acct_rotation_28",
+    "acct_rotation_29",
+    "acct_rotation_30",
+    "acct_rotation_31",
+    "acct_rotation_32",
+];
+
 fn plan(operation: &Operation) -> RoutingPlan {
     plan_with_policy(
         operation,
@@ -680,6 +723,7 @@ fn plan_with_profiles(
             "acct_wrong",
         ]
         .into_iter()
+        .chain(ROTATION_TEST_ACCOUNTS)
         .map(|id| {
             (
                 ProviderAccountId::new(id).expect("account"),
@@ -699,6 +743,17 @@ fn plan_with_profiles(
             None,
         )
         .with_smart_scheduling(account_selection_policy.smart_scheduling())
+        .with_max_account_rotations(account_selection_policy.max_account_rotations())
+        .with_openai_account_affinity(account_selection_policy.openai_account_affinity())
+        .with_openai_session_affinity_ttl_hours(
+            u32::try_from(
+                account_selection_policy
+                    .openai_session_affinity_ttl()
+                    .as_secs()
+                    / 3600,
+            )
+            .unwrap(),
+        )
         .with_request_location(request_location, true),
         vec![provider.clone()],
         vec![ProviderModel::new(
@@ -2851,6 +2906,7 @@ fn rate_limited_account_exhaustion_survives_a_later_empty_selection() {
                 ProviderErrorKind::RateLimited,
                 UpstreamSendState::Sent,
             )
+            .with_source(std::io::Error::other("ORIGINAL_RATE_LIMIT_CAUSE"))
             .with_status(429)
             .with_upstream_code(OpaqueUpstreamValue::new("rate_limit_exceeded"))
             .with_retry_after(Duration::from_secs(30))
@@ -2895,6 +2951,12 @@ fn rate_limited_account_exhaustion_survives_a_later_empty_selection() {
     assert_eq!(
         state.finalizations[0].provider_error_code.as_deref(),
         Some("rate_limit_exceeded")
+    );
+    let details: Value =
+        serde_json::from_str(state.finalizations[0].error_details.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        details["causes"]["messages"],
+        json!(["ORIGINAL_RATE_LIMIT_CAUSE"])
     );
 }
 
@@ -4908,6 +4970,59 @@ fn global_location_and_group_fast_policy_reach_every_account_retry() {
 }
 
 #[test]
+fn profile_preparation_failure_is_traced_and_finalized_without_starting_an_attempt() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, provider) = coordinator(vec![]);
+    *provider.default_profile_error.lock().unwrap() = Some(
+        ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+            .with_diagnostic(
+                gateway_core::error::ProviderDiagnostic::new("Profile release unavailable")
+                    .with_classification("prepare", "request_profile_release_unavailable"),
+            ),
+    );
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    assert!(block_on(session.collect_uncommitted()).is_err());
+    assert!(provider.contexts.lock().unwrap().is_empty());
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.finalizations.len(), 1);
+    let trace: Value = serde_json::from_str(
+        state.finalizations[0]
+            .diagnostic_trace_json
+            .as_deref()
+            .unwrap(),
+    )
+    .unwrap();
+    let events = trace["events"].as_array().unwrap();
+    let failure = events
+        .iter()
+        .find(|event| event["stage"] == "attempt.failed")
+        .unwrap();
+    assert_eq!(failure["attemptIndex"], 0);
+    assert_eq!(
+        failure["data"]["diagnostic"]["code"],
+        "request_profile_release_unavailable"
+    );
+    assert_eq!(
+        failure["data"]["diagnostic"]["message"],
+        "Profile release unavailable"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event["stage"] != "attempt.started")
+    );
+}
+
+#[test]
 fn first_resolved_profile_is_frozen_across_account_retries() {
     use gateway_core::account::OpaqueProviderData;
     let operation = generate_operation();
@@ -5569,4 +5684,139 @@ fn prepare_failure_can_forbid_provider_fallback_without_affecting_ordinary_empty
         assert_eq!(block_on(session.collect_uncommitted()).is_err(), prohibited);
         assert_eq!(xai.contexts.lock().unwrap().len(), usize::from(!prohibited));
     }
+}
+
+#[test]
+fn configured_rotation_budget_limits_actual_account_changes() {
+    for budget in [0, 1, 31] {
+        let operation = generate_operation();
+        let route_plan = plan_with_policy(
+            &operation,
+            AccountSelectionPolicy::new(
+                RotationStrategy::Smart,
+                NonZeroU32::new(2).unwrap(),
+                Duration::ZERO,
+            )
+            .with_max_account_rotations(budget)
+            .with_openai_session_affinity_ttl(Duration::from_secs(168 * 3600)),
+        );
+        let (coordinator, store, provider) = coordinator(
+            ROTATION_TEST_ACCOUNTS
+                .iter()
+                .map(|id| Script::Stream {
+                    account_id: id,
+                    items: vec![Err(ProviderError::new(
+                        ProviderErrorKind::RateLimited,
+                        UpstreamSendState::Sent,
+                    )
+                    .with_status(429)
+                    .with_replay_safe())],
+                })
+                .collect(),
+        );
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        assert!(block_on(session.collect_uncommitted()).is_err());
+        let contexts = provider.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), (budget + 1) as usize);
+        assert!(contexts.iter().all(|context| {
+            context.account_selection_policy().max_account_rotations() == budget
+                && context
+                    .account_selection_policy()
+                    .openai_session_affinity_ttl()
+                    == Duration::from_secs(168 * 3600)
+        }));
+        assert_eq!(
+            store.state.lock().unwrap().finalizations[0].attempt_count,
+            budget + 1
+        );
+    }
+}
+
+#[test]
+fn larger_rotation_budget_reaches_a_healthy_account_after_four_failures() {
+    let operation = generate_operation();
+    let route_plan = plan_with_policy(
+        &operation,
+        AccountSelectionPolicy::new(
+            RotationStrategy::Smart,
+            NonZeroU32::new(2).unwrap(),
+            Duration::ZERO,
+        )
+        .with_max_account_rotations(4),
+    );
+    let mut scripts = ROTATION_TEST_ACCOUNTS[..4]
+        .iter()
+        .map(|id| Script::Stream {
+            account_id: id,
+            items: vec![Err(ProviderError::new(
+                ProviderErrorKind::RateLimited,
+                UpstreamSendState::Sent,
+            )
+            .with_replay_safe())],
+        })
+        .collect::<Vec<_>>();
+    scripts.push(Script::Stream {
+        account_id: ROTATION_TEST_ACCOUNTS[4],
+        items: complete_stream(None),
+    });
+    let (coordinator, _, provider) = coordinator(scripts);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    assert_eq!(provider.contexts.lock().unwrap().len(), 5);
+}
+
+#[test]
+fn zero_rotation_budget_still_allows_retrying_the_same_account() {
+    let operation = generate_operation();
+    let route_plan = plan_with_policy(
+        &operation,
+        AccountSelectionPolicy::new(
+            RotationStrategy::Smart,
+            NonZeroU32::new(2).unwrap(),
+            Duration::ZERO,
+        )
+        .with_max_account_rotations(0),
+    );
+    let (coordinator, _, provider) = coordinator(vec![
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(transient_rejection())],
+        },
+        Script::Stream {
+            account_id: "acct_first",
+            items: complete_stream(None),
+        },
+    ]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    block_on(session.collect_uncommitted()).unwrap();
+    let contexts = provider.contexts.lock().unwrap();
+    assert_eq!(contexts.len(), 2);
+    assert_eq!(
+        contexts[1].required_account(),
+        Some(&ProviderAccountId::new("acct_first").unwrap())
+    );
 }

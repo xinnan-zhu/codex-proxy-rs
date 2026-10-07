@@ -259,7 +259,13 @@ impl ProviderAccountStore for MemoryAccountStore {
         provider: &ProviderKind,
     ) -> Result<Vec<ProviderAccount>, StoreError> {
         if self.fail_provider_listing.load(Ordering::SeqCst) {
-            return Err(store_error(StoreErrorKind::Unavailable));
+            return Err(StoreError::caused_by(
+                StoreErrorKind::Unavailable,
+                std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    "PRIVATE_DATABASE_CAUSE",
+                ),
+            ));
         }
         // 与 Postgres 实现的调度列表语义一致：停用账号不进入常规候选
         Ok(self
@@ -733,9 +739,14 @@ pub(crate) struct MemorySessionAffinity {
         Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionBinding>>,
     lookups: Mutex<Vec<String>>,
     renewal_ttls: Mutex<Vec<Duration>>,
+    alias_ttls: Mutex<Vec<Duration>>,
 }
 
 impl MemorySessionAffinity {
+    pub(crate) fn alias_ttls(&self) -> Vec<Duration> {
+        self.alias_ttls.lock().unwrap().clone()
+    }
+
     pub(crate) fn renewal_ttls(&self) -> Vec<Duration> {
         self.renewal_ttls.lock().expect("affinity TTL lock").clone()
     }
@@ -871,7 +882,7 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
         provider: &'a ProviderKind,
         alias: &'a ProviderSessionAffinityKey,
         session: &'a gateway_core::provider_ports::ProviderSessionAlias,
-        _: Duration,
+        ttl: Duration,
     ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
         Box::pin(async move {
             let mut aliases = self.aliases.lock().unwrap();
@@ -881,7 +892,11 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
                     alias.expose_to_store().to_owned(),
                 ))
                 .or_insert_with(|| session.clone());
-            Ok(current == session)
+            let applied = current == session;
+            if applied {
+                self.alias_ttls.lock().unwrap().push(ttl);
+            }
+            Ok(applied)
         })
     }
 }
@@ -1079,6 +1094,7 @@ pub(crate) fn account_policy() -> gateway_core::account::AccountSelectionPolicy 
         NonZeroU32::new(2).expect("nonzero concurrency"),
         Duration::from_millis(10),
     )
+    .with_openai_account_affinity(gateway_core::account::AccountAffinity::Strict)
 }
 
 /// 内存 `ProviderCooldownPort`：实现 `read`/`put_if_later` 与容量失败计数

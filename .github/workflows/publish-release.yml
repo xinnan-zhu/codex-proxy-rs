@@ -206,14 +206,25 @@ jobs:
         run: |
           set -euo pipefail
           notes="$(mktemp)"
-          cat > "${notes}" <<EOF
-          # ${TAG}
+          export RELEASE_NOTES_PATH="${notes}"
+          python3 <<'PY_NOTES'
+          import os
+          import pathlib
 
-          本 fork 的 linux/amd64 更新包，供管理端在线更新使用。
-
-          - 提交：\`${GITHUB_SHA}\`
-          - 构建类型：release
-          EOF
+          source = pathlib.Path("release/notes.md").read_text(encoding="utf-8")
+          if source.splitlines()[0] != f"# {os.environ['TAG']}":
+              raise SystemExit("release notes title does not match the requested tag")
+          if not source.partition("\n")[2].strip():
+              raise SystemExit("release notes must include update details")
+          metadata = (
+              "\n\n## 构建信息\n\n"
+              f"- 提交：`{os.environ['GITHUB_SHA']}`\n"
+              "- 构建类型：release\n"
+          )
+          pathlib.Path(os.environ["RELEASE_NOTES_PATH"]).write_text(
+              source.rstrip() + metadata, encoding="utf-8"
+          )
+          PY_NOTES
           extra=()
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
             extra+=(--target "${GITHUB_SHA}")

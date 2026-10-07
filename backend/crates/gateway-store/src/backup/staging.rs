@@ -24,15 +24,16 @@ impl StagingArea {
     ///
     /// 目录创建或权限设置失败时返回 [`StoreError`]
     pub fn open(base_dir: PathBuf, max_archive_bytes: u64) -> StoreResult<Self> {
-        std::fs::create_dir_all(&base_dir).map_err(|_| unavailable("create staging directory"))?;
+        std::fs::create_dir_all(&base_dir)
+            .map_err(|source| unavailable("create staging directory", source))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
             std::fs::set_permissions(&base_dir, std::fs::Permissions::from_mode(0o700))
-                .map_err(|_| unavailable("set staging directory permissions"))?;
+                .map_err(|source| unavailable("set staging directory permissions", source))?;
         }
         let metadata = std::fs::metadata(&base_dir)
-            .map_err(|_| unavailable("read staging directory metadata"))?;
+            .map_err(|source| unavailable("read staging directory metadata", source))?;
         if !metadata.is_dir() {
             return Err(invalid("staging path is not a directory"));
         }
@@ -70,9 +71,10 @@ impl StagingArea {
     /// 剩余空间不足或读取失败时返回 [`crate::StoreError`]
     pub fn ensure_capacity(&self) -> StoreResult<()> {
         let free = fs2::available_space(&self.base_dir)
-            .map_err(|_| unavailable("read staging free space"))?;
+            .map_err(|source| unavailable("read staging free space", source))?;
         if free < MIN_STAGING_FREE_BYTES {
             return Err(StoreError::InvalidData {
+                source: None,
                 entity: "backup staging",
                 message: "staging disk space is below 1 GiB".to_owned(),
             });
@@ -93,12 +95,16 @@ impl StagingArea {
     }
 }
 
-fn unavailable(operation: &'static str) -> StoreError {
-    crate::postgres_unavailable(operation)
+fn unavailable(
+    operation: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> StoreError {
+    crate::postgres_unavailable(operation, source)
 }
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "backup staging",
         message: message.to_owned(),
     }

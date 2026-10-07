@@ -28,17 +28,36 @@ pub enum ProviderStoreErrorKind {
 }
 
 /// Provider 存储端口的脱敏错误
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("provider store {operation} failed: {kind:?}")]
 pub struct ProviderStoreError {
     kind: ProviderStoreErrorKind,
     operation: &'static str,
+    source: Option<crate::error::ErrorSource>,
 }
 
 impl ProviderStoreError {
     #[must_use]
     pub const fn new(kind: ProviderStoreErrorKind, operation: &'static str) -> Self {
-        Self { kind, operation }
+        Self {
+            kind,
+            operation,
+            source: None,
+        }
+    }
+
+    /// 包装基础设施失败，分类与原始来源分别保留
+    #[must_use]
+    pub fn caused_by(
+        kind: ProviderStoreErrorKind,
+        operation: &'static str,
+        source: impl Into<crate::error::ErrorSource>,
+    ) -> Self {
+        Self {
+            kind,
+            operation,
+            source: Some(source.into()),
+        }
     }
 
     #[must_use]
@@ -278,6 +297,7 @@ impl ProviderSessionBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderSessionAlias {
     pub session_key: ProviderSessionAffinityKey,
+    pub root_session_key: Option<ProviderSessionAffinityKey>,
     pub follow_only: bool,
 }
 
@@ -1091,6 +1111,38 @@ pub struct ProviderFreezePolicy {
 }
 
 impl ProviderFreezePolicy {
+    /// 管理写入与运行策略构造共用的冻结约束
+    pub fn validate_values(
+        threshold: u32,
+        window_seconds: u64,
+        duration_seconds: u64,
+        probe_model: Option<&str>,
+    ) -> Result<(), &'static str> {
+        for (valid, field) in [
+            (
+                (2..=1_000).contains(&threshold),
+                "account_auto_freeze_threshold",
+            ),
+            (
+                (60..=3_600).contains(&window_seconds),
+                "account_auto_freeze_window_seconds",
+            ),
+            (
+                (300..=604_800).contains(&duration_seconds),
+                "account_auto_freeze_duration_seconds",
+            ),
+            (
+                valid_optional_probe_model(probe_model),
+                "account_auto_freeze_probe_model",
+            ),
+        ] {
+            if !valid {
+                return Err(field);
+            }
+        }
+        Ok(())
+    }
+
     /// 边界与迁移 `0010_account_auto_freeze.sql` 的 check 约束一致；
     /// store 层写入前已校验，这里兜底防御越界配置
     pub fn try_new(
@@ -1102,15 +1154,13 @@ impl ProviderFreezePolicy {
         probe_model: Option<String>,
         adaptive_concurrency: bool,
     ) -> Result<Self, ProviderStoreError> {
-        if !(2..=1_000).contains(&threshold)
-            || !(60..=3_600).contains(&window_seconds)
-            || !(300..=604_800).contains(&freeze_duration_seconds)
-            || probe_model.as_deref().is_some_and(|model| {
-                model.is_empty()
-                    || model.len() > 128
-                    || model != model.trim()
-                    || model.bytes().any(|byte| byte.is_ascii_control())
-            })
+        if Self::validate_values(
+            threshold,
+            window_seconds,
+            freeze_duration_seconds,
+            probe_model.as_deref(),
+        )
+        .is_err()
         {
             return Err(ProviderStoreError::new(
                 ProviderStoreErrorKind::InvalidData,
@@ -1219,20 +1269,27 @@ pub struct ProviderWarmupPolicy {
 }
 
 impl ProviderWarmupPolicy {
+    /// 保存设置与创建预热策略使用相同的时间表和模型约束
+    pub fn validate_values(
+        enabled: bool,
+        schedule_time: &str,
+        model: Option<&str>,
+    ) -> Result<(), &'static str> {
+        if !valid_warmup_schedule_time(schedule_time) {
+            return Err("account_warmup_schedule_time");
+        }
+        if (enabled && model.is_none()) || !valid_optional_probe_model(model) {
+            return Err("account_warmup_model");
+        }
+        Ok(())
+    }
+
     pub fn try_new(
         enabled: bool,
         schedule_time: String,
         model: Option<String>,
     ) -> Result<Self, ProviderStoreError> {
-        if !valid_warmup_schedule_time(&schedule_time)
-            || (enabled && model.is_none())
-            || model.as_deref().is_some_and(|m| {
-                m.is_empty()
-                    || m.len() > 128
-                    || m != m.trim()
-                    || m.bytes().any(|byte| byte.is_ascii_control())
-            })
-        {
+        if Self::validate_values(enabled, &schedule_time, model.as_deref()).is_err() {
             return Err(ProviderStoreError::new(
                 ProviderStoreErrorKind::InvalidData,
                 "validate warmup policy",
@@ -1475,6 +1532,7 @@ pub struct ProviderStorePorts {
     cooldowns: Arc<dyn ProviderCooldownPort>,
     runtime_policy: Arc<dyn ProviderRuntimePolicyPort>,
     oauth_pending: Arc<dyn OAuthPendingFlowPort>,
+    diagnostics: Arc<dyn crate::diagnostics::OperationalDiagnostics>,
 }
 
 impl ProviderStorePorts {
@@ -1492,6 +1550,7 @@ impl ProviderStorePorts {
         cooldowns: Arc<dyn ProviderCooldownPort>,
         runtime_policy: Arc<dyn ProviderRuntimePolicyPort>,
         oauth_pending: Arc<dyn OAuthPendingFlowPort>,
+        diagnostics: Arc<dyn crate::diagnostics::OperationalDiagnostics>,
     ) -> Self {
         Self {
             accounts,
@@ -1505,7 +1564,13 @@ impl ProviderStorePorts {
             cooldowns,
             runtime_policy,
             oauth_pending,
+            diagnostics,
         }
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> Arc<dyn crate::diagnostics::OperationalDiagnostics> {
+        self.diagnostics.clone()
     }
 
     #[must_use]
@@ -1568,4 +1633,13 @@ impl fmt::Debug for ProviderStorePorts {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ProviderStorePorts([CAPABILITIES])")
     }
+}
+
+fn valid_optional_probe_model(model: Option<&str>) -> bool {
+    model.is_none_or(|model| {
+        !model.is_empty()
+            && model.len() <= 128
+            && model == model.trim()
+            && !model.bytes().any(|byte| byte.is_ascii_control())
+    })
 }
