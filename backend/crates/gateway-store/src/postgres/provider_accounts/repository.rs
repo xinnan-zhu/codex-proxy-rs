@@ -664,7 +664,7 @@ async fn update_provider_account_codex_only_in_transaction(
         .bind(codex_only)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| postgres_unavailable("update provider account codex only"))?;
+        .map_err(|source| postgres_unavailable("update provider account codex only", source))?;
     Ok(())
 }
 
