@@ -2546,6 +2546,7 @@ mod errors {
             _: &'a ClientApiKeyId,
             _: &'a ProviderKind,
             _: &'a [ProviderAccountId],
+            _pool: gateway_core::provider_ports::ProviderConcurrencyPool,
         ) -> BoxFuture<'a, Result<ProviderSchedulingState, ProviderStoreError>> {
             panic!("manual refresh does not use scheduling leases")
         }
