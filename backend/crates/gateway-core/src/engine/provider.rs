@@ -885,7 +885,7 @@ pub struct ProviderRequest {
 pub struct ProviderRequestObservation {
     /// 独立 Provider 端点声明的请求模型，仅用于观测，不参与文本模型目录路由
     pub requested_model: Option<PublicModelId>,
-    /// 客户端原始请求中的推理强度
+    /// 客户端指定的推理强度，Provider 可用 default 标记未指定且由上游决定
     pub reasoning_effort: Option<String>,
     pub reasoning_preset: Option<String>,
     pub request_kind: Option<String>,
