@@ -18,7 +18,6 @@ import {
   usageAccountText,
   usageUserAgent,
 } from './shared/presenter'
-import UsageIqBadge from './UsageIqBadge.vue'
 
 // 使用记录表只负责该领域的单元格呈现；筛选与分页由页面组合。
 withDefaults(
@@ -96,10 +95,6 @@ withDefaults(
 
     <template #model="{ row }">
       <UsageModelCell :record="row" />
-    </template>
-
-    <template #clientTurnStateBytes="{ row }">
-      <UsageIqBadge :bytes="row.clientTurnStateBytes" />
     </template>
 
     <template #reasoningEffort="{ row }">

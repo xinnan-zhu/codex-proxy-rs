@@ -117,7 +117,6 @@ pub struct UsageListRecordView {
     pub created_at_display: String,
     pub client_ip: Option<String>,
     pub user_agent: Option<String>,
-    pub client_turn_state_bytes: Option<i64>,
     /// 发起请求的 Client Key 名称；Key 已删除时为 `null`。
     pub client_key_name: Option<String>,
 }
@@ -163,7 +162,6 @@ pub struct UsageRecordView {
     pub response_id: Option<String>,
     pub upstream_request_id: Option<String>,
     pub latency_ms: Option<u64>,
-    pub first_token_ms: Option<u64>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
@@ -178,7 +176,6 @@ pub struct UsageRecordView {
     pub created_at_display: String,
     pub client_ip: Option<String>,
     pub user_agent: Option<String>,
-    pub client_turn_state_bytes: Option<i64>,
     /// 发起请求的 Client Key 名称；Key 已删除时为 `null`。
     pub client_key_name: Option<String>,
     pub reasoning_effort: Option<String>,
@@ -191,7 +188,6 @@ pub struct UsageRecordView {
     pub costs: Vec<CostView>,
     pub cost_coverage: CostCoverageView,
     pub first_token_latency_ms: Option<u64>,
-    pub first_token_latency_ms_display: String,
     pub latency_ms_display: String,
     pub logical_outcome: String,
 }
@@ -228,9 +224,21 @@ pub struct UsageLatencyDetailsView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_text_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_token_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub openai_processing_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_response_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_api_overhead_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_engine_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_engine_iapi_ttft_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_engine_service_ttft_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_engine_iapi_tbt_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_engine_service_tbt_ms: Option<f64>,
 }
 
 /// 单次上游尝试展示

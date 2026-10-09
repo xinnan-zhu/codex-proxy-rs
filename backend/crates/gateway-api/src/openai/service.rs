@@ -124,7 +124,6 @@ impl OpenAiService {
                         client_ip: metadata.client_ip(),
                         user_agent: metadata.user_agent().map(str::to_owned),
                         codex_client: metadata.codex_client(),
-                        client_turn_state_bytes: metadata.client_turn_state_bytes(),
                         previous_response_id,
                     },
                 },
@@ -165,7 +164,6 @@ impl OpenAiService {
                     client_ip,
                     user_agent,
                     codex_client,
-                    client_turn_state_bytes: None,
                     previous_response_id: None,
                 },
             )

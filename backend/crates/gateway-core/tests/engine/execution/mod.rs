@@ -136,7 +136,6 @@ fn request(service: &DefaultExecutionService, transport: ClientTransport) -> Sta
             client_ip: None,
             user_agent: None,
             codex_client: None,
-            client_turn_state_bytes: None,
             previous_response_id: None,
         },
     }
@@ -275,7 +274,6 @@ fn provider_http_endpoint_uses_the_same_admission_and_budget_gate() {
             client_ip: None,
             user_agent: None,
             codex_client: None,
-            client_turn_state_bytes: None,
             previous_response_id: None,
         },
     }));
@@ -313,7 +311,6 @@ fn bound_token_count_reports_an_explicit_unsupported_capability() {
             client_ip: None,
             user_agent: None,
             codex_client: None,
-            client_turn_state_bytes: None,
             previous_response_id: None,
         },
     }));
@@ -1205,7 +1202,6 @@ fn completed_parent_rejects_new_nested_execution_and_cancels_an_active_child() {
                 client_ip: None,
                 user_agent: None,
                 codex_client: None,
-                client_turn_state_bytes: None,
                 previous_response_id: None,
             },
             provider: Some(ProviderKind::new("nested").unwrap()),
@@ -3523,7 +3519,6 @@ fn assert_provider_endpoint_observation(model: Option<&str>) {
             client_ip: None,
             user_agent: None,
             codex_client: None,
-            client_turn_state_bytes: None,
             previous_response_id: None,
         },
     }))
@@ -3571,7 +3566,6 @@ fn known_catalog_should_reject_a_model_that_the_provider_did_not_publish() {
             client_ip: None,
             user_agent: None,
             codex_client: None,
-            client_turn_state_bytes: None,
             previous_response_id: None,
         },
     }));
@@ -3657,7 +3651,6 @@ fn execution_metadata_with_continuation() -> ExecutionRequestMetadata {
         client_ip: None,
         user_agent: None,
         codex_client: None,
-        client_turn_state_bytes: None,
         previous_response_id: Some(PreviousResponseId::new("response-private")),
     }
 }
@@ -4593,7 +4586,6 @@ fn repeated_connection_failures_never_block_later_requests_for_the_provider() {
                 client_ip: None,
                 user_agent: None,
                 codex_client: None,
-                client_turn_state_bytes: None,
                 previous_response_id: None,
             },
         }))

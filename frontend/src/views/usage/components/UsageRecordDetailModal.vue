@@ -10,7 +10,6 @@ import {
   usageAccountText,
   usageBillingText,
   usageClientIp,
-  usageClientTurnStateBytes,
   usageLatencyDetails,
   usageModelDisplay,
   usageReasoningEffort,
@@ -57,8 +56,9 @@ const overviewItems = computed(() => [
   { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
   { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
   { label: '总耗时', value: props.record?.latencyMsDisplay, mono: true },
+  { label: '上游耗时', value: latencyDetails.value?.upstreamDisplay ?? '—', mono: true },
   {
-    label: latencyDetails.value?.firstOutputLabel ?? '首字',
+    label: '首个输出等待',
     value: latencyDetails.value?.firstOutputDisplay ?? '—',
     mono: true,
   },
@@ -83,11 +83,6 @@ const clientUpstreamItems = computed(() => [
   { label: '服务档位', value: props.record?.serviceTier, mono: true },
   { label: '事件类型', value: props.record?.kind, mono: true },
   { label: '尝试序号', value: finalAttemptIndex.value },
-  {
-    label: 'Turn State',
-    value: props.record ? usageClientTurnStateBytes(props.record) : '—',
-    mono: true,
-  },
   {
     label: 'User-Agent',
     value: props.record ? usageUserAgent(props.record) : '',

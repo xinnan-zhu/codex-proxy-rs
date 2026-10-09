@@ -347,7 +347,6 @@ impl PluginModels {
                 client_ip: None,
                 user_agent: None,
                 codex_client: None,
-                client_turn_state_bytes: None,
                 previous_response_id,
             },
             provider,

@@ -307,8 +307,14 @@ pub(crate) fn usage_list_record_view(
             first_event_ms: record.first_event_ms,
             first_reasoning_ms: record.first_reasoning_ms,
             first_text_ms: record.first_text_ms,
-            first_token_ms: record.first_token_ms,
             openai_processing_ms: record.provider_processing_ms,
+            upstream_response_ms: record.upstream_response_ms,
+            upstream_api_overhead_ms: record.upstream_api_overhead_ms,
+            upstream_engine_ms: record.upstream_engine_ms,
+            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
+            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
+            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
+            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         first_token_latency_ms: record.first_token_ms,
         latency_ms: record.latency_ms,
@@ -316,7 +322,6 @@ pub(crate) fn usage_list_record_view(
         created_at_display,
         client_ip: record.client_ip,
         user_agent: record.user_agent,
-        client_turn_state_bytes: record.client_turn_state_bytes,
         client_key_name: record.client_key_name,
     }
 }
@@ -347,7 +352,6 @@ pub(crate) fn usage_record_view(
         .error_message
         .clone()
         .unwrap_or_else(|| outcome.clone());
-    let first_token_display = display_duration(record.first_token_ms);
     let latency_display = display_duration(record.latency_ms);
     let cost_coverage = match record.cost_source.as_str() {
         "provider_reported" | "calculated" => CostCoverageView {
@@ -411,15 +415,20 @@ pub(crate) fn usage_record_view(
             first_event_ms: record.first_event_ms,
             first_reasoning_ms: record.first_reasoning_ms,
             first_text_ms: record.first_text_ms,
-            first_token_ms: record.first_token_ms,
             openai_processing_ms: record.provider_processing_ms,
+            upstream_response_ms: record.upstream_response_ms,
+            upstream_api_overhead_ms: record.upstream_api_overhead_ms,
+            upstream_engine_ms: record.upstream_engine_ms,
+            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
+            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
+            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
+            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         attempt_index: None,
         attempt_count: u64::from(record.attempt_count),
         response_id: record.client_response_id,
         upstream_request_id: record.upstream_request_id,
         latency_ms: record.latency_ms,
-        first_token_ms: record.first_token_ms,
         input_tokens: record.input_tokens,
         output_tokens: record.output_tokens,
         cached_tokens: record.cached_tokens,
@@ -433,7 +442,6 @@ pub(crate) fn usage_record_view(
         created_at_display: time.datetime(&record.started_at),
         client_ip: record.client_ip,
         user_agent: record.user_agent,
-        client_turn_state_bytes: record.client_turn_state_bytes,
         client_key_name: record.client_key_name,
         reasoning_effort: record.reasoning_effort,
         reasoning_preset: record.reasoning_preset,
@@ -445,7 +453,6 @@ pub(crate) fn usage_record_view(
         costs,
         cost_coverage,
         first_token_latency_ms: record.first_token_ms,
-        first_token_latency_ms_display: first_token_display,
         latency_ms_display: latency_display,
         logical_outcome: outcome,
     }
@@ -760,7 +767,7 @@ pub(crate) fn trend_summary_view(
                 ratio: None,
             },
             TrendSummaryView {
-                label: "吞吐 P50".to_owned(),
+                label: "速率 P50".to_owned(),
                 value: summary
                     .minimum_output_throughput_p50
                     .map_or_else(|| "—".to_owned(), |value| format!("{value} tok/s")),

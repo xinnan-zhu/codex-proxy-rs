@@ -104,7 +104,6 @@ async fn count_tokens(
                 client_ip,
                 user_agent,
                 codex_client: None,
-                client_turn_state_bytes: None,
                 previous_response_id: None,
             },
         })
@@ -190,7 +189,6 @@ async fn provider_http(
                 client_ip,
                 user_agent,
                 codex_client: None,
-                client_turn_state_bytes: None,
                 previous_response_id: None,
             },
         })
