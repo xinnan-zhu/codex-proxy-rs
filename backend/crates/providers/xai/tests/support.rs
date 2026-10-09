@@ -244,6 +244,8 @@ pub struct MemoryProviderAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     quota_reads: AtomicUsize,
     fail_provider_listing: AtomicBool,
+    credential_reads: AtomicUsize,
+    fail_credential_loading: AtomicBool,
 }
 
 impl MemoryProviderAccountStore {
@@ -281,6 +283,14 @@ impl MemoryProviderAccountStore {
         stored.account = stored.account.clone().with_outbound_proxy(proxy);
     }
 
+    pub fn set_access_token_expires_at(&self, id: &ProviderAccountId, expires_at: SystemTime) {
+        let mut accounts = lock(&self.accounts);
+        let stored = accounts.get_mut(id).expect("seeded account");
+        let mut replacement = AccountReplacement::preserving(&stored.account);
+        replacement.access_token_expires_at = Some(expires_at);
+        stored.account = rebuild_account(&stored.account, replacement);
+    }
+
     pub fn last_error_message(&self, id: &ProviderAccountId) -> Option<String> {
         lock(&self.accounts)
             .get(id)
@@ -303,6 +313,14 @@ impl MemoryProviderAccountStore {
 
     pub fn fail_provider_listing(&self) {
         self.fail_provider_listing.store(true, Ordering::SeqCst);
+    }
+
+    pub fn fail_credential_loading(&self) {
+        self.fail_credential_loading.store(true, Ordering::SeqCst);
+    }
+
+    pub fn credential_reads(&self) -> usize {
+        self.credential_reads.load(Ordering::SeqCst)
     }
 }
 
@@ -391,6 +409,10 @@ impl ProviderAccountStore for MemoryProviderAccountStore {
         &self,
         account: &ProviderAccountId,
     ) -> Result<LoadedCredential, StoreError> {
+        self.credential_reads.fetch_add(1, Ordering::SeqCst);
+        if self.fail_credential_loading.load(Ordering::SeqCst) {
+            return Err(invalid());
+        }
         let accounts = lock(&self.accounts);
         let stored = accounts.get(account).ok_or_else(invalid)?;
         Ok(LoadedCredential {

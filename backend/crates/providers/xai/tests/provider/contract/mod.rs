@@ -2009,6 +2009,25 @@ async fn account_selection_uses_the_exact_routed_model() {
 }
 
 #[tokio::test]
+async fn request_observation_identifies_unspecified_xai_reasoning_without_rewriting_payload() {
+    let provider = provider(StubSelector::success(), StubInferenceTransport::success()).await;
+    let body = object(json!({"model": "client-model", "input": "hello"}));
+    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object("openai", body.clone()).expect("OpenAI payload"),
+    ));
+    let client_key_id =
+        gateway_core::policy::ClientApiKeyId::new("key_xai_default").expect("client key");
+
+    let observation = provider.request_observation(&operation, &client_key_id);
+
+    assert_eq!(observation.reasoning_effort.as_deref(), Some("default"));
+    let Operation::Generate(request) = &operation else {
+        panic!("generate operation");
+    };
+    assert_eq!(request.protocol_payload().body(), &body);
+}
+
+#[tokio::test]
 async fn request_observation_preserves_raw_xai_reasoning_effort() {
     let provider = provider(StubSelector::success(), StubInferenceTransport::success()).await;
 

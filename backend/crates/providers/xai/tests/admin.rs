@@ -21,7 +21,7 @@ use gateway_admin::model::{MutationActor, MutationContext, Revision};
 use gateway_admin::ports::provider::ProviderAdminErrorKind;
 use gateway_core::account::{
     AccountRuntimeSignals, CredentialRevision, OpaqueProviderData, ProviderAccount,
-    ProviderAccountId, ProviderAccountStore,
+    ProviderAccountId, ProviderAccountStore, QuotaAccessChange, QuotaEvidence, QuotaState,
 };
 use gateway_core::lifecycle::CancellationToken;
 use gateway_core::operation::Operation;
@@ -37,7 +37,8 @@ use gateway_core::provider_ports::{
 };
 use gateway_core::routing::{ProviderKind, UpstreamModelId};
 use gateway_core::task::{
-    WorkerContribution, WorkerCycleContext, WorkerKind, WorkerRunnable, WorkerTaskError,
+    WorkerContribution, WorkerCycleContext, WorkerKind, WorkerRegistration, WorkerRunnable,
+    WorkerTaskError,
 };
 use provider_xai::{
     DiscoveryDocument, GrokAccountSessionSelector, GrokCredentialFailure, GrokCredentialRepository,
@@ -217,7 +218,20 @@ async fn xai_quota_catalog_worker_preserves_store_failures() {
 async fn run_quota_catalog_cycle(
     bundle: &mut provider_xai::ProviderBundle,
 ) -> Result<(), WorkerTaskError> {
-    let registration = bundle
+    let registration = take_quota_catalog_worker(bundle);
+    let WorkerRunnable::Scheduled { task, .. } = registration.runnable else {
+        panic!("xAI quota/catalog worker must be scheduled");
+    };
+    task.run_cycle(WorkerCycleContext::new(
+        registration.id,
+        None,
+        CancellationToken::new(),
+    ))
+    .await
+}
+
+fn take_quota_catalog_worker(bundle: &mut provider_xai::ProviderBundle) -> WorkerRegistration {
+    bundle
         .take_worker_contributions()
         .into_iter()
         .find_map(|contribution| match contribution {
@@ -229,16 +243,125 @@ async fn run_quota_catalog_cycle(
             }
             WorkerContribution::Registration(_) | WorkerContribution::Disabled { .. } => None,
         })
-        .expect("xAI quota/catalog worker");
-    let WorkerRunnable::Scheduled { task, .. } = registration.runnable else {
-        panic!("xAI quota/catalog worker must be scheduled");
-    };
-    task.run_cycle(WorkerCycleContext::new(
-        registration.id,
-        None,
-        CancellationToken::new(),
-    ))
-    .await
+        .expect("xAI quota/catalog worker")
+}
+
+#[tokio::test]
+async fn xai_quota_catalog_worker_refreshes_normal_accounts_and_throttles_failed_attempts() {
+    for state in [
+        QuotaState::unknown(),
+        QuotaState::allowed(SystemTime::now()),
+    ] {
+        let store = MemoryProviderAccountStore::shared();
+        let input = create_input("periodic-normal", "subject-periodic-normal");
+        seed_input(&store, &input).await.unwrap();
+        store
+            .apply_quota_access(QuotaAccessChange {
+                account_id: input.account_id,
+                expected_revision: CredentialRevision::new(1).unwrap(),
+                state,
+            })
+            .await
+            .unwrap();
+        // 在真实额度服务读取凭据时失败，验证刷新入口并避免访问官方端点
+        store.fail_credential_loading();
+        let mut bundle = provider_xai::initialize(provider_ports_with(
+            store.clone(),
+            Arc::new(TestOAuthPending::default()),
+        ))
+        .await
+        .unwrap();
+        let registration = take_quota_catalog_worker(&mut bundle);
+        let WorkerRunnable::Scheduled { task, .. } = registration.runnable else {
+            panic!("scheduled quota worker");
+        };
+        for expected_reads in [2, 3] {
+            let error = task
+                .run_cycle(WorkerCycleContext::new(
+                    registration.id.clone(),
+                    None,
+                    CancellationToken::new(),
+                ))
+                .await
+                .expect_err("quota/catalog credential read fails");
+            assert_eq!(
+                error.as_safe_str(),
+                "xAI quota or catalog synchronization failed"
+            );
+            // 第一轮额度和目录各读取一次，紧接着的第二轮只允许目录读取
+            assert_eq!(store.credential_reads(), expected_reads, "{state:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn xai_quota_catalog_worker_preserves_exhaustion_and_credential_eligibility() {
+    let now = SystemTime::now();
+    let old = now - Duration::from_secs(11 * 60);
+    let cases = [
+        (
+            QuotaState::exhausted(
+                QuotaEvidence::ProviderDenied,
+                old,
+                Some(now + Duration::from_secs(60)),
+            ),
+            true,
+            false,
+            false,
+        ),
+        (
+            QuotaState::exhausted(
+                QuotaEvidence::ProviderDenied,
+                old,
+                Some(now - Duration::from_secs(60)),
+            ),
+            true,
+            false,
+            true,
+        ),
+        (
+            QuotaState::exhausted(QuotaEvidence::ProviderDenied, now, None),
+            true,
+            false,
+            false,
+        ),
+        (
+            QuotaState::exhausted(QuotaEvidence::ProviderDenied, old, None),
+            true,
+            false,
+            true,
+        ),
+        (QuotaState::allowed(now), true, true, false),
+        (QuotaState::allowed(now), false, false, false),
+    ];
+    for (state, enabled, expired, refresh_due) in cases {
+        let store = MemoryProviderAccountStore::shared();
+        let mut input = create_input("periodic-eligibility", "subject-periodic-eligibility");
+        input.enabled = enabled;
+        seed_input(&store, &input).await.unwrap();
+        if expired {
+            store.set_access_token_expires_at(&input.account_id, now - Duration::from_secs(60));
+        }
+        store
+            .apply_quota_access(QuotaAccessChange {
+                account_id: input.account_id,
+                expected_revision: CredentialRevision::new(1).unwrap(),
+                state,
+            })
+            .await
+            .unwrap();
+        store.fail_credential_loading();
+        let mut bundle = provider_xai::initialize(provider_ports_with(
+            store.clone(),
+            Arc::new(TestOAuthPending::default()),
+        ))
+        .await
+        .unwrap();
+        let result = run_quota_catalog_cycle(&mut bundle).await;
+        assert_eq!(result.is_err(), enabled);
+        let expected_reads = usize::from(enabled) + usize::from(refresh_due);
+        assert_eq!(store.credential_reads(), expected_reads, "{state:?}");
+    }
 }
 
 #[tokio::test]

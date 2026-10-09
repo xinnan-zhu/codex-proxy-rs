@@ -11,7 +11,6 @@ pub(super) const QUOTA_CATALOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 // rolling 24h 描述的是上游用量窗口，不代表从本次观测起封禁 24 小时；
 // 缺少可信 reset 时间时按短周期探测策略恢复检查
 pub(super) const EXHAUSTED_QUOTA_FALLBACK_RECHECK_INTERVAL: Duration = Duration::from_secs(10 * 60);
-pub(super) const EXHAUSTED_QUOTA_REFRESH_RETRY_INTERVAL: Duration = QUOTA_CATALOG_INTERVAL;
 pub(super) const CLI_RELEASE_WORKER_OWNER: &str = "xai-cli-release";
 
 pub(crate) fn worker_contributions(
@@ -206,8 +205,7 @@ impl XaiQuotaCatalogTask {
                 let due = last_periodic_refresh_at
                     .get(account.id())
                     .is_none_or(|last| {
-                        now.saturating_duration_since(*last)
-                            >= EXHAUSTED_QUOTA_REFRESH_RETRY_INTERVAL
+                        now.saturating_duration_since(*last) >= QUOTA_CATALOG_INTERVAL
                     });
                 if due {
                     last_periodic_refresh_at.insert(account.id().clone(), now);
@@ -223,7 +221,8 @@ pub(super) fn eligible_quota_worker_account(account: &ProviderAccount, now: Syst
         && account
             .access_token_expires_at()
             .is_some_and(|expires_at| expires_at > now)
-        && account
-            .quota()
-            .exhaustion_refresh_due(now, EXHAUSTED_QUOTA_FALLBACK_RECHECK_INTERVAL)
+        && (!account.quota().is_exhausted()
+            || account
+                .quota()
+                .exhaustion_refresh_due(now, EXHAUSTED_QUOTA_FALLBACK_RECHECK_INTERVAL))
 }
