@@ -2,7 +2,7 @@
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护 fork，不是官方仓库。
 
-- 当前基线：官方 `main` **v3.22.1**
+- 当前基线：官方 `main` **v3.23.0**
 - 远程：本地 `fork` 为本仓库，`origin` 为官方仓库，`prfork` 为独立 PR 仓库
 
 官方功能、部署方式和客户端接入仍以官方 README / 文档为准。这里只记录本 fork **多出来的**、以及**明确不再保留**的差异。
@@ -61,7 +61,7 @@ xAI 后台每 5 分钟刷新正常账号的官方 billing 快照；耗尽账号�
 
 ## 数据库迁移
 
-本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.22.1 止于 `0025`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
+本 fork 的定制迁移编号为 **90000N**，避免和官方 `0016` 及之后的编号冲突。官方 v3.23.0 止于 `0026`；上游新迁移排在 `90000N` 之前也会按缺失补跑。
 
 | 编号 | 作用 |
 |------|------|
@@ -106,7 +106,7 @@ checksums.txt
 
 在线更新对更新包和运行镜像有两条硬要求，缺一条就会失败：
 
-- 更新包与镜像都必须带 `plugins/official/plugin-release-manifest.json`（版本、提交与二进制一致）。缺少时更新报 `release archive does not contain the official plugin manifest`，镜像里则被判为「安装文件不完整」，更新弹窗显示「系统当前状态不允许执行该操作」。`publish-release.yml` 负责更新包；源码构建的镜像由 `deploy/Dockerfile` 的 `runtime` 阶段生成（本 fork 对官方 Dockerfile 的唯一改动）。更新包里的 `plugin_host` 与官方 `release.yml` 一致，写成 v1 加空 `permissions` 的过渡格式，旧版在线更新器才能解析；镜像内清单只给同版本二进制读取，直接使用 v2 声明。
+- 更新包与镜像都必须带 `plugins/official/plugin-release-manifest.json`（版本、提交与二进制一致）。缺少时更新报 `release archive does not contain the official plugin manifest`，镜像里则被判为「安装文件不完整」，更新弹窗显示「系统当前状态不允许执行该操作」。`publish-release.yml` 负责更新包；源码构建的镜像由 `deploy/Dockerfile` 的 `runtime` 阶段生成（本 fork 对官方 Dockerfile 的唯一改动）。更新包与镜像里的 `plugin_host` 均使用与官方一致的 v2 声明，兼容范围以当前宿主合同为准；最低支持的在线升级起点为 v3.18.1。
 - 更新包二进制必须在 bookworm（glibc 2.36）上编译，否则放进运行镜像后因 `GLIBC_2.38/2.39 not found` 无法启动。`publish-release.yml` 在固定的 `rust:1.97-bookworm` 容器里编译并校验 glibc 需求。
 
 ## 同步官方更新

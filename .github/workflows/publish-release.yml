@@ -165,8 +165,6 @@ jobs:
           plugin_host = json.loads(plugin_host_path.read_text())
           if plugin_host.get("schema_version") != 2:
               raise SystemExit(f"Invalid plugin host compatibility declaration: {plugin_host_path}")
-          # 旧版在线更新器只能解析 v1 且带空权限字段的声明；新宿主会还原成 v2 再核对兼容范围。
-          plugin_host = {**plugin_host, "schema_version": 1, "permissions": []}
           plugin_manifest_path = release_dir / "plugin-release-manifest.json"
           plugin_manifest_path.write_text(json.dumps({
               "schema_version": 1,

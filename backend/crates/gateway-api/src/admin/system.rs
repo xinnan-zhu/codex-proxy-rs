@@ -127,7 +127,6 @@ struct SystemUpdateDetailView {
     notes: Option<String>,
     cached: bool,
     update_supported: bool,
-    restart_confirmation_supported: bool,
     unsupported_reason: Option<String>,
     warning: Option<String>,
 }
@@ -147,7 +146,6 @@ impl From<SystemUpdateDetail> for SystemUpdateDetailView {
             notes: detail.notes,
             cached: detail.cached,
             update_supported: detail.update_supported,
-            restart_confirmation_supported: true,
             unsupported_reason: detail.unsupported_reason,
             warning: detail.warning,
         }

@@ -215,6 +215,62 @@ async fn xai_quota_catalog_worker_preserves_store_failures() {
     assert_eq!(error.as_safe_str(), "xAI Provider accounts unavailable");
 }
 
+#[tokio::test]
+async fn xai_quota_catalog_worker_retains_both_failure_stages_and_finishes_the_batch() {
+    for exhausted in [true, false] {
+        let store = MemoryProviderAccountStore::shared();
+        for suffix in ["broken_one", "broken_two"] {
+            let input = create_input(suffix, "synthetic-subject");
+            let mut account = crate::support::prepare_input(&input).unwrap();
+            // 模拟历史持久化凭据损坏，额度与目录读取均应保留各自的失败分类
+            account.credential = gateway_core::account::PlaintextCredential::new(Map::new());
+            let revision = account.account.revision();
+            store.create_account(account).await.unwrap();
+            if exhausted {
+                store
+                    .apply_quota_access(gateway_core::account::QuotaAccessChange {
+                        account_id: input.account_id,
+                        expected_revision: revision,
+                        state: gateway_core::account::QuotaState::exhausted(
+                            gateway_core::account::QuotaEvidence::ProviderDenied,
+                            SystemTime::UNIX_EPOCH,
+                            None,
+                        ),
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+        let mut bundle = provider_xai::initialize(provider_ports_with(
+            store,
+            Arc::new(TestOAuthPending::default()),
+        ))
+        .await
+        .unwrap();
+
+        let error = run_quota_catalog_cycle(&mut bundle)
+            .await
+            .expect_err("invalid stored credentials");
+        assert_eq!(
+            error.as_safe_str(),
+            "xAI quota or catalog synchronization failed"
+        );
+        let details = error.error_details().expect("synchronization causes");
+        let details: Value = serde_json::from_str(details.as_str()).unwrap();
+        let cause = details["causes"]["messages"][0].as_str().unwrap();
+        assert!(
+            cause.contains("catalog error: Grok provider account store is unavailable"),
+            "{cause}"
+        );
+        // 正常与耗尽账号都周期刷新，批次中的两条损坏凭据应保留相同失败事实
+        assert!(cause.contains("quota failures=2"), "{cause}");
+        assert!(
+            cause.contains("first quota error: xAI quota credential or billing data is invalid"),
+            "{cause}"
+        );
+    }
+}
+
 async fn run_quota_catalog_cycle(
     bundle: &mut provider_xai::ProviderBundle,
 ) -> Result<(), WorkerTaskError> {

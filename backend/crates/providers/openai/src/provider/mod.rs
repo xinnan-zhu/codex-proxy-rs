@@ -125,10 +125,6 @@ const WEBSOCKET_TRANSPORT: &str = "websocket";
 // 在已观测到的 Codex OAuth 上游 16 MiB 附近消息边界前留出传输 metadata 余量
 const WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES: usize = 15 * 1024 * 1024;
 const MAX_COOKIE_HEADER_BYTES: usize = 16 * 1024;
-/// 提交边界前预取 128 KiB 原始上游 chunk；容纳携带配置回显的前导事件，
-/// 超过阈值后结束无感换号窗口（最后一个 chunk 可越过阈值），
-/// 但不会把上游数据改写成协议失败
-const MAX_STREAM_PREFETCH_BYTES: usize = 128 * 1024;
 /// 短暂保留 response.created 等结构事件，让随后到达的明确拒绝可以无感换号；
 /// 到期即放行，避免模型长时间思考时让客户端一直收不到首事件
 const STREAM_REPLAY_GRACE: Duration = Duration::from_millis(2_500);
@@ -380,6 +376,16 @@ impl fmt::Debug for CodexProvider {
 
 #[async_trait]
 impl Provider for CodexProvider {
+    fn compile_privacy_policy(
+        &self,
+        policy: &gateway_core::settings::privacy::CodexPrivacyPolicy,
+    ) -> Result<
+        Arc<dyn gateway_core::settings::privacy::CompiledPrivacyPolicy>,
+        gateway_core::settings::privacy::PrivacyError,
+    > {
+        crate::transport::privacy::compile(policy)
+    }
+
     fn resolve_request_profile(
         &self,
         configuration: &gateway_core::account::OpaqueProviderData,
@@ -752,7 +758,6 @@ impl CodexProvider {
                 UpstreamSendState::NotSent,
             ));
         }
-        validate_openai_reasoning(generate.protocol_payload().body())?;
         let mut upstream = encode_generate_request(&generate, upstream_model.as_str(), None)
             .map_err(map_request_error)?;
         upstream.client_account_follow_only = crate::request_identity::follows_session_with_headers(
@@ -1021,7 +1026,8 @@ impl CodexProvider {
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_connection_budget(context.connection_budget().clone())
                 .with_response_control(context.response_control().cloned())
-                .with_middleware_headers(middleware_headers),
+                .with_middleware_headers(middleware_headers)
+                .with_privacy(context.privacy(), context.cancellation().clone()),
             response_origin: self.responses_url.clone(),
             request: upstream_request,
             upstream_model,
@@ -1056,27 +1062,4 @@ fn native_request_requirements(request: &GenerateRequest) -> CapabilityRequireme
         request.protocol_payload().clone(),
     ))
     .capability_requirements()
-}
-
-fn validate_openai_reasoning(body: &Map<String, Value>) -> Result<(), ProviderError> {
-    let Some(effort) = body
-        .get("reasoning")
-        .and_then(Value::as_object)
-        .and_then(|reasoning| reasoning.get("effort"))
-    else {
-        return Ok(());
-    };
-    let Some(effort) = effort.as_str() else {
-        return Err(provider_error(
-            ProviderErrorKind::InvalidRequest,
-            UpstreamSendState::NotSent,
-        ));
-    };
-    if effort.is_empty() || effort.len() > 64 || effort.chars().any(char::is_control) {
-        return Err(provider_error(
-            ProviderErrorKind::InvalidRequest,
-            UpstreamSendState::NotSent,
-        ));
-    }
-    Ok(())
 }

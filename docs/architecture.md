@@ -293,6 +293,12 @@ service；客户端原生对象保存在有界进程缓存中，与套餐 Redis 
 `RuntimeSnapshot → RoutingPlan → AttemptContext` 冻结传递，关闭时保留客户端原有字段；
 Provider 在选定账号后应用代理位置覆盖。请求期间不额外查询全局设置，配置发布不改变已开始请求的全局值
 
+隐私规则合同及编译端口由 Core 定义，OpenAI Provider 拥有路径、正则和承载结构的解释，Admin 的保存校验与样本预览复用同一实现。
+Store 将策略与设置 revision 原子持久化；编译结果随快照、计划及 attempt 冻结，未改变策略的请求设置覆盖复用已编译对象。
+规则在宿主请求头和 WS metadata 投影完成后作用于本次出站副本，重试及传输回退从原请求重新构造，避免重复替换。
+每条规则跨承载副本原子提交；发送前拒绝携带 `NotSent` 和禁止重试标记。被规则改写的握手头参与 WS 池身份，防止复用旧值，
+关闭策略不进入改写管线。字段与执行限制见[隐私策略 API](api.md#隐私策略)
+
 Fast 限制由同一快照链路冻结：Client Key 所有绑定分组的开关取逻辑或；
 禁用分组仍贡献限制，无分组 Key 不限制 Fast，不按所选账号的分组重新解释。
 OpenAI Provider 在独立编码请求上、生成上游头与观测前统一应用顶层档位覆盖，HTTP、WS 与重试共用。
@@ -384,8 +390,9 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 
 Responses 按模型目录编译候选；全局模型映射是精确映射，未命中时模型名原样交给候选 Provider。
 Images 与 standalone Search 是 OpenAI Provider 自有端点：两者都不参与文本模型映射，只在 Client Key
-的账号范围确实包含 OpenAI 账号时生成单一 OpenAI 候选。Images 不要求模型字段；Search body 中的模型
-及其他字段保持原始 bytes 并由上游解释
+的账号范围确实包含 OpenAI 账号时生成单一 OpenAI 候选。Images 的图片模型由 Provider 从正文旁路
+提取，用于账号模型政策检查，并在中间件改写后复验当前租约账号；不要求图片模型进入文本目录。
+Search body 中的模型及其他字段保持原始 bytes 并由上游解释
 
 ## 5. Provider 与协议边界
 
@@ -404,10 +411,12 @@ OpenAI 模型目录用于发现，不因目录缺项拒绝请求；管理员配�
 - OpenAI 是透明边界。Responses 请求保留未知字段和字段顺序；SSE、WebSocket、Images 与 standalone
   Search 的业务正文按原始字节转发，原生续写额度恢复遵循下述 continuation 例外。
   canonical facts 从同一数据旁路提取，用于路由、恢复判断、观测和计费。
+  WebSocket transport 按完整文本消息交付，wire 同时保留原文与可选解析视图；同协议出口使用原文，
+  SSE 转换只发生在需要该表达的出口。插件未改写的封套继续携带原始文本，观测失败不否定交付。
   非流式 Responses 由 API 聚合 wire：终态省略或清空 `output` 时，使用同一响应的 `output_item.done`
   按 `output_index` 还原完整输出；已有非空终态输出不改写。完成项缺失或冲突时在下游提交前拒绝，
   不凭 canonical 增量补造内容，也不让 SSE/WS 转发额外保存整份输出
-- Responses 的业务扩展头保留原始多值字节。API 负责剥离鉴权、账号身份和 HTTP 传输字段，
+- Responses、Images 与 standalone Search 的业务扩展头保留原始多值字节。API 负责剥离鉴权、账号身份和 HTTP 传输字段，
   并提取会话语义；`gateway-protocol` 共享 HTTP 传输与网关链路字段分类。客户端兼容规则集中在
   `providers/openai/src/transport/downstream/`：`headers.rs` 管理下游环境头和已提取语义的头部别名，
   `body.rs` 管理已知顶层参数的过滤、缺省值补齐和已确认不兼容的 `input` 形状适配；兼容基准为 Codex Core/Desktop 请求协议，
@@ -484,6 +493,9 @@ client，OIDC 的 JWKS 缓存与单飞归属对应出口状态。自动刷新提
 管理端导出的 Codex 配置使用代理 Bearer 密钥，并声明服务端托管账号认证。
 客户端据此开放原生生图工具，图片生成和编辑由 Images 路由处理。
 这只解决客户端能力识别；模型能力、客户端限制和上游账号的实际生图权限仍分别检查
+
+OpenAI Provider 将 OAuth 套餐资格作为 Images 选号条件，复用账号持久事实，
+在获取租约前与冻结的模型黑白名单共同过滤候选；亲和与重试沿用同一资格检查
 
 `X-OpenAI-Actor-Authorization` 是客户端能力标记，不是账号凭据。API 解码和 OpenAI Provider
 都过滤该 header，网关继续校验 Client Key，上游认证由服务端账号产生。
@@ -708,9 +720,10 @@ Admin 的手动重置复用同一账本与 Key 行锁，在一个事务中清零
 - SSE 持有并发名额直到终态；WebSocket 每个 `response.create` 独立准入，空闲连接不占名额。
   Core 在每次请求开始时重新鉴权并冻结当前策略，既有连接也应用已发布的限额与授权范围变更。
   换号和内部重试复用同一名额，Key 与账号并发上限同时生效；预算拒绝或启动失败释放名额
-- 响应中断入口由 Core 的根执行持有，API 只控制当前连接正在交付的执行。Provider 在收到上游
-  `response.created` 后注册活动响应 owner，在终态、失败或断连时释放；控制句柄本身不延长 owner
-  生命周期。中断信号交给占用原账号、原 socket 的 exchange，不经过全局响应查询、新选号或独立 attempt。
+- Core 的根执行携带不解释协议的连接控制端口，Provider 在请求写入上游后绑定原 socket。
+  API 在响应期间发送控制帧，终态后还可读取原连接事件；空闲读取必须在下一轮执行前取消，
+  与 Provider 正文消费共用单一有界接收通道。连接 owner 持有控制目标，复用时替换，销毁时释放；
+  控制句柄使用弱引用，不延长连接生命周期，也不经过全局响应查询、新选号或独立 attempt。
   API 暂存的下一轮请求和连接泵接收队列共用容量名额，控制帧处理不取消中间件正在读取响应体的 future
 
 完成、失败、取消和断连使用同一结算路径，在结束时以网关请求 ID 幂等累计已取得费用。

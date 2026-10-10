@@ -196,6 +196,10 @@ curl -i http://127.0.0.1:8080/healthz
 
 `204 No Content` 表示应用、PostgreSQL、Redis 和后台任务的健康检查通过，不代表每个上游账号都可用
 
+`503 Service Unavailable` 的失败组件与原因保存在运维错误记录中，组件为 `health`，关联标识以
+`probe:` 或 `worker:` 开头；探针超时也会指明组件。连续相同故障去重，恢复后再次失败重新记录，
+应用日志记录故障与恢复摘要。健康响应保持空正文，详情沿用有界观测队列，队列或存储故障时可能缺失
+
 HTTP 在数据库迁移和初始化完成后才监听。迁移期间启动日志每 15 秒报告已等待时间，
 包含执行迁移和等待迁移锁的时间，不代表完成比例；不要因暂时无法访问而反复重启。
 镜像和 Compose 默认提供 5 分钟健康检查启动宽限期，探测成功后立即转为健康，无需等满宽限期。
@@ -287,7 +291,7 @@ SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待
 
 管理端生成的 CC Switch 一键导入包含连接信息和当前 Key 的日／周额度查询，默认每 30 分钟刷新。
 查询地址和凭据随导入生成，在 CC Switch 中修改 Provider 的地址或 Key 后，需重新导入以同步用量查询。
-导入不包含下方模板的原生生图和 WebSocket 设置。需要原生生图时，使用下方配置直连 CPR，
+导入不包含下方模板的远程压缩、原生生图和 WebSocket 设置。需要这些设置时，使用下方配置直连 CPR，
 避免 CC Switch 切换或接管后重写 Provider 配置
 
 Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
@@ -314,6 +318,10 @@ requires_openai_auth = false
 # 填写代理密钥，真实账号由服务端管理。
 experimental_bearer_token = "<client-api-key>"
 
+[model_providers.OpenAI.capabilities]
+# Codex 0.162.0+ 显式启用 V2 远程压缩，不依赖 Provider 名称识别
+remote_compaction = "v2"
+
 [model_providers.OpenAI.http_headers]
 # 供客户端识别服务端托管认证，本身不是密钥。
 X-OpenAI-Actor-Authorization = "proxy-managed"
@@ -326,6 +334,9 @@ goals = true
 `OpenAI` 是自定义 Provider ID，大小写要与 `model_provider` 一致。合并配置时修改已有表，
 不要重复添加 `[features]` 或 Provider 表。更换模型时也要检查其支持的推理强度。
 密钥以明文保存，文件仅供本人读取，不要提交到 Git。接入代理不需要扩大命令沙箱的联网或文件权限
+
+V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上游需支持该协议。
+若 Provider ID 改为 `custom`，相应能力配置也要改到 `[model_providers.custom.capabilities]`
 
 需要指定完整模型目录时，在账号的模型列表中导出所选 Codex 模型，并在 `config.toml` 顶层设置
 `model_catalog_json = "/absolute/path/to/cpr-model-catalog.json"`。导出文件不含账号凭据；
@@ -352,10 +363,10 @@ OpenAI OAuth 账号的上游传输方式默认 WS；固定为 SSE 的账号不�
 代理位置优先。`host.timezone` 控制部署日历和管理端时间展示，不代替请求位置设置。
 覆盖字段与环境消息识别条件见 [代理位置合同](../docs/api.md#独立代理管理--managed-proxies)
 
-Codex 回答仍显示本机时区时，先核对请求是否使用了预期账号和代理，再区分环境正文与工具结果：
+Codex 回答仍显示本机时区时，先核对请求是否使用了预期账号和代理，再区分时间上下文与工具结果：
 
 - 使用新会话询问环境上下文中的时区，避免已有工具输出或历史回答影响判断
-- 检查实际环境消息是否满足完整上下文形状；显式普通文本分类或非法 XML 不会被覆盖
+- 检查 `environment_context` 和 Desktop 的 `codex_apps_client_time_context` 是否满足[时间上下文识别条件](../docs/api.md#独立代理管理--managed-proxies)；显式普通文本分类或非法 XML 不会被覆盖
 - 若模型调用 `date` 等工具查询本机，工具结果仍反映真实系统时区，覆盖不会修改客户端操作系统
 
 网关的请求头画像和位置覆盖不提供完整匿名化。正文与工作区 metadata 的保留范围见
@@ -590,6 +601,8 @@ alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Late
 ### 管理端在线更新
 
 官方构建按上述规则在线更新；源码等非官方构建返回不支持原因，不提供可用更新。
+最低受支持的在线升级起点为 **v3.18.1**。更旧版本需手动安装 v3.18.1 或新版完整发行包／镜像，
+不能依赖旧更新页面直接升级到最新版或选择已不是最新版的过渡版本。
 点击「下载并更新」后，操作日志显示下载、校验与安装过程，完成后显示「待重启」及待生效版本，重启后才使用新程序。
 「当前版本」始终表示正在运行的版本，「通道最新」表示所选通道的检查结果
 

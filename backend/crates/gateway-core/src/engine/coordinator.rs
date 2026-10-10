@@ -1049,6 +1049,7 @@ where
                 .with_pricing(self.plan.pricing())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_codex_client(self.codex_client)
+                .with_privacy(self.plan.privacy())
                 .with_concurrency_wait_budget(self.concurrency_wait_budget.clone())
                 .with_connection_budget(self.connection_budget.clone())
                 .with_timing_started_at(self.observation.timing_started_at)

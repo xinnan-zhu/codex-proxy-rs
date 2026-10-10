@@ -63,7 +63,7 @@ where
                     .start_prepared_provider_endpoint(
                         prepared,
                         operation,
-                        // 图像/搜索等原生端点没有对应的上游模型权限。
+                        // 原生端点的模型语义由 Provider 从正文提取并检查账号政策
                         None,
                         (client_ip, user_agent, None),
                         endpoint,
