@@ -73,6 +73,7 @@ xAI 后台每 5 分钟刷新正常账号的官方 billing 快照；耗尽账号�
 | `900006` | `runtime_settings.system_update_proxy_id` |
 | `900007` | 删除 turn-state 阻断字段 |
 | `900008` | 删除 Turn State 字节观测字段并重建官方观测视图 |
+| `900009` | 保持官方可优化的请求观测视图 |
 
 ## 预编译镜像
 

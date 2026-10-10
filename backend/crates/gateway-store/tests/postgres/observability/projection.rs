@@ -51,6 +51,49 @@ async fn projection_upgrade_preserves_observation_values() {
 }
 
 #[tokio::test]
+async fn fork_projection_upgrade_preserves_previously_migrated_observations() {
+    let Some(db) = TestDatabase::create_through("fork_projection_upgrade", 26).await else {
+        return;
+    };
+    // 还原上一正式版的迁移集合，验证官方小编号迁移补跑及定制迁移后的最终投影
+    let previous = sqlx::migrate::Migrator::with_migrations(
+        super::super::TEST_MIGRATOR
+            .iter()
+            .filter(|migration| migration.version != 27 && migration.version <= 900008)
+            .cloned()
+            .collect(),
+    );
+    previous.run(&db.pool).await.unwrap();
+    seed_observability_facts(&db.pool, Utc::now())
+        .await
+        .unwrap();
+    let before: Vec<Value> =
+        sqlx::query_scalar("select to_jsonb(mr) from model_request_observations mr order by id")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap();
+    super::super::TEST_MIGRATOR.run(&db.pool).await.unwrap();
+    let after: Vec<Value> =
+        sqlx::query_scalar("select to_jsonb(mr) from model_request_observations mr order by id")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        after, before,
+        "fork upgrade preserves every observation field"
+    );
+    let updatable: String = sqlx::query_scalar(
+        "select is_updatable from information_schema.views
+          where table_schema = current_schema() and table_name = 'model_request_observations'",
+    )
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!(updatable, "NO", "fork projection remains read-only");
+    db.close().await;
+}
+
+#[tokio::test]
 async fn plain_observation_aggregates_can_use_a_covering_index() {
     let Some(db) = TestDatabase::create("observation_covering_index").await else {
         return;

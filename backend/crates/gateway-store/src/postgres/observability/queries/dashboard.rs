@@ -302,6 +302,7 @@ fn push_request_metrics_source(
                       mr.first_token_ms, mr.latency_ms, mr.admission_decision_ms,
                       mr.account_selection_wait_ms, mr.upstream_response_ms,
                       mr.capacity_used_slots, mr.capacity_total_slots, mr.cost_source,
+                      mr.cost_currency,
                       ({fact}) as is_completed_usage
                  from model_request_observations mr where mr.started_at >= "
     ));
