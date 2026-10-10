@@ -445,6 +445,7 @@ export interface UsageOverviewCost {
   outputTokens: number
   cachedTokens: number
   totalTokens: number
+  billedTotalTokens: number
   points: UsageOverviewCostPoint[]
   coverage: UsageCostCoverage
 }

@@ -381,6 +381,7 @@ async fn observability_services_should_calculate_usage_insights_and_diagnostic_s
         input_tokens: 800,
         output_tokens: 200,
         total_tokens: 1_000,
+        billed_total_tokens: 800,
         latency_count: 5,
         admission_decision_count: 10,
         admission_decision_percentiles: LatencyPercentiles {
@@ -475,6 +476,8 @@ async fn observability_services_should_calculate_usage_insights_and_diagnostic_s
     assert_eq!(insights.performance.capacity_coverage, 0.8);
     assert_eq!(insights.performance.output_throughput_p50, Some(50));
     assert_eq!(insights.cost.tokens_per_request, 100.0);
+    assert_eq!(insights.cost.total_tokens, 1_000);
+    assert_eq!(insights.cost.billed_total_tokens, 800);
     assert_eq!(
         insights
             .cost

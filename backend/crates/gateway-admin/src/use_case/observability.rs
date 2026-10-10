@@ -542,6 +542,7 @@ fn build_usage_insights(
         output_tokens: requests.output_tokens,
         cached_tokens: requests.cached_tokens,
         total_tokens: requests.total_tokens,
+        billed_total_tokens: requests.billed_total_tokens,
         points: trend
             .iter()
             .map(|point| UsageInsightsCostPoint {
@@ -1099,6 +1100,9 @@ fn add_request_metrics(total: &mut RequestMetrics, value: &RequestMetrics) {
         .reasoning_tokens
         .saturating_add(value.reasoning_tokens);
     total.total_tokens = total.total_tokens.saturating_add(value.total_tokens);
+    total.billed_total_tokens = total
+        .billed_total_tokens
+        .saturating_add(value.billed_total_tokens);
     total.first_token_latency_sum_ms = total
         .first_token_latency_sum_ms
         .saturating_add(value.first_token_latency_sum_ms);

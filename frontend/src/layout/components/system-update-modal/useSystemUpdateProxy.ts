@@ -1,4 +1,4 @@
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import { getSystemUpdateProxy, updateSystemUpdateProxy } from '@/api'
 import { useProxyCatalog } from '@/composables/useProxyCatalog'
@@ -55,10 +55,10 @@ export function useSystemUpdateProxy() {
     try {
       const data = await updateSystemUpdateProxy({ proxyId })
       selectedProxyId.value = data.proxyId
-      toast.success(data.proxyId ? '更新将通过所选代理下载' : '更新将直连下载')
+      ZNotification.success({ message: data.proxyId ? '更新将通过所选代理下载' : '更新将直连下载' })
     }
     catch (error: unknown) {
-      toast.error(errorMessage(error, '保存下载代理失败'))
+      ZNotification.error({ message: errorMessage(error, '保存下载代理失败') })
     }
     finally {
       saving.value = false

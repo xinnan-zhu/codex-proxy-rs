@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { getUsageRecordInsightsOverview, getUsageRecordSummary } from '@/api'
-import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
+import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 
 import { Activity, CircleDollarSign, Database, FileText, Timer } from '@lucide/vue'
 import { computed } from 'vue'
@@ -16,14 +16,13 @@ function averageLatencyDisplay(value: string) {
 }
 
 const costDetail = computed(() => {
-  const { partial, unknown } = props.cost.coverage
-  if (partial + unknown > 0)
-    return `${partial + unknown} 次请求计费不完整，实际可能更高`
   const estimatedCost = decimalDisplayNumber(props.cost.estimatedCost)
-  const costPerMillionTokens = estimatedCost != null && props.cost.totalTokens > 0
-    ? estimatedCost / props.cost.totalTokens * 1_000_000
+  const millionsPerDollar = estimatedCost != null && estimatedCost > 0 && props.cost.billedTotalTokens > 0
+    ? props.cost.billedTotalTokens / estimatedCost / 1_000_000
     : null
-  return `每 1M Token ${formatUsd(costPerMillionTokens, true)}`
+  return millionsPerDollar != null && Number.isFinite(millionsPerDollar)
+    ? `每 $1 可跑 ${millionsPerDollar.toFixed(2)}M Token`
+    : '每 $1 可跑 — M Token'
 })
 
 const items = computed(() => [
@@ -72,16 +71,16 @@ const items = computed(() => [
 
 <template>
   <section class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5" aria-label="使用概览">
-    <BaseCard
+    <ZCard
       v-for="item in items"
       :key="item.key"
       as="article"
       padding="compact"
       class="grid min-h-23 grid-cols-[36px_minmax(0,1fr)] items-stretch gap-3"
     >
-      <BaseMotionIcon class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp" :class="item.tone">
+      <ZMotionIcon class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp" :class="item.tone">
         <component :is="item.icon" class="size-4.5" />
-      </BaseMotionIcon>
+      </ZMotionIcon>
       <div class="flex min-w-0 flex-col justify-between py-0.5">
         <span class="block text-cp-sm leading-none font-bold text-cp-text-quaternary">
           {{ item.label }}
@@ -93,6 +92,6 @@ const items = computed(() => [
           {{ item.detail }}
         </span>
       </div>
-    </BaseCard>
+    </ZCard>
   </section>
 </template>

@@ -1274,6 +1274,7 @@ pub(crate) fn usage_insights_view(
             output_tokens: insights.cost.output_tokens,
             cached_tokens: insights.cost.cached_tokens,
             total_tokens: insights.cost.total_tokens,
+            billed_total_tokens: insights.cost.billed_total_tokens,
             points: cost_points,
             costs: cost_views(&insights.cost.costs),
             coverage: cost_coverage_view(&insights.cost.coverage),

@@ -458,6 +458,8 @@ pub struct RequestMetrics {
     pub cache_write_tokens: u64,
     pub reasoning_tokens: u64,
     pub total_tokens: u64,
+    /// 已完整交付且具有完整 USD 费用的请求 Token 总数
+    pub billed_total_tokens: u64,
     pub first_token_latency_sum_ms: u64,
     pub first_token_latency_count: u64,
     pub latency_sum_ms: u64,
@@ -1255,6 +1257,7 @@ pub struct UsageInsightsCost {
     pub output_tokens: u64,
     pub cached_tokens: u64,
     pub total_tokens: u64,
+    pub billed_total_tokens: u64,
     pub points: Vec<UsageInsightsCostPoint>,
     pub costs: Vec<CurrencyCost>,
     pub coverage: CostCoverage,

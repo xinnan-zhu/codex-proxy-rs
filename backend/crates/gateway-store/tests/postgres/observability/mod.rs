@@ -1,5 +1,7 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
+mod projection;
+
 use futures::TryStreamExt;
 use std::{
     collections::BTreeMap,
@@ -1438,6 +1440,133 @@ async fn calculated_usage_billing_facts_keep_only_completed_calculated_costs() {
     assert_eq!(facts[0].service_tier.as_deref(), Some("priority"));
     assert_eq!(facts[0].total.amount.as_str(), "1.25");
 
+    database.close().await;
+}
+
+#[tokio::test]
+async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_usage() {
+    let Some(database) = TestDatabase::create("billed_tokens").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now)
+        .await
+        .expect("seed observability facts");
+    seed_calculated_billing_facts(&database.pool, now)
+        .await
+        .expect("seed calculated billing facts");
+    sqlx::query(
+        "update model_requests set downstream_committed_at = completed_at
+         where id = 'req_observe_uncommitted'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("complete unknown-cost usage");
+    let range =
+        admin_observability::TimeRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
+            .expect("admin observability range");
+    let store = admin_observability_store(&database.pool);
+    let filter = admin_observability::UsageFilter::default();
+    let overview = store
+        .usage_summary(range, filter.clone())
+        .await
+        .expect("mixed costs");
+    assert_eq!(overview.requests.total_tokens, 2_920);
+    assert_eq!(overview.requests.billed_total_tokens, 1_120);
+    assert_eq!(overview.attempts.costs[0].currency, "USD");
+    assert_eq!(overview.attempts.costs[0].amount.as_str(), "2.5");
+    let trend = store
+        .usage_trend(
+            range,
+            filter.clone(),
+            admin_observability::Granularity::FifteenMinutes,
+        )
+        .await
+        .expect("mixed-cost trend");
+    assert_eq!(
+        trend
+            .iter()
+            .map(|point| point.metrics.total_tokens)
+            .sum::<u64>(),
+        2_920
+    );
+    assert_eq!(
+        trend
+            .iter()
+            .map(|point| point.metrics.billed_total_tokens)
+            .sum::<u64>(),
+        1_120
+    );
+
+    let unknown = store
+        .usage_summary(
+            range,
+            admin_observability::UsageFilter {
+                request_id: Some("req_observe_uncommitted".to_owned()),
+                ..admin_observability::UsageFilter::default()
+            },
+        )
+        .await
+        .expect("unknown-cost filter");
+    assert_eq!(unknown.requests.total_tokens, 1_800);
+    assert_eq!(unknown.requests.billed_total_tokens, 0);
+    assert!(unknown.attempts.costs.is_empty());
+
+    sqlx::query(
+        "update model_requests set cost_currency = 'EUR' where id = 'req_observe_calculated'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("foreign-currency cost");
+    let overview = store
+        .usage_summary(range, filter.clone())
+        .await
+        .expect("foreign currency");
+    assert_eq!(overview.requests.total_tokens, 2_920);
+    assert_eq!(overview.requests.billed_total_tokens, 120);
+    let usd = overview
+        .attempts
+        .costs
+        .iter()
+        .find(|cost| cost.currency == "USD")
+        .expect("USD cost");
+    assert_eq!(usd.amount.as_str(), "1.25");
+    let trend = store
+        .usage_trend(
+            range,
+            filter.clone(),
+            admin_observability::Granularity::FifteenMinutes,
+        )
+        .await
+        .expect("foreign-currency trend");
+    assert_eq!(
+        trend
+            .iter()
+            .map(|point| point.metrics.billed_total_tokens)
+            .sum::<u64>(),
+        120
+    );
+
+    sqlx::query(
+        "update model_requests set cost_source = 'unavailable', cost_amount = null,
+         cost_currency = null where id = 'req_observe_success'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("remove remaining USD cost");
+    let overview = store
+        .usage_summary(range, filter)
+        .await
+        .expect("no USD costs");
+    assert_eq!(overview.requests.total_tokens, 2_920);
+    assert_eq!(overview.requests.billed_total_tokens, 0);
+    assert!(
+        overview
+            .attempts
+            .costs
+            .iter()
+            .all(|cost| cost.currency != "USD")
+    );
     database.close().await;
 }
 

@@ -725,6 +725,7 @@ pub struct OverviewCostView {
     pub output_tokens: u64,
     pub cached_tokens: u64,
     pub total_tokens: u64,
+    pub billed_total_tokens: u64,
     pub points: Vec<OverviewCostPointView>,
     pub costs: Vec<CostView>,
     pub coverage: CostCoverageView,

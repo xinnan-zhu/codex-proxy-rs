@@ -346,6 +346,7 @@ function emptyOverview() {
       outputTokens: 0,
       cachedTokens: 0,
       totalTokens: 0,
+      billedTotalTokens: 0,
       points: [],
       coverage: { known: 0, partial: 0, unknown: 0, notBillable: 0 },
     },
