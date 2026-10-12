@@ -10,9 +10,9 @@ async fn projection_upgrade_preserves_observation_values() {
     let Some(db) = TestDatabase::create_through("observation_projection_upgrade", 26).await else {
         return;
     };
-    seed_observability_facts(&db.pool, Utc::now())
-        .await
-        .unwrap();
+    // 此测试固定覆盖 26 → 27 的冻结视图合同，不依赖最新版本的写入夹具
+    sqlx::query("insert into model_requests(id,client_api_key_ref,operation,client_transport,outcome,client_status_code,started_at,deadline_at,completed_at,request_observation_json) values('req_observe_success','historical_key','responses','http_sse','succeeded',200,now()-interval '1 hour',now(),now(),'{\"request\":{\"configRevision\":1,\"protocol\":\"openai\",\"endpoint\":\"/v1/responses\",\"compact\":false},\"routing\":{\"scope\":\"all\",\"groupRefs\":[],\"groupNamesSnapshot\":[]},\"timings\":{\"local\":{\"latencyMs\":800}}}'::jsonb)")
+        .execute(&db.pool).await.unwrap();
     sqlx::query(
         "update model_requests
             set request_observation_json = jsonb_set(request_observation_json,
@@ -28,7 +28,10 @@ async fn projection_upgrade_preserves_observation_values() {
             .await
             .unwrap();
 
-    super::super::TEST_MIGRATOR.run(&db.pool).await.unwrap();
+    super::super::TEST_MIGRATOR
+        .run_to(27, &db.pool)
+        .await
+        .unwrap();
 
     let after: Vec<Value> =
         sqlx::query_scalar("select to_jsonb(mr) from model_request_observations mr order by id")
@@ -52,44 +55,39 @@ async fn projection_upgrade_preserves_observation_values() {
 
 #[tokio::test]
 async fn fork_projection_upgrade_preserves_previously_migrated_observations() {
-    let Some(db) = TestDatabase::create_through("fork_projection_upgrade", 26).await else {
+    let Some(db) = TestDatabase::create_through("fork_projection_upgrade", 27).await else {
         return;
     };
-    // 还原上一正式版的迁移集合，验证官方小编号迁移补跑及定制迁移后的最终投影
+    // 还原上一正式版，覆盖先应用高编号定制迁移后补跑官方迁移的升级路径
     let previous = sqlx::migrate::Migrator::with_migrations(
         super::super::TEST_MIGRATOR
             .iter()
-            .filter(|migration| migration.version != 27 && migration.version <= 900008)
+            .filter(|migration| {
+                migration.version <= 27 || (900001..=900009).contains(&migration.version)
+            })
             .cloned()
             .collect(),
     );
     previous.run(&db.pool).await.unwrap();
-    seed_observability_facts(&db.pool, Utc::now())
-        .await
-        .unwrap();
-    let before: Vec<Value> =
-        sqlx::query_scalar("select to_jsonb(mr) from model_request_observations mr order by id")
-            .fetch_all(&db.pool)
-            .await
-            .unwrap();
+    sqlx::query(r#"insert into model_requests(id,client_api_key_ref,operation,client_transport,outcome,client_status_code,input_tokens,output_tokens,cached_tokens,total_tokens,started_at,deadline_at,completed_at,request_observation_json) values('req_fork_upgrade','historical_key','responses','http_sse','succeeded',200,100,20,40,120,now()-interval '1 hour',now(),now(),'{"request":{"configRevision":1,"protocol":"openai","endpoint":"/v1/responses","compact":false,"reasoningEffort":"default"},"routing":{"scope":"all","groupRefs":[],"groupNamesSnapshot":[]},"timings":{"local":{"latencyMs":800}}}'::jsonb)"#)
+        .execute(&db.pool).await.unwrap();
+    let before: (Value, i64, i64) = sqlx::query_as("select request_observation_json,total_tokens,cached_tokens from model_requests where id='req_fork_upgrade'")
+        .fetch_one(&db.pool).await.unwrap();
     super::super::TEST_MIGRATOR.run(&db.pool).await.unwrap();
-    let after: Vec<Value> =
-        sqlx::query_scalar("select to_jsonb(mr) from model_request_observations mr order by id")
-            .fetch_all(&db.pool)
-            .await
-            .unwrap();
-    assert_eq!(
-        after, before,
-        "fork upgrade preserves every observation field"
-    );
-    let updatable: String = sqlx::query_scalar(
-        "select is_updatable from information_schema.views
-          where table_schema = current_schema() and table_name = 'model_request_observations'",
-    )
-    .fetch_one(&db.pool)
-    .await
-    .unwrap();
-    assert_eq!(updatable, "NO", "fork projection remains read-only");
+    let after: (Value, i64, i64) = sqlx::query_as("select request_observation_json,total_tokens,cached_input_tokens from model_requests where id='req_fork_upgrade'")
+        .fetch_one(&db.pool).await.unwrap();
+    // 新快照字段按官方升级合同补齐，其余观测文档及用量保持原值
+    let mut document = after.0.clone();
+    if let Some(request) = document.get_mut("request").and_then(Value::as_object_mut) {
+        request.remove("clientApiKeyNameSnapshot");
+    }
+    assert_eq!((document, after.1, after.2), before);
+    let retained: (String, Option<String>, Option<String>) = sqlx::query_as("select reasoning_effort,client_api_key_name_snapshot,provider_account_plan_type_snapshot from model_request_observations where id='req_fork_upgrade'")
+        .fetch_one(&db.pool).await.unwrap();
+    assert_eq!(retained, ("default".to_owned(), None, None));
+    let updatable: String = sqlx::query_scalar("select is_updatable from information_schema.views where table_schema=current_schema() and table_name='model_request_observations'")
+        .fetch_one(&db.pool).await.unwrap();
+    assert_eq!(updatable, "NO");
     db.close().await;
 }
 
@@ -102,10 +100,11 @@ async fn plain_observation_aggregates_can_use_a_covering_index() {
         .await
         .unwrap();
     let mut transaction = db.pool.begin().await.unwrap();
+    // 视图通过请求 ID 关联运行态租约，覆盖索引包含关联键但不包含观测 JSON
     // 小夹具只验证覆盖索引路径可达，不把耗时阈值或生产规划器成本固定在测试中
     sqlx::raw_sql(
         "create index observation_plain_cover_idx on model_requests (started_at)
-           include (input_tokens, cost_amount) where recovered_at is null;
+           include (id, input_tokens, cost_amount) where recovered_at is null;
          set local enable_seqscan = off",
     )
     .execute(&mut *transaction)

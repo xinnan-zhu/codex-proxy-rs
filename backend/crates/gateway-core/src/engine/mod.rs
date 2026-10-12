@@ -571,6 +571,14 @@ impl AttemptContext {
         self.request.client_transport
     }
 
+    /// 原生双向通道可提前交付可替换前导事件；中间件可能改变其输出语义
+    #[must_use]
+    pub fn allows_replayable_prelude(&self) -> bool {
+        self.client_transport() == execution::ClientTransport::WebSocket
+            && self.request.middleware.is_none()
+            && self.response_control().is_some()
+    }
+
     #[must_use]
     pub fn response_control(&self) -> Option<&response_control::ResponseControl> {
         self.request.response_control.as_ref()
@@ -833,8 +841,8 @@ impl AttemptContext {
 /// 创建唯一 `model_requests` 行所需的入口事实
 #[derive(Debug, Clone)]
 pub struct NewModelRequest {
+    pub client_api_key_name_snapshot: Option<String>,
     pub id: ModelRequestId,
-    pub client_api_key_id: Option<ClientApiKeyId>,
     pub client_api_key_ref: ClientApiKeyId,
     pub config_revision: ConfigRevision,
     pub routing: crate::routing::AccountRoutingSnapshot,
@@ -863,11 +871,11 @@ pub struct NewModelRequest {
 /// 每次真实上游发送前对同一 `model_requests` 行的更新
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttemptRecord {
+    pub account_snapshot: Option<crate::account::AccountHistorySnapshot>,
     pub request_id: ModelRequestId,
     pub attempt_count: NonZeroU32,
     pub trigger: AttemptTrigger,
     pub provider_kind: ProviderKind,
-    pub provider_account_id: Option<ProviderAccountId>,
     pub provider_account_ref: Option<ProviderAccountId>,
     pub upstream_model_id: Option<UpstreamModelId>,
     pub upstream_transport: String,
@@ -882,6 +890,7 @@ pub struct AttemptRecord {
 /// 需要解释换号的中间失败
 #[derive(Debug)]
 pub struct IntermediateFailure {
+    pub account_snapshot: Option<crate::account::AccountHistorySnapshot>,
     pub request_id: ModelRequestId,
     pub attempt_index: NonZeroU32,
     pub trigger: AttemptTrigger,

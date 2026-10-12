@@ -348,6 +348,7 @@ where
             current: None,
             send_state_watermark: UpstreamSendState::NotSent,
             downstream_committed_at: None,
+            replay_barrier_reached: false,
             client_status_code: None,
             delivery_pending: false,
             upstream_complete: false,
@@ -486,6 +487,8 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     /// 请求级发送状态水位；跨 attempt 单调不降，终态写回不得低于此档
     send_state_watermark: UpstreamSendState,
     downstream_committed_at: Option<SystemTime>,
+    /// 已交付的实际输出禁止重放，可替换前导事件不跨越此屏障
+    replay_barrier_reached: bool,
     client_status_code: Option<u16>,
     delivery_pending: bool,
     upstream_complete: bool,
@@ -551,6 +554,10 @@ where
         loop {
             match self.pull().await? {
                 PullOutcome::Events(events) => {
+                    self.replay_barrier_reached |= self.middleware.is_some()
+                        || self.client_transport != super::execution::ClientTransport::WebSocket
+                        || self.response_control.is_none()
+                        || events.iter().any(|event| !event.is_replayable_prelude());
                     let requirement = if self.downstream_committed_at.is_some() {
                         CommitRequirement::AlreadyCommitted
                     } else {
@@ -571,6 +578,7 @@ where
                         self.delivery_pending = true;
                         CommitRequirement::CommitBeforeDelivery
                     };
+                    self.replay_barrier_reached = true;
                     self.pending_terminal_failure =
                         Some(PendingTerminalFailure { error, send_state });
                     return CoordinatedEvent::try_batch(events, requirement).map(Some);
@@ -671,6 +679,7 @@ where
             return Err(EngineError::InvalidDeliveryState);
         }
         self.delivery_pending = false;
+        self.replay_barrier_reached = false;
         Ok(())
     }
 
@@ -1320,11 +1329,11 @@ where
             ));
         }
         let attempt_record = AttemptRecord {
+            account_snapshot: metadata.account_snapshot().cloned(),
             request_id: self.request_id.clone(),
             attempt_count: next_attempt,
             trigger,
             provider_kind: metadata.provider().clone(),
-            provider_account_id: Some(metadata.provider_account_id().clone()),
             provider_account_ref: Some(metadata.provider_account_id().clone()),
             upstream_model_id: metadata.upstream_model().cloned(),
             upstream_transport: metadata.transport().as_str().to_owned(),
@@ -1501,7 +1510,7 @@ where
         let account_rotation_retry = !execution_effect_observed
             && self.account_selection.required_account().is_none()
             && self.continuation_attempt == ContinuationAttempt::None
-            && self.downstream_committed_at.is_none()
+            && !self.replay_barrier_reached
             && !self.delivery_pending
             && attempt_send_state != UpstreamSendState::Ambiguous
             && matches!(
@@ -1521,7 +1530,7 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountConnectionRetry { transport })
                 if !execution_effect_observed
                     && !self.connection_budget.exhausted()
-                    && self.downstream_committed_at.is_none()
+                    && !self.replay_barrier_reached
                     && !self.delivery_pending
                     && attempt_send_state == UpstreamSendState::NotSent
                     && self.current_send_state() == UpstreamSendState::NotSent
@@ -1539,7 +1548,7 @@ where
                 delay,
             }) if !execution_effect_observed
                 && !self.connection_budget.exhausted()
-                && self.downstream_committed_at.is_none()
+                && !self.replay_barrier_reached
                 && !self.delivery_pending =>
             {
                 Some((AttemptTransport::Retry(retry_index), delay))
@@ -1547,7 +1556,7 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountTransportFallback)
                 if !execution_effect_observed
                     && !self.connection_budget.exhausted()
-                    && self.downstream_committed_at.is_none()
+                    && !self.replay_barrier_reached
                     && !self.delivery_pending =>
             {
                 Some((
@@ -1562,7 +1571,7 @@ where
             && !execution_effect_observed
             && self.account_selection.required_account().is_none()
             && self.continuation_attempt == ContinuationAttempt::None
-            && self.downstream_committed_at.is_none()
+            && !self.replay_barrier_reached
             && !self.delivery_pending
             && attempt_send_state != UpstreamSendState::Ambiguous
             && provider_proved_replay_safe
@@ -1594,7 +1603,7 @@ where
         let same_account_retry = !execution_effect_observed
             && error.retries_same_account()
             && provider_proved_replay_safe
-            && self.downstream_committed_at.is_none()
+            && !self.replay_barrier_reached
             && !self.delivery_pending
             && attempt_send_state != UpstreamSendState::Ambiguous
             && self.routing_attempts < self.plan.max_attempts().get()
@@ -1660,6 +1669,7 @@ where
             "executionEffectObserved": execution_effect_observed,
             "delayMs": transient_retry.or(transport_recovery.map(|(_, delay)| delay)).map(duration_ms),
             "downstreamCommitted": self.downstream_committed_at.is_some(),
+            "replayBarrierReached": self.replay_barrier_reached,
             "sendState": format!("{attempt_send_state:?}"),
         }));
         if retryable {
@@ -1705,6 +1715,7 @@ where
                     self.engine
                         .store()
                         .record_intermediate_failure(IntermediateFailure {
+                            account_snapshot: current.metadata.account_snapshot().cloned(),
                             request_id: self.request_id.clone(),
                             attempt_index: current.index,
                             trigger: current.trigger,
@@ -1817,7 +1828,7 @@ where
     ) -> bool {
         if self.account_selection.required_account().is_some()
             || self.continuation_attempt == ContinuationAttempt::None
-            || self.downstream_committed_at.is_some()
+            || self.replay_barrier_reached
             || self.delivery_pending
             || send_state == UpstreamSendState::Ambiguous
             || !provider_proved_replay_safe

@@ -313,11 +313,14 @@ Responses WebSocket 接受文本消息，`response.create` 在同一连接串行
 留在有界接收队列中，待当前响应完成终结和写出后再逐条校验、准入与执行，不因请求提前到达而断开。
 接收队列容量为 32 个事件，超载仍关闭连接；Ping/Pong、客户端关闭和服务关闭不等待队列中的请求执行
 
-其余文本消息原样发送到当前执行绑定的原上游 WebSocket，包括
-`response.interrupt` 和未知类型；类型、响应 ID、模式及扩展字段由上游校验。
-控制帧不重新选号、不创建推理 attempt，也不合并重复消息。响应结束后原连接仍可接收控制帧并返回上游事件；
-下一轮执行使用新绑定的控制入口。尚未建立原连接、原连接已失效、实际走 HTTP 或 Provider 未提供控制通道时返回 `400`，
-不能通过控制帧新建上游连接
+其余文本消息发送到当前执行绑定的上游 WebSocket，未知类型、模式和扩展字段由上游校验。
+`response.interrupt` 的 `discard_partial_items` 模式若指向当前逻辑请求已交付的响应 ID，
+网关会保留中断意图；重试交付新的 `response.created` 后，以新 ID 转发中断，避免换号空档丢失控制消息。
+跨账号缺少原连接上下文时，仍通过恢复错误要求客户端完整重放
+
+控制帧不重新选号、不创建推理 attempt。响应结束后原连接仍可接收控制帧并返回上游事件；
+下一轮执行使用新绑定的控制入口。除上述重试期间保留中断的情况外，尚未建立原连接、原连接已失效、
+实际走 HTTP 或 Provider 未提供控制通道时返回 `400`，不能通过控制帧新建上游连接
 
 中断后继续转发上游事件与终态；只有 `response.incomplete` 的 `incomplete_details.reason` 为
 `interrupted` 时，才按官方中断语义保留原连接续接能力。部分输出是否被丢弃以上游终态为准。
@@ -435,10 +438,16 @@ xAI 的 `reasoning.effort` 接受 `none / minimal / low / medium / high / xhigh 
 
 #### 容量拒绝与重试
 
-OpenAI Responses 的 `response.created`、`response.in_progress` 等前导事件保留到首次有效文本、
-推理、工具活动或终态再交付，SSE 与 WebSocket 使用相同边界。前导缓冲不另设等待时长或累计体积上限，
-等待沿用[请求期限](#请求期限)与传输超时配置。WebSocket 独立 Ping 保活；
-HTTP 在首个业务事件前保留状态码和响应头，SSE 注释保活从提交响应后开始
+原生 Responses Lite WebSocket 在未启用中间件链时，按顺序及时交付正常事件，
+让客户端取得中断所需的响应 ID。无输出的 `response.created`、`response.in_progress`
+及 `codex.response.metadata`、`codex.rate_limits` 元数据交付后仍可按已有安全条件重试，
+客户端可能收到下一次尝试的新 `response.created`。
+其他事件也立即交付，但会关闭透明重试窗口，后续前导事件不再恢复重试资格；
+错误事件先按既有重试规则处理，无法重试时交付错误
+
+其他 WebSocket 与 HTTP/SSE 的前导事件保留到首次有效文本、推理、工具活动或终态再交付。
+前导缓冲不另设等待时长或累计体积上限，等待沿用[请求期限](#请求期限)与传输超时配置。
+WebSocket 独立 Ping 保活；HTTP 在首个业务事件前保留状态码和响应头，SSE 注释保活从提交响应后开始
 
 WebSocket 在交付有效输出前断线或超时，可按 `stream_max_retries` 做同账号、有退避的尽力重试
 （默认最多 5 次），耗尽后仅在请求允许时改用 HTTP。已发送或发送结果不明不单独阻止这项恢复；
@@ -1827,15 +1836,16 @@ request/response/upstream ID、outcome 与搜索文本。诊断 `dimension` 可�
 `requestShare` 的分母为该维度筛选后、截取前的全部请求数；`failureClass` 只在带错误类型的请求内计算占比
 `retryCount` 为额外执行尝试次数之和，`retryRate` 为发生过重试的请求数占该组请求数的比例，同一请求多次重试只计一次
 
-账号维度诊断项、使用记录列表和错误排查列表的 `accountPlanType` / `accountPlanTypeDisplay` 返回账号当前订阅及展示名称，
-按各记录的内部账号 ID 关联；订阅未知或账号已删除时为 `null`，不作为请求发生时的订阅快照
+使用记录列表和错误排查列表的 `accountPlanType` / `accountPlanTypeDisplay` 来自记录保存的账号订阅快照。
+账号维度诊断使用该账号最近请求的订阅快照；未保存订阅时为 `null`
 
-管理端请求列表及 Dashboard 最近请求中的 `accountNotes` 为账号当前备注，按内部账号 ID 关联。
-备注不写入请求历史快照；无备注或账号已删除时返回 `null`，修改备注不改变历史请求的账号归属
+管理端请求列表及 Dashboard 最近请求中的 `accountNotes` 来自请求保存的账号备注快照，未保存时为 `null`
 
-`/api/admin/usage/records` 与 `/api/admin/operations/errors` 的记录返回 `clientApiKeyName`，为关联 Key 的当前名称
+`/api/admin/usage/records` 与 `/api/admin/operations/errors` 的 `clientApiKeyName` 来自请求保存的 Key 名称快照，
+未保存时为 `null`，不影响记录返回，不包含密钥原文
 
-Key 已删除或未关联时为 `null`，不影响记录返回，不包含密钥原文
+查询不关联当前配置，改名、修改订阅或删除配置不改变已有快照。补写的历史 Key 名称与订阅取自补写时仍存在的配置，
+不保证等于请求发生时的值；无法补齐的字段保持未知
 
 运维错误记录的 `errorDetails` 为受控诊断文本，无详情时为 `null`。
 错误来源快照以 JSON 文本保存：`causes.messages` 按外层到内层排列本地原因，`causes.truncated`

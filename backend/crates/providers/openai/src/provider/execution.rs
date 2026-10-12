@@ -328,6 +328,9 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_account_snapshot(Some(
+            gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
+        ))
         .with_selection_observation(ProviderSelectionObservation::new(
             account_selection_wait_ms,
             lease.capacity_snapshot(),
@@ -744,7 +747,7 @@ fn image_response_metering(
     let mut usage = Usage::new();
     usage.input_tokens = raw.get("input_tokens").and_then(Value::as_u64);
     usage.output_tokens = raw.get("output_tokens").and_then(Value::as_u64);
-    usage.cached_tokens = raw
+    usage.cached_input_tokens = raw
         .pointer("/input_tokens_details/cached_tokens")
         .and_then(Value::as_u64);
     usage.image_input_tokens = raw
@@ -951,7 +954,11 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             .with_requested_service_tier(request.service_tier())
             .with_request_tool_pricing(upstream_model.as_str(), request.tools())
             .with_raw_sse_passthrough();
-        let mut pre_commit_events = PreCommitClientEvents::new(trace);
+        let mut pre_commit_events = PreCommitClientEvents::new(trace).with_replayable_prelude(
+            websocket_transport
+                && request.responses_lite.as_deref() == Some("true")
+                && context.allows_replayable_prelude(),
+        );
         loop {
             if context.deadline().is_elapsed() {
                 if allows_account_state_mutation {

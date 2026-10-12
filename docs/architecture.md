@@ -376,13 +376,17 @@ Client Key 鉴权完成后，API adapter 从有界请求头识别客户端，Cor
 - 一个客户端请求对应一条 `model_requests`；attempt 是请求内事实，不建立第二张权威表
 - Provider 的一次 `execute` 只选择一个 credential 并返回一个冷流；换号、重试和 fallback 由 Core 决定
 - `not_sent`、`sent`、`ambiguous` 是单调的上游发送边界；结果不明确时不能假定上游未收到请求
-- downstream commit 是不可撤回的交付承诺。commit 后禁止换号、重试和 fallback
+- downstream commit 记录不可撤回的首次交付；不可重放事件交付后禁止换号、重试和 fallback
+  原生 Responses Lite WebSocket 及时交付正常事件，仅 Provider 明确标记的可替换前导保留重试资格；Core 单独维护重放屏障，
+  仍检查错误分类、续接归属、发送状态、副作用及预算。中间件链不启用此前导例外
 - API 在最终错误编码出口投影客户端恢复信号；该投影不修改 Provider 上游事实，也不改变 Core 的
   重试与提交边界。具体错误合同见 [数据面接口](api.md#3-openai-数据面与模型目录)
 - Provider 可将明确容量拒绝标记为有界同账号退避，Core 在既有安全重放边界内执行，按账号维护请求内
   预算，耗尽后复用普通换号路径。该退避消耗总路由预算，与 WS 传输恢复、OAuth 刷新及账号额度冷却分开
-- OpenAI 的结构事件由 Provider 保留到有效输出或终态，不按等待时长或累计体积提前交付。
-  交付前的 WS 传输错误可请求有界同账号尽力恢复，即使发送结果不明也保留此恢复意图；
+- OpenAI Provider 在原生 Responses Lite WebSocket 上不等待后续事件再交付正常帧；
+  未知事件立即交付并结束重放窗口。其他 WebSocket 及 HTTP/SSE 保留到有效输出或终态，
+  不按等待时长或累计体积提前交付，中间件链沿用缓冲策略。
+  有效输出交付前的 WS 传输错误可请求有界同账号尽力恢复，即使发送结果不明也保留此恢复意图；
   发送事实与安全重放证明不因此改写。Provider 限定传输次数与续接范围，Core 保持原账号并检查
   取消、deadline、已观测外部副作用及下游交付边界
 - 换号预算从运行设置冻结到请求计划，选中账号与上一 attempt 不同时计数；首次选号、同账号重试和
@@ -604,6 +608,10 @@ Client Key 与账号分组形成授权范围：
 - 已绑定分组为空或全部禁用时得到空池，绝不回退为全部账号
 - 分组可以包含多个 Provider，账号也可以属于多个分组
 
+Core 在账号授权、模型政策与请求路由约束内，优先选择目录明确包含映射后模型且能力匹配的 Provider，
+再保留发现型或暂不可读目录的未知模型候选；两类候选各自保持 Provider 标识顺序。
+目录缺项不阻止 OpenAI 模型透传，重试和跨 Provider fallback 仍受原有发送与重放安全边界约束
+
 账号选择综合启停状态、credential/quota 事实、Redis cooldown、并发上限、权重、请求间隔和会话亲和。
 默认账号并发上限为 `0` 时表示无限；账号独立正数上限仍优先，未设置则继承默认值。
 无限并发只跳过并发上限判断，保留在途租约计数、请求间隔及其他准入约束；含无限账号的容量不投影有限占用比例。
@@ -639,7 +647,7 @@ Continuation 受原请求的 Client Key、账号范围、Provider 和发送/交�
 - OpenAI Provider 的 OAuth 大包传输预检在发送前执行，新链可选择 HTTP；大 connection-local
   续接和 HTTP `store=false` 后不可原生续写的 WS 增量返回 `ClientReplayRequired`，由客户端重发
   完整历史。体积测量复用 WS 编码结构，Provider session state 仍只携带元数据，不保存 transcript
-- OpenAI 在交付前收到可安全重放的明确额度拒绝时，先隔离账号，再投影 `ClientReplayRequired`；
+- OpenAI 在有效输出交付前收到可安全重放的明确额度拒绝时，先隔离账号，再投影 `ClientReplayRequired`；
   丢弃未交付的原错误帧，由客户端提交完整历史开启新链，不把原增量输入交给其他账号。
   真实错误分类、状态码、发送状态和上游诊断保持不变，客户端合同见 [Responses API](api.md#3-openai-数据面与模型目录)
 - OpenAI 按 native → replay owner → replay any 推进，并保留官方 `previous_response_id` 语义；
@@ -844,6 +852,10 @@ OpenAI 订阅周期属于按需个人信息，不是额度事实。Admin 账号�
 发送结果不明确时必须复用原键。确认成功后管理端再显式刷新卡片与 quota，不能直接改本地重置时间
 
 ## 10. 观测与后台任务
+
+管理观测查询与统计 Worker 共用 PostgreSQL 连接预算，为请求执行保留连接容量。每项操作使用一个受预算约束的连接；
+超时或调用方取消后，名额持续覆盖 SQLx 的协议收尾、事务回滚和连接归还，不能随查询 Future 提前释放。
+请求列表的精确总数与候选页共用数据库快照，按距首尾的较短方向读取，返回顺序和页码语义保持一致。
 
 ### 额度预测
 

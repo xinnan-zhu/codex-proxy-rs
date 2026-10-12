@@ -282,6 +282,77 @@ impl ProviderCatalogPort for TestCatalog {
     }
 }
 
+struct MixedCatalog;
+
+impl ProviderCatalogPort for MixedCatalog {
+    fn catalog_generations(&self) -> BTreeMap<ProviderKind, ProviderCatalogGeneration> {
+        ["openai", "xai"]
+            .into_iter()
+            .map(|provider| {
+                (
+                    ProviderKind::new(provider).unwrap(),
+                    ProviderCatalogGeneration::new(1),
+                )
+            })
+            .collect()
+    }
+
+    fn model_catalog_is_exhaustive(&self, provider: &ProviderKind) -> bool {
+        provider.as_str() != "openai"
+    }
+
+    fn query_model_capabilities(
+        &self,
+        provider: &ProviderKind,
+    ) -> BoxFuture<'_, Result<Vec<ProviderModelCapabilities>, ProviderCatalogUnavailable>> {
+        let model = match provider.as_str() {
+            "openai" => "gpt-5.5",
+            "xai" => "grok-4.7",
+            _ => return Box::pin(async { Err(ProviderCatalogUnavailable) }),
+        };
+        Box::pin(async move {
+            Ok([model, "shared-model"]
+                .into_iter()
+                .map(|model| {
+                    ProviderModelCapabilities::new(
+                        UpstreamModelId::new(model).unwrap(),
+                        super::capabilities(),
+                    )
+                })
+                .collect())
+        })
+    }
+}
+
+fn mixed_catalog_snapshot() -> gateway_core::routing::RuntimeSnapshot {
+    let facts = SnapshotFacts::new(
+        revision(1),
+        revision(1),
+        super::settings(),
+        vec![],
+        vec![],
+        ["openai", "xai"]
+            .into_iter()
+            .map(|provider| {
+                SnapshotProviderAccountFacts::new(
+                    gateway_core::account::ProviderAccountId::new(format!("acct_{provider}"))
+                        .unwrap(),
+                    provider,
+                )
+            })
+            .collect(),
+        vec![],
+    );
+    block_on(
+        RuntimeSnapshotCompiler::new(
+            Arc::new(TestSnapshotStore::new(Ok(facts))),
+            Arc::new(MixedCatalog),
+        )
+        .compile(),
+    )
+    .unwrap()
+}
+
 fn catalog_generations(generation: u64) -> BTreeMap<ProviderKind, ProviderCatalogGeneration> {
     BTreeMap::from([(
         ProviderKind::new("alpha").expect("provider"),
@@ -604,6 +675,139 @@ fn discovery_catalog_should_not_reject_an_unlisted_model() {
             },
         )
         .expect("upstream decides model availability");
+}
+
+#[test]
+fn mixed_catalog_should_prefer_known_model_over_discovery_fallback() {
+    let snapshot = mixed_catalog_snapshot();
+    let model = PublicModelId::new("grok-4.7").unwrap();
+    assert!(
+        snapshot
+            .public_models_for_scope(&snapshot.all_account_scope())
+            .contains(&model)
+    );
+
+    let plan = snapshot
+        .plan(
+            &model,
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        plan.candidates()
+            .iter()
+            .map(|candidate| candidate.provider().as_str())
+            .collect::<Vec<_>>(),
+        ["xai", "openai"]
+    );
+}
+
+#[test]
+fn mixed_catalog_should_prioritize_the_mapped_upstream_model() {
+    let snapshot = mixed_catalog_snapshot();
+    let settings = snapshot
+        .settings()
+        .clone()
+        .with_model_mappings(BTreeMap::from([(
+            "public-model".to_owned(),
+            "grok-4.7".to_owned(),
+        )]));
+    let snapshot = snapshot.with_settings(&settings).unwrap();
+
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("public-model").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    assert_eq!(plan.candidates()[0].provider().as_str(), "xai");
+    assert_eq!(
+        plan.candidates()[0].upstream_model().unwrap().as_str(),
+        "grok-4.7"
+    );
+}
+
+#[test]
+fn mixed_catalog_should_keep_discovery_routes_for_unlisted_models() {
+    let snapshot = mixed_catalog_snapshot();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("unlisted-model").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    assert_eq!(plan.candidates().len(), 1);
+    assert_eq!(plan.candidates()[0].provider().as_str(), "openai");
+}
+
+#[test]
+fn mixed_catalog_should_preserve_provider_order_for_shared_models() {
+    let snapshot = mixed_catalog_snapshot();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("shared-model").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &Default::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        plan.candidates()
+            .iter()
+            .map(|candidate| candidate.provider().as_str())
+            .collect::<Vec<_>>(),
+        ["openai", "xai"]
+    );
+}
+
+#[test]
+fn mixed_catalog_should_respect_required_provider_before_model_priority() {
+    let snapshot = mixed_catalog_snapshot();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("grok-4.7").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &gateway_core::routing::RoutingContext {
+                required_provider: Some(ProviderKind::new("openai").unwrap()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(plan.candidates().len(), 1);
+    assert_eq!(plan.candidates()[0].provider().as_str(), "openai");
+}
+
+#[test]
+fn mixed_catalog_should_respect_blocked_provider_before_model_priority() {
+    let snapshot = mixed_catalog_snapshot();
+    let plan = snapshot
+        .plan(
+            &PublicModelId::new("grok-4.7").unwrap(),
+            &super::operation(),
+            snapshot.all_account_scope(),
+            &gateway_core::routing::RoutingContext {
+                blocked_providers: std::collections::BTreeSet::from([
+                    ProviderKind::new("xai").unwrap()
+                ]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(plan.candidates().len(), 1);
+    assert_eq!(plan.candidates()[0].provider().as_str(), "openai");
 }
 
 #[test]

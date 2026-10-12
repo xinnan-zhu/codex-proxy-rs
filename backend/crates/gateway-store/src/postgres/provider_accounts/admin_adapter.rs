@@ -120,18 +120,22 @@ impl PgAdminAccountStore {
             .collect::<Vec<_>>();
         let rows = self
             .query_budget
-            .run("load account usage windows", async {
-                sqlx::query(sqlx::AssertSqlSafe(account_usage_by_windows_sql()))
-                    .bind(account_ids)
-                    .bind(keys)
-                    .bind(starts)
-                    .bind(ends)
-                    .fetch_all(&self.pool)
-                    .await
-                    .map_err(|source| {
-                        postgres_unavailable("load provider account quota window usage", source)
-                    })
-            })
+            .run(
+                &self.pool,
+                "load account usage windows",
+                |mut connection| async move {
+                    sqlx::query(sqlx::AssertSqlSafe(account_usage_by_windows_sql()))
+                        .bind(account_ids)
+                        .bind(keys)
+                        .bind(starts)
+                        .bind(ends)
+                        .fetch_all(&mut *connection)
+                        .await
+                        .map_err(|source| {
+                            postgres_unavailable("load provider account quota window usage", source)
+                        })
+                },
+            )
             .await
             .map_err(|error| admin_store_error(ENTITY, error))?;
         let mut usage_rows = Vec::with_capacity(windows.len());

@@ -29,6 +29,7 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 /// Store 读取到的一个启用 Client API Key 策略事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
+    name_snapshot: Option<String>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     key_id: ClientApiKeyId,
     plaintext_key: PlaintextClientApiKey,
@@ -37,6 +38,12 @@ pub struct SnapshotClientPolicyFacts {
 }
 
 impl SnapshotClientPolicyFacts {
+    #[must_use]
+    pub fn with_name_snapshot(mut self, name: Option<String>) -> Self {
+        self.name_snapshot = name;
+        self
+    }
+
     #[must_use]
     pub fn with_request_profiles(
         mut self,
@@ -55,6 +62,7 @@ impl SnapshotClientPolicyFacts {
     ) -> Self {
         Self {
             key_id,
+            name_snapshot: None,
             request_profiles: BTreeMap::new(),
             plaintext_key,
             group_ids,
@@ -509,17 +517,20 @@ async fn compile_runtime_snapshot(
                     .map_err(|_| RuntimeSnapshotCompileError::InvalidData)?,
             )
         };
-        client_policies.push(ClientPolicy::new(
-            policy.key_id,
-            policy.plaintext_key,
-            Arc::new(
-                account_scope
-                    .with_fast_mode(fast_mode)
-                    .with_request_profiles(policy.request_profiles),
-            ),
-            true,
-            policy.limits,
-        ));
+        client_policies.push(
+            ClientPolicy::new(
+                policy.key_id,
+                policy.plaintext_key,
+                Arc::new(
+                    account_scope
+                        .with_fast_mode(fast_mode)
+                        .with_request_profiles(policy.request_profiles),
+                ),
+                true,
+                policy.limits,
+            )
+            .with_name_snapshot(policy.name_snapshot),
+        );
     }
 
     RuntimeSnapshot::new_with_privacy_compiler(
@@ -1090,6 +1101,7 @@ impl RuntimeSnapshot {
     ) -> Result<RoutingPlan, RoutingError> {
         let requirements = operation.capability_requirements();
         let mut candidates = Vec::new();
+        let mut unlisted_candidates = Vec::new();
 
         if context.required_provider.is_none() && account_scope.provider_kinds().is_empty() {
             return Err(RoutingError::EmptyAccountScope);
@@ -1137,11 +1149,11 @@ impl RuntimeSnapshot {
             {
                 continue;
             }
-            let emulated_features = match self
+            let capabilities = self
                 .provider_models
                 .get(provider)
-                .and_then(|models| models.get(&upstream_model))
-            {
+                .and_then(|models| models.get(&upstream_model));
+            let emulated_features = match capabilities {
                 Some(capabilities) => {
                     let Some(emulated) = capabilities.match_requirements(&requirements) else {
                         continue;
@@ -1151,7 +1163,7 @@ impl RuntimeSnapshot {
                 None if self.exhaustive_provider_catalogs.contains(provider) => continue,
                 None => BTreeSet::new(),
             };
-            candidates.push(ProviderCandidate {
+            let candidate = ProviderCandidate {
                 provider: provider.clone(),
                 model_presentation: self
                     .provider_model_presentations
@@ -1161,8 +1173,15 @@ impl RuntimeSnapshot {
                 upstream_model: Some(upstream_model),
                 emulated_features,
                 account_scope: Arc::clone(&account_scope),
-            });
+            };
+            if capabilities.is_some() {
+                candidates.push(candidate);
+            } else {
+                unlisted_candidates.push(candidate);
+            }
         }
+        // 已知模型优先；发现型目录的未知模型仍可透传，但不能抢在明确匹配的 Provider 前面
+        candidates.extend(unlisted_candidates);
 
         if candidates.is_empty() {
             // 模型存在性必须包含被请求路由限制排除的 Provider；目录未知时不能断言模型不存在

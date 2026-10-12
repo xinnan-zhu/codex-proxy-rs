@@ -7,7 +7,7 @@ import { computed } from 'vue'
 import { decimalDisplayNumber, formatUsd } from '@/utils/format'
 
 const props = defineProps<{
-  summary: Awaited<ReturnType<typeof getUsageRecordSummary>>
+  summary: Omit<Awaited<ReturnType<typeof getUsageRecordSummary>>, 'analytics'>
   cost: Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>['cost']
 }>()
 
@@ -54,7 +54,7 @@ const items = computed(() => [
     key: 'cached',
     label: '缓存 Token',
     icon: Database,
-    value: props.summary.cachedTokens,
+    value: props.summary.cachedInputTokens,
     detail: '缓存读取命中',
     tone: 'bg-cp-orange-container text-cp-orange-on-container',
   },
