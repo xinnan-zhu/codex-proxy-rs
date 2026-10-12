@@ -148,7 +148,7 @@ async fn dashboard_summary_should_derive_first_token_average_from_trend() {
 }
 
 #[tokio::test]
-async fn health_timeline_should_match_legacy_status_precedence_and_thresholds() {
+async fn health_timeline_should_apply_status_precedence_and_thresholds() {
     let now = Utc::now();
     let current_slot = quarter_hour_start(now);
     let store = Arc::new(FixtureObservabilityStore::new(observation_range(now)));
@@ -158,12 +158,27 @@ async fn health_timeline_should_match_legacy_status_precedence_and_thresholds() 
             RequestMetrics {
                 failure_count: 1,
                 cancelled_count: 1,
-                incomplete_count: 1,
                 caller_error_count: 1,
                 ..RequestMetrics::default()
             },
             HealthStatus::NoData,
             None,
+        ),
+        (
+            RequestMetrics {
+                incomplete_count: 1,
+                ..RequestMetrics::default()
+            },
+            HealthStatus::LowSample,
+            Some(0.0),
+        ),
+        (
+            RequestMetrics {
+                incomplete_count: 3,
+                ..RequestMetrics::default()
+            },
+            HealthStatus::Unavailable,
+            Some(0.0),
         ),
         (
             RequestMetrics {
@@ -184,21 +199,21 @@ async fn health_timeline_should_match_legacy_status_precedence_and_thresholds() 
         ),
         (
             RequestMetrics {
-                success_count: 98,
-                failure_count: 2,
+                success_count: 94,
+                failure_count: 6,
                 ..RequestMetrics::default()
             },
             HealthStatus::Unstable,
-            Some(98.0),
+            Some(94.0),
         ),
         (
             RequestMetrics {
-                success_count: 99,
-                failure_count: 1,
+                success_count: 95,
+                incomplete_count: 5,
                 ..RequestMetrics::default()
             },
             HealthStatus::Stable,
-            Some(99.0),
+            Some(95.0),
         ),
     ];
 
@@ -221,6 +236,92 @@ async fn health_timeline_should_match_legacy_status_precedence_and_thresholds() 
             .expect("current health slot");
         assert_eq!(point.status, expected_status);
         assert_eq!(point.reliability_percent, expected_reliability);
+    }
+}
+
+#[tokio::test]
+async fn health_views_should_include_incomplete_and_keep_final_outcomes_separate() {
+    let now = Utc::now();
+    let current_slot = quarter_hour_start(now);
+    let store = Arc::new(FixtureObservabilityStore::new(observation_range(now)));
+    let services = observability_services(store.clone()).await;
+    let fixtures = [
+        (162, 0, 2, 0, 0, 98.780_487_804_878_05),
+        (297, 0, 2, 5, 0, 99.331_103_678_929_76),
+        (467, 1, 5, 0, 0, 98.731_501_057_082_45),
+        (95, 2, 3, 4, 1, 95.0),
+        (100, 0, 0, 0, 0, 100.0),
+    ];
+
+    for (index, (success, failed, incomplete, cancelled, caller_error, expected_percent)) in
+        fixtures.into_iter().enumerate()
+    {
+        let range = observation_range(
+            now + Duration::seconds(i64::try_from(index).expect("fixture index fits i64") * 2),
+        );
+        let metrics = RequestMetrics {
+            request_count: success + failed + incomplete + cancelled + caller_error,
+            success_count: success,
+            failure_count: failed + caller_error,
+            incomplete_count: incomplete,
+            cancelled_count: cancelled,
+            caller_error_count: caller_error,
+            ..RequestMetrics::default()
+        };
+        store.replace_trend(vec![health_metric_point(current_slot, metrics.clone())]);
+        store.replace_overview(UsageOverview {
+            analytics: Default::default(),
+            range,
+            requests: metrics,
+            // 中间尝试失败不会增加最终失败请求数
+            attempts: AttemptMetrics {
+                failure_count: 2,
+                ..AttemptMetrics::default()
+            },
+            providers: Vec::new(),
+        });
+
+        let dashboard = services
+            .observability()
+            .dashboard_summary(range, TrendKind::Usage)
+            .await
+            .expect("dashboard summary");
+        let timeline = dashboard.health_timeline;
+        let point = timeline
+            .points
+            .iter()
+            .find(|point| point.bucket_start == current_slot)
+            .expect("current health slot");
+        assert_eq!(point.status, HealthStatus::Stable);
+        assert_eq!(point.failed_requests, failed);
+        assert_eq!(point.incomplete_requests, incomplete);
+        assert_eq!(point.cancelled_requests, cancelled);
+        assert_eq!(point.caller_error_requests, caller_error);
+        for reliability in [timeline.reliability_percent, point.reliability_percent] {
+            assert!((reliability.expect("health reliability") - expected_percent).abs() < 1e-10);
+        }
+        for success_rate in [
+            dashboard.trend.summary.success_rate,
+            dashboard.trend.points[0].success_rate,
+        ] {
+            assert!(
+                (success_rate.expect("trend success rate") * 100.0 - expected_percent).abs()
+                    < 1e-10
+            );
+        }
+
+        let insights = services
+            .observability()
+            .usage_insights(range, UsageFilter::default())
+            .await
+            .expect("usage insights");
+        assert_eq!(insights.health.failed_requests, failed);
+        assert_eq!(insights.health.incomplete_requests, incomplete);
+        assert!((insights.health.success_rate * 100.0 - expected_percent).abs() < 1e-10);
+        assert!(
+            (insights.health.points[0].error_rate * 100.0 - (100.0 - expected_percent)).abs()
+                < 1e-10
+        );
     }
 }
 

@@ -5855,3 +5855,144 @@ fn zero_rotation_budget_still_allows_retrying_the_same_account() {
         Some(&ProviderAccountId::new("acct_first").unwrap())
     );
 }
+
+#[test]
+fn transport_keepalive_preserves_pre_output_recovery_and_first_business_commit() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, provider) = coordinator(vec![
+        Script::Stream {
+            account_id: "acct_first",
+            items: vec![Err(transient_rejection())],
+        },
+        Script::Stream {
+            account_id: "acct_first",
+            items: complete_stream(None),
+        },
+    ]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .expect("session");
+    let transport = session.response_commit();
+    transport.record(Some(200));
+    let first_commit = transport.committed_at();
+    let event = block_on(session.next_event())
+        .expect("recovery")
+        .expect("event");
+    assert_eq!(
+        event.commit_requirement(),
+        CommitRequirement::CommitBeforeDelivery
+    );
+    block_on(session.commit_downstream(Some(200))).expect("business commit");
+    while block_on(session.next_event())
+        .expect("remaining stream")
+        .is_some()
+    {}
+    assert_eq!(transport.committed_at(), first_commit);
+    assert_eq!(provider.contexts.lock().unwrap().len(), 2);
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.finalizations.len(), 1);
+    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Succeeded);
+    assert_eq!(state.finalizations[0].client_status_code, Some(200));
+    assert!(state.finalizations[0].committed);
+}
+
+#[test]
+fn transport_keepalive_records_late_failure_as_incomplete_http_200() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, _) = coordinator(vec![Script::Stream {
+        account_id: "acct_first",
+        items: vec![Err(ProviderError::new(
+            ProviderErrorKind::Timeout,
+            UpstreamSendState::Sent,
+        )
+        .with_status(504))],
+    }]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .expect("session");
+    session.response_commit().record(Some(200));
+    block_on(session.next_event()).expect_err("upstream failure");
+    block_on(session.record_client_status(504))
+        .expect("late logical status cannot replace HTTP 200");
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.finalizations.len(), 1);
+    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Incomplete);
+    assert_eq!(state.finalizations[0].client_status_code, Some(200));
+    assert_eq!(state.finalizations[0].upstream_status_code, Some(504));
+    assert!(state.finalizations[0].committed);
+    assert!(state.recorded_statuses.is_empty());
+}
+
+#[test]
+fn transport_keepalive_cancellation_retains_commit_without_inventing_a_send() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, provider) = coordinator(Vec::new());
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .expect("session");
+    session.response_commit().record(Some(200));
+    block_on(session.cancel_and_finalize()).expect("cancel");
+    assert!(provider.contexts.lock().unwrap().is_empty());
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.finalizations.len(), 1);
+    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Cancelled);
+    assert_eq!(state.finalizations[0].client_status_code, Some(200));
+    assert_eq!(
+        state.finalizations[0].send_state,
+        UpstreamSendState::NotSent
+    );
+    assert!(state.finalizations[0].committed);
+}
+
+#[test]
+fn transport_keepalive_cannot_change_an_already_finalized_failure_to_http_200() {
+    let operation = generate_operation();
+    let route_plan = plan(&operation);
+    let (coordinator, store, _) = coordinator(vec![Script::Stream {
+        account_id: "acct_first",
+        items: vec![Err(ProviderError::new(
+            ProviderErrorKind::Timeout,
+            UpstreamSendState::Sent,
+        )
+        .with_status(504))],
+    }]);
+    let mut session = block_on(coordinator.start(
+        model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+        operation,
+        route_plan,
+        None,
+        None,
+        CancellationToken::new(),
+    ))
+    .unwrap();
+    let transport = session.response_commit();
+    block_on(session.next_event()).expect_err("original failure");
+    assert!(!transport.record(Some(200)));
+    assert!(transport.committed_at().is_none());
+    block_on(session.record_client_status(504)).unwrap();
+    let state = store.state.lock().unwrap();
+    assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Failed);
+    assert!(!state.finalizations[0].committed);
+    assert_eq!(state.recorded_statuses, vec![504]);
+}

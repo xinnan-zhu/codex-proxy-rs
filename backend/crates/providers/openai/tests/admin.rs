@@ -412,12 +412,31 @@ async fn copying_builtin_prices_keeps_cache_read_and_write_fallback_costs() {
         "gpt-6-sol",
         "gpt-6-luna",
     ] {
-        let usage = OpenAiBillingUsage::new(100, 10, 20, 15);
-        let inherited = openai_billing_breakdown(model, usage, None).unwrap();
-        let copied =
-            openai_billing_breakdown_with_override(model, usage, None, Some(&prices[model]))
+        let ultrafast_supported = matches!(model, "gpt-6-astra" | "gpt-6.1-sol");
+        for band in ["ultrafast", "long_ultrafast"] {
+            assert_eq!(prices[model].bands.contains_key(band), ultrafast_supported);
+        }
+        for tier in [None, Some("ultrafast")] {
+            if tier.is_some() && !ultrafast_supported {
+                continue;
+            }
+            for input in [100, 272_001] {
+                let usage = OpenAiBillingUsage::new(input, 10, 20, 15);
+                let inherited = openai_billing_breakdown(model, usage, tier).unwrap();
+                let copied = openai_billing_breakdown_with_override(
+                    model,
+                    usage,
+                    tier,
+                    Some(&prices[model]),
+                )
                 .unwrap();
-        assert_eq!(inherited.total_amount(), copied.total_amount(), "{model}");
+                assert_eq!(
+                    inherited.total_amount(),
+                    copied.total_amount(),
+                    "{model} {tier:?} {input}"
+                );
+            }
+        }
     }
 }
 

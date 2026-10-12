@@ -126,10 +126,23 @@ impl<'a> CodexSelectionModel<'a> {
     }
 
     pub(crate) fn allows_account(self, account: &ProviderAccount) -> bool {
+        if account.authentication_kind() != CODEX_AUTHENTICATION_KIND_OAUTH {
+            return true;
+        }
+        // API Key 兼容上游可以提供 Grok；ChatGPT OAuth 不能因共用 Provider 被选中
+        // 使用路由映射后的模型，不限制未知别名或尚未被目录收录的 OpenAI 模型
+        if self.model().is_some_and(|model| {
+            let model = model.rsplit('/').next().unwrap_or(model);
+            model.eq_ignore_ascii_case("grok")
+                || model
+                    .get(..5)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("grok-"))
+        }) {
+            return false;
+        }
         // 官方 Codex 的 image_generation_available 排除 Free，API Key 不套用 ChatGPT 套餐
         // https://github.com/openai/codex/commit/0a0a9b6c8f
         !(matches!(self, Self::Image(_))
-            && account.authentication_kind() == CODEX_AUTHENTICATION_KIND_OAUTH
             && account
                 .plan_type()
                 .is_some_and(|plan| plan.trim().eq_ignore_ascii_case("free")))
@@ -636,8 +649,8 @@ impl CodexCredentialSelector {
                 if request.requires_websocket
                     && pinned_account.as_ref().is_none_or(|id| id == account.id())
                 {
-                    let runtime = match self.repository.load_runtime_credential(&account).await {
-                        Ok(runtime) => runtime,
+                    let runtime = match self.repository.reload_selected_credential(&account).await {
+                        Ok((_, runtime)) => runtime,
                         Err(CredentialRepositoryError::RevisionConflict(_)) => {
                             retry_account_snapshot(
                                 request.attempt,
@@ -930,10 +943,15 @@ impl CodexCredentialSelector {
                     .find(|candidate| candidate.account.id() == selected.account.id())
                     .map(|candidate| candidate.account.clone())
                     .ok_or(CredentialSelectionError::InvalidCredential(None))?;
-                // 额度观测等并发更新会使整个账号快照失效，必须重新选号并校验资格
+                // 凭据、状态或额度结论的并发更新会使账号快照失效，必须重新选号并校验资格；
+                // 仅额度观测时刻前进时沿用最新快照
                 // 在占用租约和请求间隔前完成校验，避免重读被自己的异步释放挡住
-                let runtime = match self.repository.load_runtime_credential(&account).await {
-                    Ok(runtime) => runtime,
+                let (account, runtime) = match self
+                    .repository
+                    .reload_selected_credential(&account)
+                    .await
+                {
+                    Ok(reloaded) => reloaded,
                     Err(CredentialRepositoryError::RevisionConflict(_)) => {
                         retry_account_snapshot(request.attempt, &account, &mut snapshot_retries)?;
                         continue 'capacity;
