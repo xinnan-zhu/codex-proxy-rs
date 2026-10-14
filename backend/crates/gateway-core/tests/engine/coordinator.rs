@@ -53,6 +53,7 @@ use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, PartialEq)]
 struct FinalState {
+    error_message: Option<String>,
     error_kind: Option<GatewayErrorKind>,
     diagnostic_trace_json: Option<String>,
     outcome: ExecutionOutcome,
@@ -228,6 +229,10 @@ impl ExecutionStore for FakeStore {
             .expect("store lock")
             .finalizations
             .push(FinalState {
+                error_message: finalization
+                    .error
+                    .as_ref()
+                    .map(|error| error.safe_message().to_owned()),
                 error_kind: finalization.error.as_ref().map(|error| error.kind()),
                 diagnostic_trace_json: finalization.diagnostic_trace_json,
                 outcome: finalization.outcome,
@@ -671,7 +676,6 @@ fn plan(operation: &Operation) -> RoutingPlan {
         AccountSelectionPolicy::new(
             RotationStrategy::Smart,
             NonZeroU32::new(2).expect("account concurrency"),
-            Duration::from_millis(50),
         ),
     )
 }
@@ -752,7 +756,6 @@ fn plan_with_profiles(
         ConfigRevision::new(1).expect("config revision"),
         gateway_core::settings::SettingsValues::new(
             account_selection_policy.max_concurrent_per_account().get(),
-            u64::try_from(account_selection_policy.request_interval().as_millis()).unwrap(),
             account_selection_policy.strategy().as_str(),
             Default::default(),
             None,
@@ -824,7 +827,7 @@ fn dual_provider_plan(operation: &Operation) -> RoutingPlan {
     let directory = Arc::new(RuntimeAccountDirectory::new(entries));
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("config revision"),
-        gateway_core::settings::SettingsValues::new(2, 50, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
         vec![openai.clone(), xai.clone()],
         vec![
             ProviderModel::new(
@@ -2157,7 +2160,6 @@ fn unavailable_native_continuation_uses_provider_recovery_with_the_configured_ac
         let policy = AccountSelectionPolicy::new(
             RotationStrategy::RoundRobin,
             NonZeroU32::new(2).expect("account concurrency"),
-            Duration::from_millis(50),
         );
         let route_plan = plan_with_policy(&operation, policy);
         let (coordinator, store, provider) = coordinator(vec![
@@ -4286,6 +4288,85 @@ fn structural_event_before_replay_safe_failure_should_switch_account_before_comm
 }
 
 #[test]
+fn delivered_prelude_allows_retry_without_control_until_non_replayable_delivery() {
+    for close_window in [false, true] {
+        let operation = generate_operation();
+        let route_plan = plan(&operation);
+        let prelude = || {
+            ProviderEvent::wire(
+                ProtocolWireEvent::json(
+                    "openai",
+                    Some("response.created".to_owned()),
+                    json!({"type":"response.created","response":{"id":"response-1","output":[]}}),
+                )
+                .unwrap(),
+            )
+            .with_replayable_prelude()
+        };
+        let mut items = vec![Ok(prelude())];
+        if close_window {
+            items.push(Ok(ProviderEvent::wire(
+                ProtocolWireEvent::json(
+                    "openai",
+                    Some("response.future".to_owned()),
+                    json!({"type":"response.future"}),
+                )
+                .unwrap(),
+            )));
+            // 后续前导不能撤销已经交付未知事件的事实
+            items.push(Ok(prelude()));
+        }
+        items.push(Err(ProviderError::new(
+            ProviderErrorKind::Transport,
+            UpstreamSendState::Sent,
+        )
+        .with_replay_safe()));
+        let (coordinator, store, provider) = coordinator(vec![
+            Script::ObservedStream {
+                account_id: "acct_first",
+                items,
+            },
+            Script::Stream {
+                account_id: "acct_second",
+                items: complete_stream(None),
+            },
+        ]);
+        let mut session = block_on(coordinator.start(
+            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+            operation,
+            route_plan,
+            None,
+            None,
+            CancellationToken::new(),
+        ))
+        .unwrap();
+        let first = block_on(session.next_event()).unwrap().unwrap();
+        assert!(first.into_provider_events()[0].is_replayable_prelude());
+        block_on(session.commit_downstream(Some(200))).unwrap();
+        let result = loop {
+            match block_on(session.next_event()) {
+                Ok(Some(_)) => {}
+                terminal => break terminal,
+            }
+        };
+        assert_eq!(result.is_err(), close_window);
+        let attempts = if close_window { 1 } else { 2 };
+        assert_eq!(provider.contexts.lock().unwrap().len(), attempts);
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.commits, 1);
+        assert_eq!(state.intermediate_failures, attempts - 1);
+        assert_eq!(
+            state.finalizations[0].outcome,
+            if close_window {
+                ExecutionOutcome::Incomplete
+            } else {
+                ExecutionOutcome::Succeeded
+            }
+        );
+    }
+}
+
+#[test]
 fn cancellation_before_pending_delivery_commit_reaches_terminal_state() {
     let operation = generate_operation();
     let route_plan = plan(&operation);
@@ -5727,13 +5808,9 @@ fn configured_rotation_budget_limits_actual_account_changes() {
         let operation = generate_operation();
         let route_plan = plan_with_policy(
             &operation,
-            AccountSelectionPolicy::new(
-                RotationStrategy::Smart,
-                NonZeroU32::new(2).unwrap(),
-                Duration::ZERO,
-            )
-            .with_max_account_rotations(budget)
-            .with_openai_session_affinity_ttl(Duration::from_secs(168 * 3600)),
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+                .with_max_account_rotations(budget)
+                .with_openai_session_affinity_ttl(Duration::from_secs(168 * 3600)),
         );
         let (coordinator, store, provider) = coordinator(
             ROTATION_TEST_ACCOUNTS
@@ -5780,12 +5857,8 @@ fn larger_rotation_budget_reaches_a_healthy_account_after_four_failures() {
     let operation = generate_operation();
     let route_plan = plan_with_policy(
         &operation,
-        AccountSelectionPolicy::new(
-            RotationStrategy::Smart,
-            NonZeroU32::new(2).unwrap(),
-            Duration::ZERO,
-        )
-        .with_max_account_rotations(4),
+        AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+            .with_max_account_rotations(4),
     );
     let mut scripts = ROTATION_TEST_ACCOUNTS[..4]
         .iter()
@@ -5821,12 +5894,8 @@ fn zero_rotation_budget_still_allows_retrying_the_same_account() {
     let operation = generate_operation();
     let route_plan = plan_with_policy(
         &operation,
-        AccountSelectionPolicy::new(
-            RotationStrategy::Smart,
-            NonZeroU32::new(2).unwrap(),
-            Duration::ZERO,
-        )
-        .with_max_account_rotations(0),
+        AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+            .with_max_account_rotations(0),
     );
     let (coordinator, _, provider) = coordinator(vec![
         Script::Stream {
@@ -5995,4 +6064,41 @@ fn transport_keepalive_cannot_change_an_already_finalized_failure_to_http_200() 
     assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Failed);
     assert!(!state.finalizations[0].committed);
     assert_eq!(state.recorded_statuses, vec![504]);
+}
+
+#[test]
+fn lease_cancellation_is_preserved_in_the_single_request_terminal() {
+    use gateway_core::lifecycle::{CancellationReason, LeaseFailure, RequestLeaseKind};
+    block_on(async {
+        let operation = generate_operation();
+        let (coordinator, store, _) = coordinator(vec![Script::Pending]);
+        let cancellation = CancellationToken::new();
+        let mut session = coordinator
+            .start(
+                model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+                operation.clone(),
+                plan(&operation),
+                None,
+                None,
+                cancellation.clone(),
+            )
+            .await
+            .unwrap();
+        let reason = CancellationReason::Lease {
+            kind: RequestLeaseKind::ClientAdmission,
+            failure: LeaseFailure::RenewalTimedOut,
+        };
+        let mut next = Box::pin(session.next_event());
+        assert!(futures::poll!(next.as_mut()).is_pending());
+        cancellation.cancel_with_reason(reason);
+        assert!(matches!(next.await, Err(EngineError::Cancelled)));
+        session.cancel_and_finalize().await.unwrap();
+        let state = store.state.lock().unwrap();
+        assert_eq!(state.finalizations.len(), 1);
+        assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Cancelled);
+        assert_eq!(
+            state.finalizations[0].error_message.as_deref(),
+            Some(reason.message())
+        );
+    });
 }

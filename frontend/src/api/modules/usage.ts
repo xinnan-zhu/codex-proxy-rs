@@ -389,6 +389,7 @@ export interface UsageOverviewPerformancePoint {
   outputThroughputP10: number | null
   outputThroughputP50: number | null
   outputThroughputP90: number | null
+  estimatedThroughputCount: number
   capacityUtilization: number | null
   capacityUtilizationP95: number | null
 }
@@ -407,6 +408,7 @@ export interface UsageOverviewPerformance {
   outputThroughputP10: number | null
   outputThroughputP50: number | null
   outputThroughputP90: number | null
+  estimatedThroughputCount: number
   capacityUtilization: number | null
   capacityUtilizationP95: number | null
   latencyCoverage: number
@@ -495,7 +497,6 @@ interface UsageRangeQuery {
   provider?: string
   model?: string
   statusCode?: number
-  search?: string
 }
 
 interface PageQuery {
@@ -503,7 +504,7 @@ interface PageQuery {
   pageSize: number
 }
 
-type UsagePageQuery = UsageRangeQuery & PageQuery
+type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string }
 
 type OpsErrorPageQuery = UsagePageQuery
 

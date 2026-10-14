@@ -661,6 +661,7 @@ pub struct OverviewPerformancePointView {
     pub output_throughput_p10: Option<u64>,
     pub output_throughput_p50: Option<u64>,
     pub output_throughput_p90: Option<u64>,
+    pub estimated_throughput_count: u64,
     pub capacity_utilization: Option<f64>,
     pub capacity_utilization_p95: Option<f64>,
 }
@@ -682,6 +683,7 @@ pub struct OverviewPerformanceView {
     pub output_throughput_p10: Option<u64>,
     pub output_throughput_p50: Option<u64>,
     pub output_throughput_p90: Option<u64>,
+    pub estimated_throughput_count: u64,
     pub capacity_utilization: Option<f64>,
     pub capacity_utilization_p95: Option<f64>,
     pub latency_coverage: f64,

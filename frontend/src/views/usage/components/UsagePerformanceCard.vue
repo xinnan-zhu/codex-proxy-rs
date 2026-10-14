@@ -255,6 +255,12 @@ function formatThroughput(value: number | null) {
             </strong>
           </div>
         </div>
+        <p
+          v-if="hasData && activeView === 'throughput' && performance.estimatedThroughputCount > 0"
+          class="m-0 text-cp-xs text-cp-text-secondary"
+        >
+          含 {{ performance.estimatedThroughputCount }} 次网关估算：缺少上游计时的请求按网关总耗时计算
+        </p>
         <BaseChart v-if="hasData" :option="chartOption" :height="210" />
         <ZEmpty
           v-else

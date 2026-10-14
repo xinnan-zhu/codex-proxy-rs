@@ -1131,6 +1131,7 @@ pub(crate) fn usage_insights_view(
             output_throughput_p10: point.output_throughput_p10,
             output_throughput_p50: point.output_throughput_p50,
             output_throughput_p90: point.output_throughput_p90,
+            estimated_throughput_count: point.estimated_throughput_count,
             capacity_utilization: point
                 .capacity_utilization_avg_basis_points
                 .map(basis_points_rate),
@@ -1228,6 +1229,7 @@ pub(crate) fn usage_insights_view(
             output_throughput_p10: insights.performance.output_throughput_p10,
             output_throughput_p50: insights.performance.output_throughput_p50,
             output_throughput_p90: insights.performance.output_throughput_p90,
+            estimated_throughput_count: insights.performance.estimated_throughput_count,
             capacity_utilization: insights
                 .performance
                 .capacity_utilization_avg_basis_points

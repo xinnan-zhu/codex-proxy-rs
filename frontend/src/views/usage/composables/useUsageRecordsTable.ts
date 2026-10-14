@@ -332,6 +332,7 @@ function emptyOverview() {
       outputThroughputP10: null,
       outputThroughputP50: null,
       outputThroughputP90: null,
+      estimatedThroughputCount: 0,
       capacityUtilization: null,
       capacityUtilizationP95: null,
       latencyCoverage: 0,

@@ -1,5 +1,6 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
+mod analytics;
 mod projection;
 
 use std::{
@@ -68,7 +69,7 @@ fn usage_outcome_filter_should_accept_bounded_unknown_values() {
 }
 
 #[tokio::test]
-async fn output_throughput_uses_official_response_duration_without_local_fallback() {
+async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates() {
     let Some(database) = TestDatabase::create("output_throughput_official_duration").await else {
         return;
     };
@@ -82,23 +83,40 @@ async fn output_throughput_uses_official_response_duration_without_local_fallbac
     let store = admin_observability_store(&database.pool);
     let admin_range = admin_observability::TimeRange::new(range.start, range.end).unwrap();
 
-    // 官方输出已包含推理量；本地总耗时和首字不能改变速率，也不能补齐上游耗时
-    for (first_token, latency, upstream, output, expected) in [
+    // 上游计时优先，缺失时才使用网关总耗时；未知耗时不制造速率，估算不改写官方计时
+    for (first_token, latency, upstream, output, expected, estimated) in [
         (
             Some(14_238_i64),
             Some(15_604_i64),
             Some(7_000_i64),
             Some(112_i64),
             Some(16),
+            0,
         ),
-        (None, Some(15_604), Some(7_000), Some(112), Some(16)),
-        (Some(15_603), Some(15_604), Some(7_000), Some(112), Some(16)),
-        (None, None, Some(7_000), Some(112), Some(16)),
-        (None, Some(0), Some(7_000), Some(112), Some(16)),
-        (Some(10_196), Some(11_186), Some(3_000), Some(46), Some(15)),
-        (None, Some(15_604), None, Some(112), None),
-        (None, Some(15_604), Some(7_000), Some(0), None),
-        (None, Some(15_604), Some(7_000), None, None),
+        (None, Some(15_604), Some(7_000), Some(112), Some(16), 0),
+        (
+            Some(15_603),
+            Some(15_604),
+            Some(7_000),
+            Some(112),
+            Some(16),
+            0,
+        ),
+        (None, None, Some(7_000), Some(112), Some(16), 0),
+        (None, Some(0), Some(7_000), Some(112), Some(16), 0),
+        (
+            Some(10_196),
+            Some(11_186),
+            Some(3_000),
+            Some(46),
+            Some(15),
+            0,
+        ),
+        (None, Some(15_604), None, Some(112), Some(7), 1),
+        (None, None, None, Some(112), None, 0),
+        (None, Some(0), None, Some(112), None, 0),
+        (None, Some(15_604), Some(7_000), Some(0), None, 0),
+        (None, Some(15_604), Some(7_000), None, None, 0),
     ] {
         sqlx::query(
             "update model_requests
@@ -157,6 +175,7 @@ async fn output_throughput_uses_official_response_duration_without_local_fallbac
             .usage_summary(range, UsageRecordFilter::default())
             .await
             .expect("throughput summary");
+        assert_eq!(summary.requests.estimated_throughput_count, estimated);
         assert_percentile(
             summary.requests.output_throughput_p10.map(|v| v as f64),
             expected.map(|v| v as f64),
@@ -441,7 +460,6 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
         .list_usage_records(admin_observability::UsageQuery {
             range,
             filter: admin_observability::UsageFilter {
-                routing_group_refs: Vec::new(),
                 provider_account_ref: Some("acct_team".to_owned()),
                 ..admin_observability::UsageFilter::default()
             },
@@ -504,7 +522,7 @@ async fn usage_search_should_match_literal_prefix_instead_of_substring() {
         .list_usage_records(UsageRecordQuery {
             range,
             filter: UsageRecordFilter {
-                search: Some("observe_success".to_owned()),
+                search: Some("rimary".to_owned()),
                 ..UsageRecordFilter::default()
             },
             current_page: 1,
@@ -514,6 +532,51 @@ async fn usage_search_should_match_literal_prefix_instead_of_substring() {
         .expect("usage substring search");
 
     assert_eq!(page.total, 0);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn usage_search_should_ignore_request_ids_and_preserve_exact_filters() {
+    let Some(database) = TestDatabase::create("usage_search_without_request_ids").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now)
+        .await
+        .expect("seed observability facts");
+    let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
+        .expect("observability range");
+
+    for search in [
+        "req_observe",
+        "req_observe_success",
+        "upstream_req",
+        "upstream_req_success",
+    ] {
+        assert_usage_search_ids(&database.pool, range, search, &[]).await;
+    }
+    for filter in [
+        UsageRecordFilter {
+            request_id: Some("req_observe_success".to_owned()),
+            ..Default::default()
+        },
+        UsageRecordFilter {
+            upstream_request_id: Some("upstream_req_success".to_owned()),
+            ..Default::default()
+        },
+    ] {
+        let page = observability_repository(&database.pool)
+            .list_usage_records(UsageRecordQuery {
+                range,
+                filter,
+                current_page: 1,
+                page_size: ObservabilityPageSize::new(10).expect("page size"),
+            })
+            .await
+            .expect("exact request identity filter");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].id, "req_observe_success");
+    }
     database.close().await;
 }
 
@@ -1817,7 +1880,6 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
         .list_usage_records(admin_observability::UsageQuery {
             range,
             filter: admin_observability::UsageFilter {
-                routing_group_refs: Vec::new(),
                 client_api_key_ref: Some("key_observe".to_owned()),
                 request_id: Some("req_observe_success".to_owned()),
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -1830,7 +1892,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
                 attempt_index: Some(1),
                 response_id: Some("resp_observe_success".to_owned()),
                 upstream_request_id: Some("upstream_req_success".to_owned()),
-                search: Some("req_observe_success".to_owned()),
+                search: Some("upstream-model".to_owned()),
             },
             current_page: 1,
             page_size: ObservabilityPageSize::new(10).expect("page size"),
@@ -1846,7 +1908,6 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
         .list_usage_records(admin_observability::UsageQuery {
             range,
             filter: admin_observability::UsageFilter {
-                routing_group_refs: Vec::new(),
                 outcome: Some(
                     admin_observability::RequestOutcome::new("provider_future_state")
                         .expect("bounded other outcome"),
@@ -2839,7 +2900,6 @@ async fn dashboard_shares_account_facts_and_bounds_slow_cooldown_reads() {
         resource_id: "acct_shared_1".to_owned(),
         owner_id: "dashboard-test".to_owned(),
         max_concurrent: 3,
-        request_interval: Duration::ZERO,
         ttl: Duration::from_secs(60),
     };
     let CredentialBoundedLeaseAcquisition::Acquired(lease) =

@@ -437,6 +437,7 @@ fn build_usage_insights(
         output_throughput_p10: requests.output_throughput_p10,
         output_throughput_p50: requests.output_throughput_p50,
         output_throughput_p90: requests.output_throughput_p90,
+        estimated_throughput_count: requests.estimated_throughput_count,
         capacity_utilization_avg_basis_points: requests.capacity_utilization_avg_basis_points,
         capacity_utilization_p95_basis_points: requests.capacity_utilization_p95_basis_points,
         capacity_coverage: rate_or_zero(requests.capacity_sample_count, requests.request_count),
@@ -453,6 +454,7 @@ fn build_usage_insights(
                 output_throughput_p10: point.metrics.output_throughput_p10,
                 output_throughput_p50: point.metrics.output_throughput_p50,
                 output_throughput_p90: point.metrics.output_throughput_p90,
+                estimated_throughput_count: point.metrics.estimated_throughput_count,
                 capacity_utilization_avg_basis_points: point
                     .metrics
                     .capacity_utilization_avg_basis_points,
@@ -1095,6 +1097,9 @@ fn add_request_metrics(total: &mut RequestMetrics, value: &RequestMetrics) {
         .saturating_add(value.first_token_latency_count);
     total.latency_sum_ms = total.latency_sum_ms.saturating_add(value.latency_sum_ms);
     total.latency_count = total.latency_count.saturating_add(value.latency_count);
+    total.estimated_throughput_count = total
+        .estimated_throughput_count
+        .saturating_add(value.estimated_throughput_count);
     total.min_latency_ms = match (total.min_latency_ms, value.min_latency_ms) {
         (Some(left), Some(right)) => Some(left.min(right)),
         (left, right) => left.or(right),

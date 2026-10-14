@@ -461,7 +461,7 @@ export interface AccountImportSettings {
   groupIds: string[]
 }
 
-interface AccountImportParam {
+export interface AccountImportParam {
   outboundProxyId?: string
   settings?: AccountImportSettings
   provider: string

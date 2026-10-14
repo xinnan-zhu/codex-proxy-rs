@@ -5,7 +5,7 @@ import { formatCompactNumber, formatDuration, formatInteger } from '@/utils/form
 type UsageCommonRecord = UsageListRecord | UsageRecordDetail
 type UsageLatencyRecord = Pick<UsageCommonRecord, 'latencyDetails' | 'firstTokenLatencyMs' | 'latencyMs'>
 
-export type UsagePerformanceRecord = Pick<UsageCommonRecord, 'latencyDetails' | 'firstTokenLatencyMs'> & {
+export type UsagePerformanceRecord = Pick<UsageCommonRecord, 'latencyDetails' | 'firstTokenLatencyMs' | 'latencyMs'> & {
   tokenDetails: Pick<UsageListRecord['tokenDetails'], 'outputTokens'> | null
 }
 
@@ -115,14 +115,16 @@ export function usageModelDisplay(record: UsageCommonRecord) {
 export function usagePerformanceDetails(record: UsagePerformanceRecord) {
   const upstreamMs = upstreamResponseMs(record.latencyDetails)
   const outputTokens = record.tokenDetails?.outputTokens
-  // 输出已包含推理 Token，分母只取同一完成响应的官方时间跨度
+  const localMs = durationValue(record.latencyMs)
+  const durationMs = upstreamMs ?? (localMs !== null && localMs > 0 ? localMs : null)
+  // 输出已包含推理 Token；网关耗时仅在上游计时缺失时用于估算
   const throughput = typeof outputTokens === 'number' && Number.isFinite(outputTokens) && outputTokens > 0
-    && upstreamMs !== null
-    ? outputTokens * 1000 / upstreamMs
+    && durationMs !== null
+    ? outputTokens * 1000 / durationMs
     : null
 
   return {
-    throughputDisplay: throughput === null ? '—' : `${formatCompactNumber(throughput)} tok/s`,
+    throughputDisplay: throughput === null ? '—' : `${formatCompactNumber(throughput)} tok/s${upstreamMs === null ? '（估算）' : ''}`,
     firstTokenDisplay: formatDuration(durationValue(record.firstTokenLatencyMs)),
   }
 }
@@ -224,9 +226,24 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
   return {
     upstreamDisplay,
     firstOutputDisplay: formatDuration(firstTokenMs),
+    firstOutputSeverity: latencySeverity(firstTokenMs, [10_000, 30_000, 60_000]),
     totalDisplay: formatDuration(totalMs),
+    totalSeverity: latencySeverity(totalMs, [60_000, 180_000, 300_000]),
     sections,
   }
+}
+
+function latencySeverity(ms: number | null, thresholds: readonly [number, number, number]): 'good' | 'warn' | 'slow' | 'critical' | null {
+  if (ms === null)
+    return null
+  // 沿用 sub2api 的固定分档，边界值进入下一档，不改变请求状态
+  if (ms >= thresholds[2])
+    return 'critical'
+  if (ms >= thresholds[1])
+    return 'slow'
+  if (ms >= thresholds[0])
+    return 'warn'
+  return 'good'
 }
 
 export function usageBillingText(record: Pick<UsageCommonRecord, 'billing'>) {
