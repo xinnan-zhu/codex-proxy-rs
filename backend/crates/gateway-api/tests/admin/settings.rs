@@ -84,9 +84,10 @@ async fn privacy_save_requires_provider_validation_and_preview_requires_admin_au
     fixture.auth.insert_session("valid-session");
     let mut body = update_body();
     let policy = json!({"enabled":true,"onError":"reject_request","rules":[{
-        "id":"auth","name":"自定义认证头","enabled":true,"scope":"request_header",
-        "selector":"authorization","action":"remove_field","pattern":null,
-        "replacement":"","value":null,"replaceAll":true,"caseInsensitive":false,"multiLine":false
+        "id":"auth","name":"自定义认证头","enabled":true,"steps":[{
+            "scope":"request_header","selector":"authorization","action":"remove_field","pattern":null,
+            "replacement":"","value":null,"replaceAll":true,"caseInsensitive":false,"multiLine":false
+        }]
     }]});
     body["codexPrivacyPolicy"] = policy.clone();
     let response = app(fixture.state())

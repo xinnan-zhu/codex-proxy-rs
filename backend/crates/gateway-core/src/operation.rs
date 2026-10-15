@@ -404,9 +404,36 @@ pub struct GenerateRequest {
 #[derive(Clone, PartialEq)]
 struct GeneratePayload {
     protocol_payload: ProtocolPayload,
+    client_turn: Option<ClientTurn>,
     provider_session_state: Option<ProviderSessionState>,
     source_requirements: Option<CapabilityRequirements>,
     inherited_capability_requirements: Option<CapabilityRequirements>,
+}
+
+/// 协议入口确认的客户端推理轮次，不使用连接路由键猜测身份
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientTurn {
+    thread_id: String,
+    turn_id: String,
+}
+
+impl ClientTurn {
+    pub fn new(thread_id: String, turn_id: String) -> Option<Self> {
+        if [thread_id.as_str(), turn_id.as_str()].iter().any(|value| {
+            value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control)
+        }) {
+            return None;
+        }
+        Some(Self { thread_id, turn_id })
+    }
+
+    pub fn thread_id(&self) -> &str {
+        &self.thread_id
+    }
+
+    pub fn turn_id(&self) -> &str {
+        &self.turn_id
+    }
 }
 
 impl GenerateRequest {
@@ -419,11 +446,22 @@ impl GenerateRequest {
         Self {
             payload: Arc::new(GeneratePayload {
                 protocol_payload,
+                client_turn: None,
                 provider_session_state: None,
                 source_requirements: None,
                 inherited_capability_requirements: None,
             }),
         }
+    }
+
+    #[must_use]
+    pub fn with_client_turn(mut self, client_turn: Option<ClientTurn>) -> Self {
+        Arc::make_mut(&mut self.payload).client_turn = client_turn;
+        self
+    }
+
+    pub fn client_turn(&self) -> Option<&ClientTurn> {
+        self.payload.client_turn.as_ref()
     }
 
     /// 写回原生 Provider 编码结果，保留已准入的能力、连接上下文和会话状态

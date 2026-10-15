@@ -9,6 +9,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use super::client_retry::{ClientRetryGuard, ClientRetryKey};
 use super::nested::ExecutionEffects;
 use super::observation::{
     RequestObservationDispatch, ResponseObservation, WebSocketResponseAttempt,
@@ -360,6 +361,7 @@ where
             last_retryable_failure_events: Vec::new(),
             last_observed_provider: None,
             pending_terminal_failure: None,
+            client_retry: None,
         };
 
         if session.cancellation.is_cancelled() {
@@ -369,6 +371,26 @@ where
         if deadline.is_elapsed() {
             session.finish_interruption(&EngineError::Deadline).await?;
             return Err(EngineError::Deadline);
+        }
+        if !session.account_selection.is_diagnostic()
+            && let Some(store) = &self.engine.client_retry
+            && let Operation::Generate(generate) = &session.operation
+            && let Some(turn) = generate.client_turn()
+        {
+            let guard = ClientRetryGuard::load(
+                Arc::clone(store),
+                ClientRetryKey {
+                    client_key_id: session.client_api_key_ref.clone(),
+                    turn: turn.clone(),
+                },
+                session.request_id.clone(),
+            )
+            .await;
+            session.trace.record(
+                "client_retry.loaded",
+                json!({"previousFailure": guard.has_failure()}),
+            );
+            session.client_retry = Some(guard);
         }
         Ok(session)
     }
@@ -505,6 +527,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     last_observed_provider: Option<crate::identity::ProviderKind>,
     /// 原子失败批次已交给协议层、但尚待下游提交后收敛的原 Provider 错误
     pending_terminal_failure: Option<PendingTerminalFailure>,
+    client_retry: Option<ClientRetryGuard>,
 }
 
 struct PendingTerminalFailure {
@@ -578,6 +601,7 @@ where
                     error,
                     send_state,
                 } => {
+                    self.record_client_retry_failure(&error).await;
                     let requirement = if self.delivery_committed {
                         CommitRequirement::AlreadyCommitted
                     } else {
@@ -915,7 +939,13 @@ where
                         .translate_native_response(event, terminal);
                     match translated {
                         Ok(events) if events.is_empty() => continue,
-                        Ok(events) => return Ok(PullOutcome::Events(events)),
+                        Ok(events) => {
+                            // 成功终态交付后客户端即可续发工具结果，不能等流 EOF 或异步观测再清理
+                            if terminal && let Some(guard) = &mut self.client_retry {
+                                guard.success().await;
+                            }
+                            return Ok(PullOutcome::Events(events));
+                        }
                         Err(error) => {
                             self.finish_provider_error(&error).await?;
                             return Err(provider_engine_error(error));
@@ -1586,22 +1616,32 @@ where
             && attempt_send_state != UpstreamSendState::Ambiguous
             && provider_proved_replay_safe
             && self.routing_attempts < self.plan.max_attempts().get();
+        let suppress_transient_retry = is_return_error_retry(&error)
+            && self
+                .client_retry
+                .as_ref()
+                .is_some_and(ClientRetryGuard::has_failure);
         let transient_retry = match error.pre_delivery_retry() {
             Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
                 max_retries,
                 initial_delay,
                 max_delay,
-            }) if ordinary_retry => {
+                jitter,
+                ..
+            }) if ordinary_retry && !suppress_transient_retry => {
                 let retries = self
                     .transient_retry_counts
                     .entry(current.metadata.provider_account_id().clone())
                     .or_default();
                 if *retries < max_retries.get() {
                     let multiplier = 1_u32.checked_shl(*retries).unwrap_or(u32::MAX);
-                    // 服务器建议优先于本地退避，不能被本地上限缩短或再次指数放大
-                    let delay = error
-                        .retry_after()
-                        .unwrap_or_else(|| initial_delay.saturating_mul(multiplier).min(max_delay));
+                    // 服务器建议优先于本地退避，不截断、不放大，也不叠加随机等待
+                    let delay = error.retry_after().unwrap_or_else(|| {
+                        initial_delay
+                            .saturating_mul(multiplier)
+                            .min(max_delay)
+                            .saturating_add(jitter)
+                    });
                     *retries = retries.saturating_add(1);
                     Some(delay)
                 } else {
@@ -1624,9 +1664,11 @@ where
         // 同一排除分支。换号预算只在这里消耗；同账号分支（瞬态退避、传输恢复、
         // 凭据恢复重放、continuation 精确重连）不消耗。不能直接把预算门写进
         // ordinary_retry：它是同账号瞬态退避的前置条件，会被连带误伤
+        // RetryThenReturnError 耗尽后直接交付错误，不能落入 ordinary_retry 的换号兜底
         let rotation_retry = !continuation_retry
             && !same_account_retry
             && transient_retry.is_none()
+            && !is_return_error_retry(&error)
             && transport_recovery.is_none()
             && (ordinary_retry || account_rotation_retry)
             && self.account_rotations
@@ -1672,6 +1714,7 @@ where
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
             "transientRetry": transient_retry.is_some(),
+            "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
             "connectionRetry": connection_retry_requested,
             "connectionRetries": self.connection_retries,
@@ -1952,6 +1995,9 @@ where
         if self.is_finalized() {
             return Ok(());
         }
+        if let Some(guard) = &mut self.client_retry {
+            guard.success().await;
+        }
         let completed_at = SystemTime::now();
         self.observation.finish();
         let upstream_request_id = self
@@ -2026,6 +2072,7 @@ where
         error: &ProviderError,
         send_state: UpstreamSendState,
     ) -> Result<(), EngineError> {
+        self.record_client_retry_failure(error).await;
         let send_state = self.raise_send_watermark(send_state);
         let outcome = if error.kind() == ProviderErrorKind::Cancelled {
             ExecutionOutcome::Cancelled
@@ -2051,6 +2098,16 @@ where
             },
         })
         .await
+    }
+
+    async fn record_client_retry_failure(&mut self, error: &ProviderError) {
+        // 只记录本策略的终态失败，不让其他错误改变客户端轮次的退避预算
+        if self.attempts > 0
+            && is_return_error_retry(error)
+            && let Some(guard) = &mut self.client_retry
+        {
+            guard.failure().await;
+        }
     }
 
     async fn finish_interruption(&mut self, error: &EngineError) -> Result<(), EngineError> {
@@ -2345,6 +2402,16 @@ where
     fn record_provider_failure(&mut self, provider_kind: crate::identity::ProviderKind) {
         self.last_observed_provider = Some(provider_kind);
     }
+}
+
+fn is_return_error_retry(error: &ProviderError) -> bool {
+    matches!(
+        error.pre_delivery_retry(),
+        Some(crate::error::PreDeliveryRetry::SameAccountTransientRetry {
+            policy: crate::error::TransientRetryPolicy::RetryThenReturnError,
+            ..
+        })
+    )
 }
 
 async fn best_effort_store_write<T>(

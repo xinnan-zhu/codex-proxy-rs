@@ -91,7 +91,7 @@ impl DefaultSystemService {
         let proxy = match proxy_id {
             None => None,
             Some(id) => match self.proxies.get(&id).await {
-                Ok(record) => Some(record.proxy),
+                Ok(record) => record.enabled.then_some(record.proxy),
                 Err(error) if error.kind() == AdminStoreErrorKind::NotFound => None,
                 Err(error) => return Err(map_store_error(error, "outbound proxy")),
             },
@@ -198,10 +198,14 @@ impl SystemService for DefaultSystemService {
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty());
         if let Some(id) = &proxy_id {
-            self.proxies
+            let record = self
+                .proxies
                 .get(id)
                 .await
                 .map_err(|error| map_store_error(error, "outbound proxy"))?;
+            if !record.enabled {
+                return Err(AdminError::invalid("代理已禁用，请启用后再选择"));
+            }
         }
         self.settings
             .replace_system_update_proxy_id(proxy_id.clone(), context)

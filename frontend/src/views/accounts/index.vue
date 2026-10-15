@@ -153,7 +153,6 @@ const {
   weight: batchWeight,
   codexOnly: batchCodexOnly,
   modelAccess: batchModelAccess,
-  hasChanges: batchHasChanges,
   catalogAccountId: batchCatalogAccountId,
   editingCount: batchEditingCount,
   proxyMode: batchProxyMode,
@@ -458,7 +457,6 @@ const {
       :groups="groups"
       :groups-loading="groupsLoading"
       :saving="savingBatchEdit"
-      :has-changes="batchHasChanges"
       @save="saveBatchEdit"
     />
 

@@ -511,6 +511,7 @@ mod provider {
                 total_slots: None,
             },
             account: AccountRecord {
+                outbound_proxy_enabled: true,
                 notes: None,
                 codex_only: false,
                 model_access: Default::default(),

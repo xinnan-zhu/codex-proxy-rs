@@ -219,6 +219,7 @@ impl SettingsStore for UpdateProxySettingsStore {
 fn update_proxy_record(id: &str, url: &str) -> ProxyRecord {
     let now = chrono::Utc::now();
     ProxyRecord {
+        enabled: true,
         auto_location: false,
         detected_location: None,
         location: None,
@@ -325,6 +326,63 @@ async fn system_update_proxy_should_persist_and_route_release_checks() {
         *operations.proxy_endpoint.lock().expect("proxy"),
         Some(None)
     );
+}
+
+#[tokio::test]
+async fn system_update_disabled_proxy_uses_direct_and_rejects_new_selection() {
+    let operations = Arc::new(RecordingSystemOperations::default());
+    let settings = Arc::new(UpdateProxySettingsStore::default());
+    *settings.proxy_id.lock().expect("proxy id") = Some("proxy_disabled".to_owned());
+    let mut record = update_proxy_record("proxy_disabled", "socks5h://127.0.0.1:1080");
+    record.enabled = false;
+    let services = super::AdminHarness::new()
+        .system(operations.clone())
+        .settings(settings.clone())
+        .proxies(Arc::new(TestProxies {
+            record: Some(record),
+            ..Default::default()
+        }))
+        .build()
+        .await;
+
+    services
+        .system()
+        .update_detail(true, None)
+        .await
+        .expect("check directly");
+    assert_eq!(
+        *operations.proxy_endpoint.lock().expect("proxy"),
+        Some(None)
+    );
+    assert_eq!(
+        settings.proxy_id.lock().expect("proxy id").as_deref(),
+        Some("proxy_disabled")
+    );
+
+    services
+        .system()
+        .set_update_proxy(
+            &MutationContext {
+                actor: MutationActor::System,
+                request_id: "disabled-update-proxy".to_owned(),
+            },
+            None,
+        )
+        .await
+        .expect("clear selection");
+    let error = services
+        .system()
+        .set_update_proxy(
+            &MutationContext {
+                actor: MutationActor::System,
+                request_id: "disabled-update-proxy".to_owned(),
+            },
+            Some("proxy_disabled".to_owned()),
+        )
+        .await
+        .expect_err("disabled proxy is not selectable");
+    assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Invalid);
+    assert!(settings.proxy_id.lock().expect("proxy id").is_none());
 }
 
 #[tokio::test]

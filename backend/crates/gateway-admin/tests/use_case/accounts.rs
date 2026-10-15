@@ -3140,6 +3140,7 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        outbound_proxy_enabled: true,
         notes: None,
         codex_only: false,
         model_access: Default::default(),
