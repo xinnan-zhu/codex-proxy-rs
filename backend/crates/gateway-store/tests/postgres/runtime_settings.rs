@@ -278,7 +278,11 @@ async fn privacy_steps_migration_rejects_non_object_without_losing_data() {
         .execute(&database.pool)
         .await
         .unwrap();
-    assert!(super::TEST_MIGRATOR.run(&database.pool).await.is_err());
+    // SQLx 迁移失败会保留会话级咨询锁，关闭专用连接，避免阻塞其他 schema 的升级测试
+    let mut connection = database.pool.acquire().await.unwrap();
+    let result = super::TEST_MIGRATOR.run(&mut *connection).await;
+    connection.close().await.unwrap();
+    assert!(result.is_err());
     let stored: serde_json::Value =
         sqlx::query_scalar("select codex_privacy_policy_json from runtime_settings where id = 1")
             .fetch_one(&database.pool)
