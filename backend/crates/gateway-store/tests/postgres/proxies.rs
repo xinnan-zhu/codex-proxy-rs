@@ -345,6 +345,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
                             "acct_enabled_xai".to_owned(),
                         ],
                         enabled: Some(false),
+                        codex_only: None,
                         concurrency_limit: None,
                         weight: None,
                         model_access: None,
