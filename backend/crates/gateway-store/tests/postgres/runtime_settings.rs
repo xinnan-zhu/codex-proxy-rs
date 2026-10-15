@@ -161,6 +161,19 @@ async fn privacy_steps_migration_preserves_rules_and_other_settings() {
     let Some(database) = TestDatabase::create_through("privacy_steps", 30).await else {
         return;
     };
+    // 还原上一发行版的定制迁移，整行比较必须包含原有下载代理设置
+    sqlx::migrate::Migrator::with_migrations(
+        super::TEST_MIGRATOR
+            .iter()
+            .filter(|migration| {
+                migration.version <= 30 || (900001..=900011).contains(&migration.version)
+            })
+            .cloned()
+            .collect(),
+    )
+    .run(&database.pool)
+    .await
+    .unwrap();
     let legacy = serde_json::json!({
         "enabled":true, "onError":"skip_rule", "rules":[
             {"id":"first","name":"旧规则一","enabled":true,"scope":"request_header","selector":"x-private",
@@ -203,7 +216,9 @@ async fn privacy_steps_migration_preserves_rules_and_other_settings() {
         .as_array_mut()
         .unwrap()
         .insert(1, canonical);
-    sqlx::query("update runtime_settings set codex_privacy_policy_json = $1, config_revision = 70, refresh_margin_seconds = 1234 where id = 1")
+    sqlx::query("insert into outbound_proxies(id, name, proxy_url) values ('privacy_update_proxy', '更新代理', 'http://127.0.0.1:8080')")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update runtime_settings set codex_privacy_policy_json = $1, config_revision = 70, refresh_margin_seconds = 1234, system_update_proxy_id = 'privacy_update_proxy' where id = 1")
         .bind(&mixed).execute(&database.pool).await.unwrap();
     let mut expected_row: serde_json::Value =
         sqlx::query_scalar("select to_jsonb(runtime_settings) from runtime_settings where id = 1")
