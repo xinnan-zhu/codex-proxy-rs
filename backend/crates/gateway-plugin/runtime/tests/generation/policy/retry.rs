@@ -175,6 +175,7 @@ async fn retry_callback_effects_survive_success_failure_and_cancellation() {
                     stream: false,
                     client_ip: None,
                     user_agent: None,
+                    codex_client: None,
                     previous_response_id: None,
                 },
             })
