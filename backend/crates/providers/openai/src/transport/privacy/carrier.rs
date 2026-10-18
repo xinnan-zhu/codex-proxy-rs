@@ -5,6 +5,9 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 
 use super::{Budget, changes::BodyChanges, rule::CompiledStep};
+use crate::transport::automatic_context::{
+    ContextTarget, locate_contexts, parse_xml, rewrite_git_context,
+};
 
 const METADATA_KEYS: &[&str] = &["turnMetadata", "turn_metadata", "x-codex-turn-metadata"];
 
@@ -133,13 +136,6 @@ pub(super) struct ContextIndex {
     environment: Option<Vec<ContextTarget>>,
 }
 
-struct ContextTarget {
-    path: String,
-    open: &'static str,
-    close: &'static str,
-    identified: bool,
-}
-
 impl ContextIndex {
     fn apply(
         &mut self,
@@ -155,7 +151,7 @@ impl ContextIndex {
             &mut self.environment
         };
         if targets.is_none() {
-            *targets = Some(locate_contexts(body, desktop, budget)?);
+            *targets = Some(locate_contexts(body, desktop, || budget.step())?);
         }
         let mut count = 0;
         for target in targets.iter().flatten() {
@@ -165,9 +161,7 @@ impl ContextIndex {
                 .pointer(&target.path)
                 .and_then(Value::as_str)
                 .ok_or("上下文文本不存在")?;
-            let trimmed = text.trim();
-            let complete = trimmed.starts_with(target.open) && trimmed.ends_with(target.close);
-            if !complete {
+            if !target.is_complete(text) {
                 if target.identified {
                     return Err("已识别上下文不完整，可能已被截断");
                 }
@@ -179,7 +173,10 @@ impl ContextIndex {
                     return Err("上下文必须是文本");
                 };
                 if desktop {
-                    git(rule, text, budget)
+                    budget.step()?;
+                    rewrite_git_context(text, super::MAX_VALUE_BYTES, |value| {
+                        rule.apply(value, budget)
+                    })
                 } else {
                     environment(rule, text, budget)
                 }
@@ -187,125 +184,6 @@ impl ContextIndex {
         }
         Ok(count)
     }
-}
-
-fn locate_contexts(
-    body: &Value,
-    desktop: bool,
-    budget: &mut Budget<'_>,
-) -> Result<Vec<ContextTarget>, &'static str> {
-    let mut targets = Vec::new();
-    let Some(items) = body.get("input").and_then(Value::as_array) else {
-        return Ok(targets);
-    };
-    for (item_index, item) in items.iter().enumerate() {
-        budget.step()?;
-        let role = item.get("role").and_then(Value::as_str).unwrap_or("");
-        if !(role == "user" || (!desktop && role == "developer")) {
-            continue;
-        }
-        let (kind, open, close) = if desktop {
-            (
-                "additional_content.codex_git_state",
-                "<external_codex_git_state>",
-                "</external_codex_git_state>",
-            )
-        } else if role == "developer" {
-            (
-                "additional_content.codex_apps_client_time_context",
-                "<codex_apps_client_time_context>",
-                "</codex_apps_client_time_context>",
-            )
-        } else {
-            (
-                "environments.environment_context",
-                "<environment_context>",
-                "</environment_context>",
-            )
-        };
-        let kinds = item.pointer("/internal_chat_message_metadata_passthrough/content_item_kinds");
-        let Some(parts) = item.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        for (index, part) in parts.iter().enumerate() {
-            budget.step()?;
-            if kinds.is_some_and(|kinds| kinds.get(index).and_then(Value::as_str) != Some(kind)) {
-                continue;
-            }
-            if part.get("type").and_then(Value::as_str) != Some("input_text") {
-                continue;
-            }
-            let Some(text) = part.get("text").and_then(Value::as_str) else {
-                continue;
-            };
-            let trimmed = text.trim();
-            if kinds.is_none() && !(trimmed.starts_with(open) && trimmed.ends_with(close)) {
-                continue;
-            }
-            targets.push(ContextTarget {
-                path: format!("/input/{item_index}/content/{index}/text"),
-                open,
-                close,
-                identified: kinds.is_some(),
-            });
-        }
-    }
-    Ok(targets)
-}
-
-fn git(
-    rule: &CompiledStep,
-    text: &mut String,
-    budget: &mut Budget<'_>,
-) -> Result<usize, &'static str> {
-    let document = parse_xml(text)?;
-    budget.step()?;
-    let root = document.root_element();
-    if root.tag_name().name() != "external_codex_git_state" {
-        return Err("Desktop Git 包裹不匹配");
-    }
-    let nodes: Vec<_> = root
-        .descendants()
-        .filter(|node| {
-            node.has_tag_name("git")
-                && node
-                    .parent()
-                    .is_some_and(|p| p.has_tag_name("environment_context"))
-        })
-        .collect();
-    if nodes.len() != 1 {
-        return Err("Desktop Git 数据节点不明确");
-    }
-    let git = nodes[0];
-    if git.children().any(|node| !node.is_text()) {
-        return Err("Desktop Git 数据不是文本");
-    }
-    let raw: String = git.children().filter_map(|node| node.text()).collect();
-    let mut value: Value = serde_json::from_str(&raw).map_err(|_| "Desktop Git JSON 无法解析")?;
-    if !value.is_object() {
-        return Err("Desktop Git JSON 必须是对象");
-    }
-    let count = rule.apply(&mut value, budget)?;
-    if count > 0 {
-        let range = git.range();
-        let fragment = &text[range.clone()];
-        let start = git
-            .first_child()
-            .ok_or("Desktop Git 数据为空")?
-            .range()
-            .start;
-        let end = range.start + fragment.rfind("</").ok_or("Desktop Git 包裹无效")?;
-        let encoded = serde_json::to_string(&value).map_err(|_| "Desktop Git JSON 无法编码")?;
-        let escaped = encoded
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        if text.len() - (end - start) + escaped.len() > super::MAX_VALUE_BYTES {
-            return Err("Desktop Git 编码结果超出大小限制");
-        }
-        text.replace_range(start..end, &escaped);
-    }
-    Ok(count)
 }
 
 fn environment(
@@ -322,17 +200,6 @@ fn environment(
     }
     *text = result.to_owned();
     Ok(count)
-}
-
-fn parse_xml(text: &str) -> Result<roxmltree::Document<'_>, &'static str> {
-    roxmltree::Document::parse_with_options(
-        text,
-        roxmltree::ParsingOptions {
-            nodes_limit: 10_000,
-            ..Default::default()
-        },
-    )
-    .map_err(|_| "上下文 XML 无法解析或节点数量超限")
 }
 
 fn xml_shape(text: &str, budget: &mut Budget<'_>) -> Result<Vec<(String, usize)>, &'static str> {

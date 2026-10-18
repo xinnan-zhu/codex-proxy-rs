@@ -22,7 +22,7 @@ enum CodexQuotaFetchError {
     InvalidCredential,
     Upstream {
         account: Box<ProviderAccount>,
-        error: CodexClientError,
+        error: Box<CodexClientError>,
     },
 }
 
@@ -692,7 +692,7 @@ impl CodexCredentialQuotaService {
             Err(CodexQuotaFetchAttemptError::Upstream(error)) => {
                 Err(CodexQuotaFetchError::Upstream {
                     account: Box::new(prepared.account),
-                    error,
+                    error: Box::new(error),
                 })
             }
         }

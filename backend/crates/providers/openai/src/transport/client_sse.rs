@@ -114,7 +114,9 @@ impl CodexBackendClient {
         upstream_request: &CodexResponsesRequest,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<CodexBackendStreamingResponse> {
-        let mut headers = self.request_headers_for_http_response(upstream_request, context)?;
+        let profile = self.profile.snapshot();
+        let mut headers =
+            self.request_headers_for_http_response(&profile, upstream_request, context)?;
         let headers_started_at = Instant::now();
         // OAuth 请求遵循 Codex 压缩合同；API Key 上游使用普通 JSON
         // Codex 上游只交付 SSE；即使下游请求 `stream: false`，也要上游流式执行，
@@ -127,6 +129,7 @@ impl CodexBackendClient {
         if self.protocol == OpenAiUpstreamProtocol::Codex {
             headers.insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
         }
+        profile.apply_context_versions(&mut upstream_body);
         self.apply_privacy(&mut upstream_body, &mut headers)?;
         let body =
             serde_json::to_vec(&upstream_body).map_err(CodexClientError::RequestBodyEncode)?;
@@ -284,10 +287,12 @@ impl CodexBackendClient {
         }
 
         let mut websocket_request = websocket_upstream_request(request);
+        let profile = self.profile.snapshot();
         let mut headers =
-            self.request_headers_for_websocket_response(&websocket_request, context)?;
+            self.request_headers_for_websocket_response(&profile, &websocket_request, context)?;
         let mut body = serde_json::Value::Object(std::mem::take(websocket_request.body_mut()));
         let original_headers = self.privacy.as_ref().map(|_| headers.clone());
+        profile.apply_context_versions(&mut body);
         self.apply_privacy(&mut body, &mut headers)?;
         *websocket_request.body_mut() = body.as_object().cloned().ok_or_else(|| {
             CodexClientError::Privacy(gateway_core::settings::privacy::PrivacyError {
@@ -336,7 +341,7 @@ impl CodexBackendClient {
         let pool_key =
             self.websocket_pool_key(request, context, pool_account_id, &connection_profile);
         let pool_log_context = pool_key.as_ref().map(WebSocketPoolLogContext::from_key);
-        let pool = self.websocket_pool.as_deref().zip(pool_key);
+        let pool = self.websocket_pool.as_deref().map(|pool| (pool, pool_key));
         let fast_path_budget = match requirement {
             TransportRequirement::PersistedContinuation | TransportRequirement::NewChain => {
                 Some(WEBSOCKET_FAST_PATH_BUDGET)
@@ -547,6 +552,7 @@ impl CodexBackendClient {
             .or(request.previous_response_id())?;
         let mut key = CodexWebSocketPoolKey::new(&self.base_url, account_id, conversation_id)
             .with_egress_key(&self.egress_key)
+            .with_outbound_proxy(self.outbound_proxy.as_ref())
             .with_connection_profile(connection_profile);
         if let Some(connection_id) = request.downstream_websocket_connection_id.as_deref() {
             key = key.with_downstream_connection_id(connection_id);
@@ -589,7 +595,7 @@ impl CodexBackendClient {
             .flatten();
         let body = read_model_catalog_body(response).await?;
         if !status.is_success() {
-            let body = String::from_utf8_lossy(&body).into_owned();
+            let body = String::from_utf8_lossy_owned(body);
             return Err(CodexClientError::Upstream {
                 status,
                 retry_after_seconds: retry_after_seconds

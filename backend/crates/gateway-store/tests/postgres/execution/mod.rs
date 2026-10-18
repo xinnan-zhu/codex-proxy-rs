@@ -458,6 +458,7 @@ async fn core_adapter_should_persist_calculated_cost_exactly() {
     );
     let page = observation
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range: ObservabilityRange::new(
                 Utc::now() - Duration::hours(1),
                 Utc::now() + Duration::hours(1),
@@ -2071,6 +2072,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
     assert_eq!(failed.attempts, AttemptMetrics::default());
     let page = repository
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range: zero_attempt_range(&request),
             filter: filter.clone(),
             current_page: 1,
@@ -2095,7 +2097,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
             .iter()
             .all(|point| { point.standard_amount.is_none() && point.no_cache_amount.is_none() })
     );
-    let charges: i64 = sqlx::query_scalar("select count(*) from client_key_charge_events")
+    let charges: i64 = sqlx::query_scalar("select count(*) from client_api_key_charge_events")
         .fetch_one(&database.pool)
         .await
         .expect("observations do not settle budgets");
@@ -2167,10 +2169,6 @@ async fn shared_core_usage_and_timings_preserve_fields_and_reject_invalid_phases
         upstream_response_ms: Some(1_000),
         upstream_api_overhead_ms: Some(120.25),
         upstream_engine_ms: Some(6400.0),
-        upstream_engine_iapi_ttft_ms: Some(650.5),
-        upstream_engine_service_ttft_ms: Some(720.25),
-        upstream_engine_iapi_tbt_ms: Some(18.45),
-        upstream_engine_service_tbt_ms: Some(20.12),
         latency_ms: Some(9),
     };
     ExecutionStore::finalize_model_request(&store, finalization)
@@ -2201,22 +2199,6 @@ async fn shared_core_usage_and_timings_preserve_fields_and_reject_invalid_phases
     }
     assert_eq!(persisted["upstream_api_overhead_ms"].as_f64(), Some(120.25));
     assert_eq!(persisted["upstream_engine_ms"].as_f64(), Some(6400.0));
-    assert_eq!(
-        persisted["upstream_engine_iapi_ttft_ms"].as_f64(),
-        Some(650.5)
-    );
-    assert_eq!(
-        persisted["upstream_engine_service_ttft_ms"].as_f64(),
-        Some(720.25)
-    );
-    assert_eq!(
-        persisted["upstream_engine_iapi_tbt_ms"].as_f64(),
-        Some(18.45)
-    );
-    assert_eq!(
-        persisted["upstream_engine_service_tbt_ms"].as_f64(),
-        Some(20.12)
-    );
     let invalid_id = "req_invalid_phase";
     seed_running_request(&database.pool, invalid_id)
         .await
@@ -2232,7 +2214,7 @@ async fn shared_core_usage_and_timings_preserve_fields_and_reject_invalid_phases
     assert_eq!(stored_row(&database.pool, invalid_id).await, before);
     for invalid_ms in [-1.0, f64::NAN, f64::INFINITY, i64::MAX as f64] {
         let mut invalid = successful_core_finalization(invalid_id);
-        invalid.timings.upstream_engine_iapi_tbt_ms = Some(invalid_ms);
+        invalid.timings.upstream_engine_ms = Some(invalid_ms);
         let error = ExecutionStore::finalize_model_request(&store, invalid)
             .await
             .expect_err("invalid official timing must not silently become missing");

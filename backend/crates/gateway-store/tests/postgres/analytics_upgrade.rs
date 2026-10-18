@@ -169,3 +169,64 @@ async fn fork_throughput_upgrade_rebuilds_historical_grok_rates_without_rewritin
     assert_eq!(progress_after, progress_before);
     database.close().await;
 }
+
+#[tokio::test]
+async fn published_fork_upgrade_preserves_history_and_update_proxy_and_restarts() {
+    let Some(database) = TestDatabase::create_through("published_fork_upgrade", 32).await else {
+        return;
+    };
+    // 按上一正式发行的完整迁移集合还原，包含高编号定制迁移
+    sqlx::migrate::Migrator::with_migrations(
+        TEST_MIGRATOR
+            .iter()
+            .filter(|migration| {
+                migration.version <= 32 || (900001..=900011).contains(&migration.version)
+            })
+            .cloned()
+            .collect(),
+    )
+    .run(&database.pool)
+    .await
+    .unwrap();
+    let start = Utc::now() - chrono::TimeDelta::hours(1);
+    super::analytics::seed(&database.pool, "published_fork_history", start, &[]).await;
+    sqlx::raw_sql("insert into outbound_proxies(id,name,proxy_url) values ('upgrade_proxy','更新出口','http://127.0.0.1:8080'); update runtime_settings set system_update_proxy_id='upgrade_proxy', config_revision=70, usage_retention_days=90;")
+        .execute(&database.pool).await.unwrap();
+    let before: Value = sqlx::query_scalar(
+        "select to_jsonb(mr) from model_requests mr where id='published_fork_history'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    // 重启复核必须兼容上一版本的 checksum，不能依靠更改已应用迁移记录
+    TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let after: Value = sqlx::query_scalar(
+        "select to_jsonb(mr) from model_requests mr where id='published_fork_history'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, before);
+    let settings: (String, i64, i64) = sqlx::query_as("select system_update_proxy_id, config_revision, usage_retention_days from runtime_settings where id=1")
+        .fetch_one(&database.pool).await.unwrap();
+    assert_eq!(settings, ("upgrade_proxy".to_owned(), 70, 31));
+    super::drain_analytics(&database.pool).await;
+    let repo = super::observability_repository(&database.pool);
+    let range = gateway_store::postgres::ObservabilityRange::new(
+        start - chrono::TimeDelta::minutes(1),
+        start + chrono::TimeDelta::hours(1),
+    )
+    .unwrap();
+    let summary = repo.usage_summary(range, Default::default()).await.unwrap();
+    assert_eq!(summary.requests.request_count, 1);
+    assert_eq!(summary.requests.total_tokens, 120);
+    assert!(
+        summary
+            .requests
+            .output_throughput_p50
+            .is_some_and(|value| (190..=210).contains(&value))
+    );
+    assert_eq!(summary.requests.estimated_throughput_count, 1);
+    database.close().await;
+}

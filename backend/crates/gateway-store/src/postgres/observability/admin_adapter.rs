@@ -170,16 +170,18 @@ impl PgObservabilityRepository {
         observed_at: DateTime<Utc>,
     ) -> StoreResult<DashboardObservation> {
         let range = store_range(query.range)?;
+        let yesterday_range = store_range(query.yesterday_range)?;
         let account_usage_query = ProviderAccountUsageQuery::recent(range, query.account_limit)?
             .with_hourly_request_buckets()?;
         let recent_query = UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: store_usage_filter(query.recent_request_filter),
             current_page: 1,
             page_size: ObservabilityPageSize::new(query.recent_request_limit)
                 .map_err(|_| invalid("invalid dashboard page size"))?,
         };
-        let (totals, trend, analytics, account_usage) = self
+        let (totals, yesterday, trend, analytics, account_usage) = self
             .query_budget
             .run(
                 &self.pool,
@@ -187,6 +189,7 @@ impl PgObservabilityRepository {
                 |mut connection| async move {
                     let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
                     let totals = snapshot.totals().await?;
+                    let yesterday = snapshot.dashboard_card_metrics(yesterday_range).await?;
                     let trend = snapshot
                         .trend(
                             range,
@@ -200,7 +203,7 @@ impl PgObservabilityRepository {
                         provider_account_usage(&mut snapshot, account_usage_query).await?;
                     let metadata = snapshot.metadata();
                     snapshot.finish().await?;
-                    Ok((totals, trend, metadata, account_usage))
+                    Ok((totals, yesterday, trend, metadata, account_usage))
                 },
             )
             .await?;
@@ -221,6 +224,7 @@ impl PgObservabilityRepository {
             analytics,
             range,
             totals,
+            yesterday,
             provider_accounts,
             runtime_slots,
             trend,
@@ -400,6 +404,17 @@ impl PgObservabilityRepository {
 
 #[async_trait]
 impl AdminObservabilityStore for PgAdminObservabilityStore {
+    async fn diagnostic_errors(
+        &self,
+        target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<admin_observability::OpsError>> {
+        let target = target.clone();
+        self.repository.query_budget.run(&self.repository.pool, "export diagnostic errors", |mut connection| async move {
+            diagnostic_errors(&mut connection, &target, limit).await
+        }).await.map_err(observability_error)
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         self.repository.query_budget.query_timeout()
     }

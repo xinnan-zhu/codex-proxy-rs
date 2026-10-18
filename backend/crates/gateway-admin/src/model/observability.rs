@@ -172,9 +172,19 @@ pub struct UsageFilter {
     pub search: Option<String>,
 }
 
+/// 请求列表的结果筛选，不改变汇总和计量口径
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UsageRecordStatus {
+    #[default]
+    Success,
+    Error,
+    All,
+}
+
 /// 用量记录分页查询
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageQuery {
+    pub status: UsageRecordStatus,
     pub range: TimeRange,
     pub filter: UsageFilter,
     pub current_page: u32,
@@ -185,6 +195,7 @@ pub struct UsageQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DashboardQuery {
     pub range: TimeRange,
+    pub yesterday_range: TimeRange,
     pub granularity: Granularity,
     pub account_limit: u16,
     pub recent_request_limit: u16,
@@ -192,10 +203,21 @@ pub struct DashboardQuery {
 }
 
 impl DashboardQuery {
-    #[must_use]
-    pub fn new(range: TimeRange) -> Self {
-        Self {
+    pub fn new(
+        range: TimeRange,
+        timezone: gateway_core::time::DeploymentTimeZone,
+    ) -> Result<Self, AdminModelError> {
+        let yesterday_range = TimeRange::new(
+            timezone
+                .days_before(range.end, 1)
+                .ok_or(AdminModelError::InvalidTimeRange)?,
+            timezone
+                .day_start(range.end)
+                .ok_or(AdminModelError::InvalidTimeRange)?,
+        )?;
+        Ok(Self {
             range,
+            yesterday_range,
             granularity: Granularity::for_range(range),
             account_limit: 4,
             recent_request_limit: 10,
@@ -203,7 +225,7 @@ impl DashboardQuery {
                 outcome: Some(RequestOutcome::Succeeded),
                 ..UsageFilter::default()
             },
-        }
+        })
     }
 }
 
@@ -646,6 +668,7 @@ pub struct DashboardObservation {
     pub analytics: AnalyticsMetadata,
     pub range: TimeRange,
     pub totals: DashboardTotals,
+    pub yesterday: RequestMetrics,
     pub provider_accounts: AccountPoolMetrics,
     pub runtime_slots: Option<DashboardRuntimeSlots>,
     pub trend: Vec<RequestMetricPoint>,
@@ -656,6 +679,10 @@ pub struct DashboardObservation {
 /// 使用记录表格的窄读模型
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
+    pub outcome: RequestOutcome,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub client_status_code: Option<u16>,
     pub client_api_key_name: Option<String>,
     pub id: String,
     pub endpoint: String,
@@ -698,10 +725,6 @@ pub struct UsageListRecord {
     pub upstream_response_ms: Option<u64>,
     pub upstream_api_overhead_ms: Option<f64>,
     pub upstream_engine_ms: Option<f64>,
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    pub upstream_engine_service_tbt_ms: Option<f64>,
     pub latency_ms: Option<u64>,
     pub admission_decision_ms: Option<u64>,
     pub account_selection_wait_ms: Option<u64>,
@@ -781,10 +804,6 @@ pub struct UsageRecord {
     pub upstream_response_ms: Option<u64>,
     pub upstream_api_overhead_ms: Option<f64>,
     pub upstream_engine_ms: Option<f64>,
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    pub upstream_engine_service_tbt_ms: Option<f64>,
     pub latency_ms: Option<u64>,
     pub admission_decision_ms: Option<u64>,
     pub account_selection_wait_ms: Option<u64>,
@@ -852,7 +871,7 @@ pub struct UsageAttempt {
     pub occurred_at: DateTime<Utc>,
 }
 
-/// 一条请求及其全部尝试
+/// 一条请求及其保留的尝试与诊断轨迹
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageDetail {
     pub trace: Option<serde_json::Value>,

@@ -195,6 +195,7 @@ async fn management_facts_validate_queries_without_permission_declarations() {
                 &generation,
                 &view.target,
                 PluginManagementRequest {
+                    request_context: None,
                     headers: Vec::new(),
                     method: "GET".into(),
                     path: "facts".into(),
@@ -286,6 +287,7 @@ async fn quota_refresh_is_available_without_permission_declarations() {
                 &generation,
                 &view.target,
                 PluginManagementRequest {
+                    request_context: None,
                     headers: Vec::new(),
                     method: "GET".into(),
                     path: "facts".into(),

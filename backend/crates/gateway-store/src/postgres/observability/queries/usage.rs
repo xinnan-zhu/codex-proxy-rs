@@ -113,7 +113,7 @@ pub(crate) fn literal_prefix_pattern(value: &str) -> String {
 }
 
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
-    "select mr.id, mr.client_api_key_name_snapshot as client_key_name, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
+    "select mr.id, mr.outcome, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_key_name, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
             mr.provider_account_name_snapshot as provider_account_name,
             mr.provider_account_email_snapshot as provider_account_email,
@@ -128,7 +128,7 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             mr.transport_decision_wait_ms, mr.connect_ms, mr.headers_ms,
             mr.first_event_ms, mr.first_reasoning_ms, mr.first_text_ms, mr.first_token_ms,
             mr.provider_processing_ms, mr.upstream_response_ms,
-            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.upstream_engine_iapi_ttft_ms, mr.upstream_engine_service_ttft_ms, mr.upstream_engine_iapi_tbt_ms, mr.upstream_engine_service_tbt_ms, mr.latency_ms, mr.admission_decision_ms,
+            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.latency_ms, mr.admission_decision_ms,
             mr.account_selection_wait_ms, mr.capacity_used_slots, mr.capacity_total_slots,
             host(mr.client_ip) as client_ip, mr.user_agent,
             mr.reasoning_effort, mr.reasoning_preset, mr.subagent_kind, mr.compact,
@@ -157,7 +157,7 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.cost_currency, mr.transport_decision_wait_ms, mr.connect_ms, mr.headers_ms,
             mr.first_event_ms, mr.first_reasoning_ms, mr.first_text_ms, mr.first_token_ms,
             mr.provider_processing_ms, mr.upstream_response_ms,
-            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.upstream_engine_iapi_ttft_ms, mr.upstream_engine_service_ttft_ms, mr.upstream_engine_iapi_tbt_ms, mr.upstream_engine_service_tbt_ms, mr.latency_ms, mr.admission_decision_ms,
+            mr.upstream_api_overhead_ms, mr.upstream_engine_ms, mr.latency_ms, mr.admission_decision_ms,
             mr.account_selection_wait_ms, mr.capacity_used_slots, mr.capacity_total_slots,
             host(mr.client_ip) as client_ip,
             mr.user_agent, mr.reasoning_effort, mr.reasoning_preset, mr.request_kind,
@@ -176,22 +176,24 @@ pub(crate) async fn list_usage_records(
         let items = list_usage_record_items(&mut *snapshot.tx, &query, None).await?;
         let total = if items.len() < usize::from(query.page_size.get()) {
             items.len() as u64
-        } else if let Some(counts) = snapshot
-            .completed_request_counts(query.range, &query.filter)
-            .await?
+        } else if query.status == admin_observability::UsageRecordStatus::Success
+            && let Some(counts) = snapshot
+                .completed_request_counts(query.range, &query.filter)
+                .await?
         {
             counts.values().try_fold(0_u64, |sum, count| {
                 sum.checked_add(*count)
                     .ok_or_else(|| invalid("usage count overflows u64"))
             })?
         } else {
-            count_usage_records(&mut *snapshot.tx, query.range, &query.filter).await?
+            count_usage_records(&mut *snapshot.tx, query.range, &query.filter, query.status).await?
         };
         (total, items)
     } else {
-        let (total, page) = if let Some(counts) = snapshot
-            .completed_request_counts(query.range, &query.filter)
-            .await?
+        let (total, page) = if query.status == admin_observability::UsageRecordStatus::Success
+            && let Some(counts) = snapshot
+                .completed_request_counts(query.range, &query.filter)
+                .await?
         {
             time_page_from_segments(
                 counts.into_iter().rev(),
@@ -260,7 +262,7 @@ async fn list_usage_record_items_at<'e, E: sqlx::Executor<'e, Database = Postgre
     statement.push_bind(page.range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(page.range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
+    push_usage_record_status(&mut statement, query.status);
     push_usage_filter(&mut statement, &query.filter, "mr");
     statement.push(if ascending {
         " order by mr.started_at, mr.id limit "
@@ -363,7 +365,7 @@ async fn usage_time_page(
     statement.push_bind(query.range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(query.range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
+    push_usage_record_status(&mut statement, query.status);
     push_usage_filter(&mut statement, &query.filter, "mr");
     statement.push(" group by bucket_start order by bucket_start desc");
     let rows = statement
@@ -378,6 +380,7 @@ pub(crate) async fn count_usage_records<'e, E: sqlx::Executor<'e, Database = Pos
     executor: E,
     range: ObservabilityRange,
     filter: &UsageRecordFilter,
+    status: admin_observability::UsageRecordStatus,
 ) -> StoreResult<u64> {
     let mut statement = QueryBuilder::<Postgres>::new(
         "select count(*)::bigint from model_request_observations mr where mr.started_at >= ",
@@ -385,7 +388,7 @@ pub(crate) async fn count_usage_records<'e, E: sqlx::Executor<'e, Database = Pos
     statement.push_bind(range.start);
     statement.push(" and mr.started_at < ");
     statement.push_bind(range.end);
-    push_completed_usage_fact_filter(&mut statement, "mr");
+    push_usage_record_status(&mut statement, status);
     push_usage_filter(&mut statement, filter, "mr");
     let total = statement
         .build_query_scalar::<i64>()
@@ -556,5 +559,25 @@ pub(crate) fn push_diagnostic_dimension_filter(
         | DiagnosticDimension::Account
         | DiagnosticDimension::ApiKey
         | DiagnosticDimension::Transport => {}
+    }
+}
+
+fn push_usage_record_status(
+    statement: &mut QueryBuilder<Postgres>,
+    status: admin_observability::UsageRecordStatus,
+) {
+    use admin_observability::UsageRecordStatus;
+    match status {
+        UsageRecordStatus::Success => push_completed_usage_fact_filter(statement, "mr"),
+        UsageRecordStatus::Error => {
+            statement.push(" and mr.outcome in ('failed', 'incomplete')");
+        }
+        UsageRecordStatus::All => {
+            // 成功沿用用量边界，未成功记录保留真实生命周期，不把取消与执行中标为错误
+            statement
+                .push(" and (")
+                .push(completed_usage_fact_predicate("mr"))
+                .push(" or mr.outcome <> 'succeeded')");
+        }
     }
 }

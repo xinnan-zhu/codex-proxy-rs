@@ -13,19 +13,23 @@ use futures::future::BoxFuture;
 use gateway_host::process::{ProcessControl, ProcessSpec, ProcessStartError, ProcessSupervisor};
 use gateway_plugin_sdk::{
     CallContext, Frame, Handshake, Message, PROTOCOL_VERSION, PluginFault, Stage,
-    client::{CallDeadline, CallDeadlinePause, read_frame, validate_frame, write_frame},
+    client::{CallDeadline, CallDeadlinePause, EncodedFrame, read_frame, write_frame},
 };
-use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc, oneshot, watch};
+use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
 
 use crate::{PreparedPackage, RpcStream, stream::StreamIngress};
 
-use super::dispatch;
+use super::{admission::ExecutionCapacity, dispatch};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RpcLimits {
     /// 受管回调与观察队列的缓冲预算，不是请求正文或 IPC 消息总量上限
     pub maximum_buffered_body_bytes: usize,
+    /// 包含初次排队、下游等待、取消确认和未消费流的总在途上限
     pub maximum_calls: usize,
+    pub maximum_executing_calls: usize,
+    pub maximum_queued_calls: usize,
+    pub maximum_queue_timeout: Duration,
     pub maximum_callbacks: usize,
     pub handshake_timeout: Duration,
     pub maximum_call_timeout: Duration,
@@ -36,8 +40,11 @@ impl Default for RpcLimits {
     fn default() -> Self {
         Self {
             maximum_buffered_body_bytes: 1024 * 1024,
-            maximum_calls: 16,
-            maximum_callbacks: 16,
+            maximum_calls: 256,
+            maximum_executing_calls: 64,
+            maximum_queued_calls: 64,
+            maximum_queue_timeout: Duration::from_secs(30),
+            maximum_callbacks: 64,
             handshake_timeout: Duration::from_secs(5),
             maximum_call_timeout: Duration::from_secs(120),
             maximum_stderr_bytes: 64 * 1024,
@@ -63,6 +70,8 @@ pub enum RpcError {
     Cancelled,
     #[error("plugin call capacity is exhausted")]
     Capacity,
+    #[error("plugin admission capacity is exhausted")]
+    Overloaded,
     #[error("plugin call context is invalid")]
     Context(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("plugin returned an error")]
@@ -70,6 +79,11 @@ pub enum RpcError {
 }
 
 impl RpcError {
+    pub(crate) fn is_overloaded(&self) -> bool {
+        matches!(self, Self::Overloaded)
+            || matches!(self, Self::Remote(fault) if fault.code == gateway_plugin_sdk::ErrorCode::Capacity)
+    }
+
     /// 会话状态与请求错误共用安全分类，不展开插件返回正文
     pub(crate) fn diagnostic(&self) -> (&'static str, &'static str) {
         match self {
@@ -101,6 +115,7 @@ impl RpcError {
             RpcError::Timeout => ("timeout", "插件调用超时"),
             RpcError::Cancelled => ("cancelled", "插件会话已取消"),
             RpcError::Capacity => ("capacity", "插件调用容量已耗尽"),
+            RpcError::Overloaded => ("overloaded", "插件暂时繁忙"),
             RpcError::Context(_) => ("context", "插件调用上下文无效"),
             RpcError::Remote(_) => ("remote", "插件返回错误"),
         }
@@ -175,7 +190,7 @@ pub trait CallbackHandler: Send + Sync {
 pub struct RpcSession {
     shared: Arc<Shared>,
     handshake: Handshake,
-    data: mpsc::Sender<Frame>,
+    data: mpsc::Sender<EncodedFrame>,
     slots: Arc<Semaphore>,
     next_call: AsyncMutex<u64>,
     limits: RpcLimits,
@@ -184,11 +199,9 @@ pub struct RpcSession {
 }
 
 impl RpcSession {
-    /// 只用于已确认来自插件的合同错误，不接收业务错误或原始响应内容
+    /// 响应合同错误只结束所属调用，不影响共享传输与其他在途调用
     pub(crate) fn invalid_response(&self, stage: Stage) -> RpcError {
-        let error = RpcError::InvalidResponse(stage, None);
-        self.shared.fail(error.clone());
-        error
+        RpcError::InvalidResponse(stage, None)
     }
 
     pub(crate) fn decode_response<T: serde::de::DeserializeOwned>(
@@ -197,12 +210,7 @@ impl RpcSession {
         value: serde_json::Value,
     ) -> Result<T, RpcError> {
         serde_json::from_value(value).map_err(|source| {
-            let error = RpcError::InvalidResponse(
-                stage,
-                Some(gateway_core::error::ErrorSource::new(source)),
-            );
-            self.shared.fail(error.clone());
-            error
+            RpcError::InvalidResponse(stage, Some(gateway_core::error::ErrorSource::new(source)))
         })
     }
 }
@@ -212,10 +220,12 @@ pub(crate) struct Shared {
     started_at: Instant,
     expected_stop: AtomicBool,
     failure_observer: Option<Arc<dyn Fn(Duration) + Send + Sync>>,
-    pub control: mpsc::Sender<Frame>,
+    pub control: mpsc::Sender<EncodedFrame>,
     pub process: ProcessControl,
     pub stopped: watch::Sender<bool>,
     callback_slots: Arc<Semaphore>,
+    next_slots: Arc<Semaphore>,
+    execution: ExecutionCapacity,
 }
 
 struct State {
@@ -224,6 +234,8 @@ struct State {
 }
 
 struct PendingCall {
+    _slot: Arc<OwnedSemaphorePermit>,
+    execution: Option<OwnedSemaphorePermit>,
     deadline: CallDeadline,
     handler: Arc<dyn CallbackHandler>,
     transmitted: bool,
@@ -239,10 +251,14 @@ impl PendingCall {
         for callback in self.callbacks.drain(..) {
             callback.abort();
         }
-        if let Some(stream) = self.stream.take() {
+        let stream = self.stream.take();
+        let sender = self.result.take();
+        // 先同步关闭调用资源，Core 才能在收到结果时看到全部发送副作用
+        drop(self);
+        if let Some(stream) = stream {
             stream.finish(result.as_ref().map(|_| ()).map_err(Clone::clone));
         }
-        if let Some(sender) = self.result.take() {
+        if let Some(sender) = sender {
             let _ = sender.send(result);
         }
     }
@@ -274,6 +290,7 @@ impl Shared {
                 .flatten();
             (std::mem::take(&mut state.calls), observer)
         };
+        self.execution.close();
         for call in calls.into_values() {
             call.finish(Err(error.clone()));
         }
@@ -303,6 +320,7 @@ impl Shared {
                 call.deadline.clear();
             }
             let initial = call.result.take().ok_or(RpcError::Protocol(None))?;
+            call.execution.take();
             call.handler.streaming(&call.context);
             let _ = initial.send(result);
         } else {
@@ -384,11 +402,40 @@ impl Shared {
     }
 
     pub fn pause_next(&self, id: u64) -> Option<CallDeadlinePause> {
-        self.state()
+        let mut state = self.state();
+        let call = state
             .calls
-            .get(&id)
+            .get_mut(&id)
+            .filter(|call| call.cancellation.is_none())?;
+        let pause = call.deadline.pause()?;
+        call.execution.take();
+        Some(pause)
+    }
+
+    pub async fn resume_next(&self, id: u64) -> Result<(), RpcError> {
+        {
+            let state = self.state();
+            let call = state
+                .calls
+                .get(&id)
+                .filter(|call| call.cancellation.is_none())
+                .ok_or(RpcError::Cancelled)?;
+            // 已交付响应头的流只占在途资源，不重新占用首结果执行名额
+            if call.result.is_none() {
+                return Ok(());
+            }
+        }
+        let permit = self.execution.resume().await?;
+        let mut state = self.state();
+        let call = state
+            .calls
+            .get_mut(&id)
             .filter(|call| call.cancellation.is_none())
-            .and_then(|call| call.deadline.pause())
+            .ok_or(RpcError::Cancelled)?;
+        if call.result.is_some() {
+            call.execution = Some(permit);
+        }
+        Ok(())
     }
 
     pub fn is_cancelling(&self, id: u64) -> bool {
@@ -490,26 +537,36 @@ impl Shared {
     }
 
     pub fn send_control(&self, frame: Frame) {
+        let Ok(frame) = EncodedFrame::new(frame) else {
+            self.fail(RpcError::Protocol(None));
+            return;
+        };
+        self.send_encoded_control(frame);
+    }
+
+    pub(super) fn send_encoded_control(&self, frame: EncodedFrame) {
         if self.control.try_send(frame).is_err() {
             self.fail(RpcError::Capacity);
         }
     }
 
-    pub(super) fn try_callback_slot(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
-        self.callback_slots.clone().try_acquire_owned().ok()
+    pub(super) fn try_callback_slot(&self, method: &str) -> Option<OwnedSemaphorePermit> {
+        let slots = if method == gateway_plugin_sdk::call::middleware::NEXT_METHOD {
+            &self.next_slots
+        } else {
+            &self.callback_slots
+        };
+        slots.clone().try_acquire_owned().ok()
     }
 
-    async fn wait_for_callbacks(&self, maximum_callbacks: usize) {
-        let Ok(maximum_callbacks) = u32::try_from(maximum_callbacks) else {
-            return;
-        };
-        if let Ok(permits) = self
-            .callback_slots
-            .clone()
-            .acquire_many_owned(maximum_callbacks)
-            .await
-        {
-            drop(permits);
+    async fn wait_for_callbacks(&self, limits: RpcLimits) {
+        for (slots, maximum) in [
+            (&self.callback_slots, limits.maximum_callbacks),
+            (&self.next_slots, limits.maximum_calls),
+        ] {
+            if let Ok(permits) = slots.clone().acquire_many_owned(maximum as u32).await {
+                drop(permits);
+            }
         }
     }
 }
@@ -558,6 +615,10 @@ impl RpcSession {
     ) -> Result<Self, RpcError> {
         if limits.maximum_calls == 0
             || limits.maximum_calls > 256
+            || limits.maximum_executing_calls == 0
+            || limits.maximum_executing_calls > 256
+            || limits.maximum_queued_calls > 256
+            || limits.maximum_queue_timeout.is_zero()
             || limits.maximum_callbacks == 0
             || limits.maximum_callbacks > 256
             || limits.maximum_buffered_body_bytes < 1024
@@ -657,7 +718,7 @@ impl RpcSession {
         }
         let (data, data_receiver) = mpsc::channel(limits.maximum_calls);
         let (control, control_receiver) =
-            mpsc::channel(limits.maximum_callbacks + limits.maximum_calls + 8);
+            mpsc::channel(limits.maximum_callbacks + 2 * limits.maximum_calls + 8);
         let (stopped, _) = watch::channel(false);
         let callback_slots = Arc::new(Semaphore::new(limits.maximum_callbacks));
         let shared = Arc::new(Shared {
@@ -674,6 +735,12 @@ impl RpcSession {
             process,
             stopped,
             callback_slots,
+            next_slots: Arc::new(Semaphore::new(limits.maximum_calls)),
+            execution: ExecutionCapacity::new(
+                limits.maximum_executing_calls,
+                limits.maximum_queued_calls,
+                limits.maximum_queue_timeout,
+            ),
         });
         dispatch::start(
             input,
@@ -739,6 +806,7 @@ impl RpcSession {
         // 宿主生成的上下文受本会话预算约束；固定注册期限不能使较小的总预算无法启动
         let timeout = timeout.min(self.limits.maximum_call_timeout);
         CallContext {
+            request: None,
             call_id: 0,
             instance_id: self.handshake.instance_id.clone(),
             generation: self.handshake.generation,
@@ -754,11 +822,7 @@ impl RpcSession {
         }
     }
 
-    fn call_deadline(
-        &self,
-        method: &str,
-        context: &CallContext,
-    ) -> Result<tokio::time::Instant, RpcError> {
+    fn call_timeout(&self, method: &str, context: &CallContext) -> Result<Duration, RpcError> {
         if context.instance_id != self.handshake.instance_id
             || context.generation != self.handshake.generation
             || context.incarnation != self.handshake.incarnation
@@ -769,7 +833,7 @@ impl RpcSession {
         {
             return Err(RpcError::Context(None));
         }
-        Ok(tokio::time::Instant::now() + Duration::from_millis(context.timeout_ms))
+        Ok(Duration::from_millis(context.timeout_ms))
     }
 
     fn begin_call(
@@ -777,6 +841,8 @@ impl RpcSession {
         context: CallContext,
         deadline: tokio::time::Instant,
         stream: Option<StreamIngress>,
+        slot: Arc<OwnedSemaphorePermit>,
+        execution: OwnedSemaphorePermit,
     ) -> Result<StartedCall, RpcError> {
         let id = context.call_id;
         let (result, received) = oneshot::channel();
@@ -784,14 +850,13 @@ impl RpcSession {
         if let Some(error) = &state.failure {
             return Err(error.clone());
         }
-        if state.calls.len() >= self.limits.maximum_calls {
-            return Err(RpcError::Capacity);
-        }
         let deadline = CallDeadline::new(deadline);
         self.callbacks.begin(&context, &deadline);
         state.calls.insert(
             id,
             PendingCall {
+                _slot: slot,
+                execution: Some(execution),
                 deadline: deadline.clone(),
                 handler: self.callbacks.clone(),
                 transmitted: false,
@@ -818,7 +883,16 @@ impl RpcSession {
         stream: Option<StreamIngress>,
         credit: Option<(u32, u32)>,
     ) -> Result<CompletedCall, RpcError> {
-        let deadline = self.call_deadline(method, &context)?;
+        let timeout = self.call_timeout(method, &context)?;
+        let slot = Arc::new(self.slots.clone().try_acquire_owned().map_err(|error| {
+            if matches!(error, tokio::sync::TryAcquireError::Closed) {
+                RpcError::Closed(None)
+            } else {
+                RpcError::Overloaded
+            }
+        })?);
+        let execution = self.shared.execution.enter().await?;
+        let deadline = tokio::time::Instant::now() + timeout;
         // FIFO 锁同时拥有 ID 与 data 入队顺序；Call/初始 Credit 入队后必须立即释放，
         // 不能把插件回复或重入回调纳入串行区，也不能为等待锁重置调用期限
         let mut next_call = tokio::time::timeout_at(deadline, self.next_call.lock())
@@ -838,10 +912,10 @@ impl RpcSession {
             payload,
         };
         // 本地元数据错误不能进入写队列并关闭整个会话
-        validate_frame(&frame).map_err(|source| {
+        let frame = EncodedFrame::new(frame).map_err(|source| {
             RpcError::Context(Some(gateway_core::error::ErrorSource::new(source)))
         })?;
-        let started = self.begin_call(context, deadline, stream)?;
+        let started = self.begin_call(context, deadline, stream, slot.clone(), execution)?;
         let mut guard = CallGuard {
             shared: Arc::clone(&self.shared),
             id: started.id,
@@ -855,11 +929,16 @@ impl RpcSession {
             if let Some((bytes, frames)) = credit {
                 // 初始信用跟在 Call 后走同一有序队列，不能被控制队列提前发送
                 self.data
-                    .send(Frame::control(Message::Credit {
-                        id: started.id,
-                        bytes,
-                        frames,
-                    }))
+                    .send(
+                        EncodedFrame::new(Frame::control(Message::Credit {
+                            id: started.id,
+                            bytes,
+                            frames,
+                        }))
+                        .map_err(|source| {
+                            RpcError::Context(Some(gateway_core::error::ErrorSource::new(source)))
+                        })?,
+                    )
                     .await
                     .map_err(|_| RpcError::Closed(None))?;
             }
@@ -906,6 +985,7 @@ impl RpcSession {
             }
         };
         Ok(CompletedCall {
+            slot,
             id: started.id,
             deadline: started.deadline,
             reply,
@@ -919,7 +999,6 @@ impl RpcSession {
         params: serde_json::Value,
         payload: Vec<u8>,
     ) -> Result<RpcReply, RpcError> {
-        let _slot = self.slots.try_acquire().map_err(|_| RpcError::Capacity)?;
         self.send_call(method, context, params, payload, None, None)
             .await
             .map(|completed| completed.reply)
@@ -932,9 +1011,6 @@ impl RpcSession {
         params: serde_json::Value,
         payload: Vec<u8>,
     ) -> Result<RpcStream, RpcError> {
-        let slot = Arc::clone(&self.slots)
-            .try_acquire_owned()
-            .map_err(|_| RpcError::Capacity)?;
         let bytes = self.limits.maximum_buffered_body_bytes.min(256 * 1024) as u32;
         let frames = 32;
         let (stream, chunks, terminal) = StreamIngress::new(bytes, frames);
@@ -955,7 +1031,7 @@ impl RpcSession {
             deadline: completed.deadline,
             id: completed.id,
             shared: Arc::clone(&self.shared),
-            _slot: slot,
+            _slot: completed.slot,
             _session: Arc::clone(self),
         })
     }
@@ -988,9 +1064,7 @@ impl RpcSession {
         self.shared.process.exited().await;
         // 不等待监控任务调度；先撤销父调用并中止其回调，再确认回调 future 已析构
         self.shared.fail(RpcError::Closed(None));
-        self.shared
-            .wait_for_callbacks(self.limits.maximum_callbacks)
-            .await;
+        self.shared.wait_for_callbacks(self.limits).await;
     }
 }
 
@@ -1022,6 +1096,7 @@ struct StartedCall {
 }
 
 struct CompletedCall {
+    slot: Arc<OwnedSemaphorePermit>,
     id: u64,
     deadline: CallDeadline,
     reply: RpcReply,

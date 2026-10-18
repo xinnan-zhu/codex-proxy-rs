@@ -1,6 +1,5 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
-mod analytics;
 mod projection;
 
 use std::{
@@ -128,7 +127,7 @@ async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates(
                'firstTokenMs', $2::bigint,
                'latencyMs', $3::bigint),
              'upstream', coalesce(request_observation_json #> '{timings,upstream}', '{}'::jsonb) || jsonb_build_object(
-               'responseMs', $4::bigint, 'engineIapiTbtMs', 2.450638))))
+               'responseMs', $4::bigint, 'engineMs', 2.450638))))
              where id = 'req_observe_success'",
         )
         .bind(output)
@@ -142,6 +141,7 @@ async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates(
         super::drain_analytics(&database.pool).await;
         let records = repository
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter: UsageRecordFilter::default(),
                 current_page: 1,
@@ -167,8 +167,6 @@ async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates(
             detail.request.upstream_response_ms,
             record.upstream_response_ms
         );
-        assert_eq!(record.upstream_engine_iapi_tbt_ms, Some(2.450638));
-        assert_eq!(detail.request.upstream_engine_iapi_tbt_ms, Some(2.450638));
 
         super::drain_analytics(&database.pool).await;
         let summary = repository
@@ -253,6 +251,7 @@ async fn observability_preserves_and_filters_opaque_response_ids() {
     super::drain_analytics(&database.pool).await;
     let records = repository
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 response_id: Some(response_id.clone()),
@@ -297,6 +296,7 @@ async fn usage_page_should_always_return_total() {
     super::drain_analytics(&database.pool).await;
     let page = observability_repository(&database.pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter::default(),
             current_page: 1,
@@ -369,6 +369,7 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
         super::drain_analytics(&database.pool).await;
         let page = store
             .list_usage_records(admin_observability::UsageQuery {
+                status: Default::default(),
                 range,
                 filter: admin_observability::UsageFilter::default(),
                 current_page: 1,
@@ -432,10 +433,14 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
     super::drain_analytics(&database.pool).await;
     let dashboard = store
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -458,6 +463,7 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
     super::drain_analytics(&database.pool).await;
     let page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 provider_account_ref: Some("acct_team".to_owned()),
@@ -520,6 +526,7 @@ async fn usage_search_should_match_literal_prefix_instead_of_substring() {
     super::drain_analytics(&database.pool).await;
     let page = observability_repository(&database.pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 search: Some("rimary".to_owned()),
@@ -567,6 +574,7 @@ async fn usage_search_should_ignore_request_ids_and_preserve_exact_filters() {
     ] {
         let page = observability_repository(&database.pool)
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter,
                 current_page: 1,
@@ -704,6 +712,7 @@ async fn assert_usage_search_ids(
 ) {
     let page = observability_repository(pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 search: Some(search.to_owned()),
@@ -772,6 +781,7 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
             super::drain_analytics(&database.pool).await;
             let page = repository
                 .list_usage_records(UsageRecordQuery {
+                    status: Default::default(),
                     range,
                     filter: UsageRecordFilter {
                         search: Some(search.to_owned()),
@@ -831,6 +841,7 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
         super::drain_analytics(&database.pool).await;
         let page = repository
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter: UsageRecordFilter::default(),
                 current_page: 1,
@@ -1268,10 +1279,14 @@ async fn dashboard_account_metrics_should_partition_account_statuses() {
     super::drain_analytics(&database.pool).await;
     let metrics = repository
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -1365,10 +1380,14 @@ async fn dashboard_account_metrics_with_cooldowns_should_only_reclassify_eligibl
     super::drain_analytics(&database.pool).await;
     let metrics = repository
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -1724,10 +1743,14 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let dashboard = store
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -1844,6 +1867,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let first_page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter::default(),
             current_page: 1,
@@ -1863,6 +1887,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let deep_page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter::default(),
             current_page: 129,
@@ -1878,6 +1903,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let filtered = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 client_api_key_ref: Some("key_observe".to_owned()),
@@ -1906,6 +1932,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let other_outcome = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 outcome: Some(
@@ -2090,10 +2117,14 @@ async fn dashboard_summary_totals_include_history_outside_selected_range() {
     super::drain_analytics(&database.pool).await;
     let dashboard = repository
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -2141,6 +2172,61 @@ async fn dashboard_summary_totals_include_history_outside_selected_range() {
 }
 
 #[tokio::test]
+async fn dashboard_summary_should_load_yesterday_without_widening_today() {
+    let Some(database) = TestDatabase::create("dashboard_yesterday").await else {
+        return;
+    };
+    let timezone = gateway_core::time::DeploymentTimeZone::default();
+    let end = timezone.day_start(Utc::now()).unwrap() + TimeDelta::hours(12);
+    seed_observability_facts(&database.pool, end).await.unwrap();
+    let range = admin_observability::TimeRange::calendar_at(
+        admin_observability::CalendarPeriod::Today,
+        end,
+        timezone,
+    )
+    .unwrap();
+    let query = admin_observability::DashboardQuery::new(range, timezone).unwrap();
+    sqlx::query("update model_requests set started_at=$1,completed_at=$1 + interval '1 minute' where id='req_observe_success'")
+        .bind(query.yesterday_range.start + TimeDelta::hours(1)).execute(&database.pool).await.unwrap();
+    sqlx::query("update model_requests set started_at=$1,completed_at=$1 + interval '1 minute' where id='req_observe_uncommitted'")
+        .bind(query.yesterday_range.start - TimeDelta::hours(1)).execute(&database.pool).await.unwrap();
+    super::drain_analytics(&database.pool).await;
+    let repository = observability_repository(&database.pool);
+    let result = repository
+        .dashboard_summary(query.clone(), end)
+        .await
+        .unwrap();
+    assert_eq!(result.yesterday.request_count, 1);
+    assert_eq!(result.yesterday.input_tokens, 100);
+    assert_eq!(result.yesterday.output_tokens, 20);
+    assert_eq!(result.yesterday.cached_input_tokens, 40);
+    assert_eq!(result.yesterday.total_tokens, 120);
+    assert_eq!(
+        result
+            .trend
+            .iter()
+            .map(|point| point.metrics.request_count)
+            .sum::<u64>(),
+        1
+    );
+    assert!(
+        result
+            .trend
+            .iter()
+            .all(|point| point.bucket_start >= range.start)
+    );
+    assert_eq!(result.recent_requests.len(), 0);
+
+    // 昨日迟到修正经过同一聚合管道更新，不能固化为跨日缓存
+    sqlx::query("update model_requests set input_tokens=200,total_tokens=220 where id='req_observe_success'")
+        .execute(&database.pool).await.unwrap();
+    super::drain_analytics(&database.pool).await;
+    let updated = repository.dashboard_summary(query, end).await.unwrap();
+    assert_eq!(updated.yesterday.input_tokens, 200);
+    assert_eq!(updated.yesterday.total_tokens, 220);
+}
+
+#[tokio::test]
 async fn observability_queries_preserve_request_account_cost_and_diagnostic_facts() {
     let Some(database) = TestDatabase::create("observability").await else {
         return;
@@ -2157,10 +2243,14 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
     super::drain_analytics(&database.pool).await;
     let dashboard = repository
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -2330,6 +2420,7 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
     super::drain_analytics(&database.pool).await;
     let usage_page = repository
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -2812,10 +2903,14 @@ async fn account_hourly_buckets_use_utc_hours_independently_of_calendar_metrics(
         let dashboard = admin_observability_store(&database.pool)
             .with_timezone(timezone)
             .dashboard_summary(
-                admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                    start: range.start,
-                    end: range.end,
-                }),
+                admin_observability::DashboardQuery::new(
+                    admin_observability::TimeRange {
+                        start: range.start,
+                        end: range.end,
+                    },
+                    Default::default(),
+                )
+                .expect("dashboard query"),
                 end,
             )
             .await
@@ -2938,7 +3033,9 @@ async fn dashboard_shares_account_facts_and_bounds_slow_cooldown_reads() {
         .dashboard_summary(
             admin_observability::DashboardQuery::new(
                 admin_observability::TimeRange::new(now - TimeDelta::hours(1), now).unwrap(),
-            ),
+                Default::default(),
+            )
+            .expect("dashboard query"),
             now,
         )
         .await
@@ -3002,7 +3099,7 @@ async fn observability_store_executes_caller_selection_without_replacing_policy(
     let range = TimeRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1)).unwrap();
     super::drain_analytics(&database.pool).await;
     let store = admin_observability_store(&database.pool);
-    let mut query = DashboardQuery::new(range);
+    let mut query = DashboardQuery::new(range, Default::default()).expect("dashboard query");
     query.account_limit = 1;
     query.recent_request_limit = 1;
     query.recent_request_filter = UsageFilter::default();
@@ -3097,4 +3194,48 @@ fn assert_percentile(actual: Option<f64>, expected: Option<f64>) {
         ),
         values => assert_eq!(values.0, values.1),
     }
+}
+
+#[tokio::test]
+async fn diagnostic_export_reads_exact_targets_and_prioritizes_final_error() {
+    use gateway_admin::model::diagnostics::DiagnosticTarget;
+    let Some(database) = TestDatabase::create("diagnostic_export").await else {
+        return;
+    };
+    seed_observability_facts(&database.pool, Utc::now())
+        .await
+        .unwrap();
+    let store = admin_observability_store(&database.pool);
+    let target = DiagnosticTarget::Request("req_observe_failed".into());
+    let errors = store.diagnostic_errors(&target, 129).await.unwrap();
+    assert_eq!(errors.len(), 2);
+    assert!(
+        errors
+            .iter()
+            .all(|error| error.request_id.as_deref() == Some("req_observe_failed"))
+    );
+    assert_eq!(errors[0].source, "model_request");
+    assert_eq!(
+        store.diagnostic_errors(&target, 1).await.unwrap()[0].source,
+        "model_request"
+    );
+    assert!(
+        store
+            .diagnostic_errors(&DiagnosticTarget::Request("unrelated".into()), 129)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query("update ops_events set model_request_id = null, attempt_index = null where id = 'ops_observe_retry'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let errors = store
+        .diagnostic_errors(&DiagnosticTarget::Operation("ops_observe_retry".into()), 1)
+        .await
+        .unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].event_id, "ops_observe_retry");
+    assert!(errors[0].request_id.is_none());
+    database.close().await;
 }

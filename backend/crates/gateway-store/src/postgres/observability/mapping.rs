@@ -41,6 +41,7 @@ pub(crate) fn store_usage_query(
     query: admin_observability::UsageQuery,
 ) -> AdminStoreResult<UsageRecordQuery> {
     Ok(UsageRecordQuery {
+        status: query.status,
         range: store_range(query.range).map_err(observability_error)?,
         filter: store_usage_filter(query.filter),
         current_page: query.current_page,
@@ -66,6 +67,7 @@ pub(crate) fn admin_dashboard_observation(
         analytics,
         range,
         totals,
+        yesterday,
         provider_accounts,
         runtime_slots,
         trend,
@@ -76,6 +78,7 @@ pub(crate) fn admin_dashboard_observation(
         analytics,
         range: admin_range(range),
         totals,
+        yesterday,
         provider_accounts,
         runtime_slots: Some(runtime_slots),
         trend: trend.into_iter().map(admin_request_metric_point).collect(),
@@ -302,6 +305,11 @@ pub(crate) fn usage_list_record_from_row(
         cost_currency.as_deref(),
     )?;
     Ok(UsageListRecord {
+        error_code: get(row, "error_code")?,
+        error_message: get(row, "error_message")?,
+        client_status_code: optional_status(row, "client_status_code")?,
+        outcome: admin_observability::RequestOutcome::new(get::<String>(row, "outcome")?)
+            .map_err(|_| invalid("invalid request outcome"))?,
         client_api_key_name: get(row, "client_api_key_name")?,
         billing,
         id: get(row, "id")?,
@@ -342,10 +350,6 @@ pub(crate) fn usage_list_record_from_row(
         upstream_response_ms: optional_unsigned(row, "upstream_response_ms")?,
         upstream_api_overhead_ms: get(row, "upstream_api_overhead_ms")?,
         upstream_engine_ms: get(row, "upstream_engine_ms")?,
-        upstream_engine_iapi_ttft_ms: get(row, "upstream_engine_iapi_ttft_ms")?,
-        upstream_engine_service_ttft_ms: get(row, "upstream_engine_service_ttft_ms")?,
-        upstream_engine_iapi_tbt_ms: get(row, "upstream_engine_iapi_tbt_ms")?,
-        upstream_engine_service_tbt_ms: get(row, "upstream_engine_service_tbt_ms")?,
         latency_ms: optional_unsigned(row, "latency_ms")?,
         admission_decision_ms: optional_unsigned(row, "admission_decision_ms")?,
         account_selection_wait_ms: optional_unsigned(row, "account_selection_wait_ms")?,
@@ -439,10 +443,6 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
         upstream_response_ms: optional_unsigned(row, "upstream_response_ms")?,
         upstream_api_overhead_ms: get(row, "upstream_api_overhead_ms")?,
         upstream_engine_ms: get(row, "upstream_engine_ms")?,
-        upstream_engine_iapi_ttft_ms: get(row, "upstream_engine_iapi_ttft_ms")?,
-        upstream_engine_service_ttft_ms: get(row, "upstream_engine_service_ttft_ms")?,
-        upstream_engine_iapi_tbt_ms: get(row, "upstream_engine_iapi_tbt_ms")?,
-        upstream_engine_service_tbt_ms: get(row, "upstream_engine_service_tbt_ms")?,
         latency_ms: optional_unsigned(row, "latency_ms")?,
         admission_decision_ms: optional_unsigned(row, "admission_decision_ms")?,
         account_selection_wait_ms: optional_unsigned(row, "account_selection_wait_ms")?,

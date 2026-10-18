@@ -1,6 +1,7 @@
 //! 观测领域事实到管理页面的展示投影
 
 use super::*;
+use gateway_core::metering::Usage;
 
 pub(crate) fn display_duration(value: Option<u64>) -> String {
     let Some(value) = value.and_then(|value| i64::try_from(value).ok()) else {
@@ -100,7 +101,7 @@ pub(crate) fn attempt_metrics_view(metrics: &domain::AttemptMetrics) -> AttemptM
 }
 
 pub(crate) fn token_details(record: &domain::UsageRecord) -> TokenDetailsView {
-    TokenDetailsView {
+    token_details_view(&Usage {
         input_tokens: record.input_tokens,
         output_tokens: record.output_tokens,
         cached_input_tokens: record.cached_input_tokens,
@@ -109,35 +110,11 @@ pub(crate) fn token_details(record: &domain::UsageRecord) -> TokenDetailsView {
         image_input_tokens: record.image_input_tokens,
         image_output_tokens: record.image_output_tokens,
         total_tokens: record.total_tokens,
-        input_tokens_display: record
-            .input_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-        output_tokens_display: record
-            .output_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-        cached_input_tokens_display: record
-            .cached_input_tokens
-            .map_or_else(|| "-".to_owned(), format_compact_number),
-        cache_write_input_tokens_display: record
-            .cache_write_input_tokens
-            .map_or_else(|| "-".to_owned(), format_compact_number),
-        reasoning_output_tokens_display: record
-            .reasoning_output_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-        image_input_tokens_display: record
-            .image_input_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-        image_output_tokens_display: record
-            .image_output_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-        total_tokens_display: record
-            .total_tokens
-            .map_or_else(|| "-".to_owned(), format_number),
-    }
+    })
 }
 
 pub(crate) fn usage_list_token_details(record: &domain::UsageListRecord) -> TokenDetailsView {
-    TokenDetailsView {
+    token_details_view(&Usage {
         input_tokens: record.input_tokens,
         output_tokens: record.output_tokens,
         cached_input_tokens: record.cached_input_tokens,
@@ -146,28 +123,41 @@ pub(crate) fn usage_list_token_details(record: &domain::UsageListRecord) -> Toke
         image_input_tokens: record.image_input_tokens,
         image_output_tokens: record.image_output_tokens,
         total_tokens: record.total_tokens,
-        input_tokens_display: record
+    })
+}
+
+fn token_details_view(usage: &Usage) -> TokenDetailsView {
+    TokenDetailsView {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        cache_write_input_tokens: usage.cache_write_input_tokens,
+        reasoning_output_tokens: usage.reasoning_output_tokens,
+        image_input_tokens: usage.image_input_tokens,
+        image_output_tokens: usage.image_output_tokens,
+        total_tokens: usage.total_tokens,
+        input_tokens_display: usage
             .input_tokens
             .map_or_else(|| "-".to_owned(), format_number),
-        output_tokens_display: record
+        output_tokens_display: usage
             .output_tokens
             .map_or_else(|| "-".to_owned(), format_number),
-        cached_input_tokens_display: record
+        cached_input_tokens_display: usage
             .cached_input_tokens
             .map_or_else(|| "-".to_owned(), format_compact_number),
-        cache_write_input_tokens_display: record
+        cache_write_input_tokens_display: usage
             .cache_write_input_tokens
             .map_or_else(|| "-".to_owned(), format_compact_number),
-        reasoning_output_tokens_display: record
+        reasoning_output_tokens_display: usage
             .reasoning_output_tokens
             .map_or_else(|| "-".to_owned(), format_number),
-        image_input_tokens_display: record
+        image_input_tokens_display: usage
             .image_input_tokens
             .map_or_else(|| "-".to_owned(), format_number),
-        image_output_tokens_display: record
+        image_output_tokens_display: usage
             .image_output_tokens
             .map_or_else(|| "-".to_owned(), format_number),
-        total_tokens_display: record
+        total_tokens_display: usage
             .total_tokens
             .map_or_else(|| "-".to_owned(), format_number),
     }
@@ -272,6 +262,9 @@ pub(crate) fn usage_list_record_view(
         .clone()
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
+        error_code: record.error_code,
+        error_message: record.error_message,
+        logical_outcome: record.outcome.as_str().to_owned(),
         client_api_key_name: record.client_api_key_name,
         id: record.id,
         provider: record.provider_kind,
@@ -311,10 +304,6 @@ pub(crate) fn usage_list_record_view(
             upstream_response_ms: record.upstream_response_ms,
             upstream_api_overhead_ms: record.upstream_api_overhead_ms,
             upstream_engine_ms: record.upstream_engine_ms,
-            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
-            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
-            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
-            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         first_token_latency_ms: record.first_token_ms,
         latency_ms: record.latency_ms,
@@ -419,10 +408,6 @@ pub(crate) fn usage_record_view(
             upstream_response_ms: record.upstream_response_ms,
             upstream_api_overhead_ms: record.upstream_api_overhead_ms,
             upstream_engine_ms: record.upstream_engine_ms,
-            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
-            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
-            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
-            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         attempt_index: None,
         attempt_count: u64::from(record.attempt_count),
@@ -547,8 +532,6 @@ pub(crate) fn usage_detail_view(
     time: crate::time::TimePresenter,
 ) -> UsageRecordDetailView {
     UsageRecordDetailView {
-        trace: detail.trace,
-        related_requests: detail.related_requests,
         request: usage_record_view(detail.request, time),
         attempts: detail
             .attempts
@@ -628,7 +611,7 @@ pub(crate) fn ops_error_view(
         subagent_kind: error.subagent_kind,
         compact: error.compact,
         message: error.message,
-        error_details: error.error_details,
+        error_details: error.error_details.map(error_details_view),
         metadata: OpsErrorMetadataView {
             source: error.source,
             component: error.component,
@@ -650,6 +633,20 @@ pub(crate) fn ops_error_view(
         created_at: error.occurred_at,
         created_at_display: time.datetime(&error.occurred_at),
     }
+}
+
+// 受控错误正文保持原文语义，嵌套 JSON 只在展示投影中展开缩进
+fn error_details_view(raw: String) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(&raw) else {
+        return raw;
+    };
+    if let Some(upstream) = value.get_mut("upstream")
+        && let Some(text) = upstream.as_str()
+        && let Ok(parsed) = serde_json::from_str::<Value>(text)
+    {
+        *upstream = parsed;
+    }
+    serde_json::to_string_pretty(&value).unwrap_or(raw)
 }
 
 pub(crate) fn ops_page_view(

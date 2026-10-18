@@ -79,7 +79,7 @@ const columns = defineTableColumns<PrivacyRule>([
   { key: 'name', label: '规则 / 字段', kind: 'identity', size: '3xl' },
   { key: 'scope', label: '作用范围', kind: 'meta', size: 'lg' },
   { key: 'action', label: '处理方式', kind: 'meta', size: 'md' },
-  { key: 'actions', label: '', kind: 'actions', size: 'md', fixedWidth: true },
+  { key: 'actions', label: '', kind: 'actions', size: 'lg', fixedWidth: true },
 ])
 </script>
 
@@ -91,7 +91,7 @@ const columns = defineTableColumns<PrivacyRule>([
     <p class="sr-only" role="status" aria-live="polite">
       {{ announcement }}
     </p>
-    <ZTable :columns="columns" :data="rules" size="small" empty-text="暂无规则，添加一条或从预设开始">
+    <ZTable :columns="columns" :data="rules" size="small" class="[&_tbody>tr>td:last-child]:pr-2!" empty-text="暂无规则，添加一条或从预设开始">
       <template #enabled="{ row }">
         <div class="flex items-center justify-center">
           <ZSwitch :disabled="disabled" :model-value="row.enabled" :aria-label="`启用规则：${row.name}`" @update:model-value="emit('toggle', row, $event)" />

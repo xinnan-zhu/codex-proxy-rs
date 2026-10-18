@@ -38,6 +38,7 @@ const HEALTH_TIMELINE_SLOT_MINUTES: i64 = 15;
 const HEALTH_TIMELINE_MIN_SAMPLE_SIZE: u64 = 10;
 const HEALTH_TIMELINE_UNAVAILABLE_FAILURE_THRESHOLD: u64 = 3;
 const HEALTH_TIMELINE_STABLE_RELIABILITY: f64 = 95.0;
+mod export;
 mod store_cache;
 pub(crate) use store_cache::CachedObservabilityStore;
 
@@ -70,6 +71,10 @@ pub trait ObservabilityService: Send + Sync {
         dimension: DiagnosticDimension,
     ) -> Result<DiagnosticsResult, AdminError>;
     async fn ops_errors(&self, query: OpsErrorQuery) -> Result<OpsErrorPage, AdminError>;
+    async fn export_diagnostics(
+        &self,
+        target: crate::model::diagnostics::DiagnosticTarget,
+    ) -> Result<crate::model::diagnostics::DiagnosticBundle, AdminError>;
 }
 
 pub(crate) struct DefaultObservabilityService {
@@ -78,6 +83,7 @@ pub(crate) struct DefaultObservabilityService {
     accounts: Arc<dyn AccountStore>,
     settings: Arc<dyn SettingsStore>,
     providers: ProviderAdminRegistry,
+    system: Arc<dyn super::system::SystemService>,
 }
 
 impl DefaultObservabilityService {
@@ -88,6 +94,7 @@ impl DefaultObservabilityService {
         settings: Arc<dyn SettingsStore>,
         providers: ProviderAdminRegistry,
         timezone: gateway_core::time::DeploymentTimeZone,
+        system: Arc<dyn super::system::SystemService>,
     ) -> Self {
         Self {
             timezone,
@@ -95,6 +102,7 @@ impl DefaultObservabilityService {
             accounts,
             settings,
             providers,
+            system,
         }
     }
 
@@ -103,9 +111,11 @@ impl DefaultObservabilityService {
         range: TimeRange,
     ) -> Result<DashboardResult, AdminError> {
         let observed_at = Utc::now();
+        let query = DashboardQuery::new(range, self.timezone)
+            .map_err(|_| AdminError::internal("时间超出支持范围"))?;
+        let today_start = query.yesterday_range.end;
         let (mut observation, settings) = futures::try_join!(
-            self.store
-                .dashboard_summary(DashboardQuery::new(range), observed_at),
+            self.store.dashboard_summary(query, observed_at),
             self.settings.load_runtime_settings(),
         )
         .map_err(|error| map_store_error(error, "dashboard"))?;
@@ -118,17 +128,16 @@ impl DefaultObservabilityService {
                 .providers
                 .plan_type_display(&account.provider_kind, account.plan_type.as_deref());
         }
-        let today_start = self
-            .timezone
-            .day_start(observation.range.end)
-            .ok_or_else(|| AdminError::internal("时间超出支持范围"))?;
-        let yesterday_start = self
-            .timezone
-            .days_before(observation.range.end, 1)
-            .ok_or_else(|| AdminError::internal("时间超出支持范围"))?;
-        let today =
-            dashboard_period_metrics(&observation.trend, today_start, observation.range.end);
-        let yesterday = dashboard_period_metrics(&observation.trend, yesterday_start, today_start);
+        let today = dashboard_period_metrics(
+            observation
+                .trend
+                .iter()
+                .filter(|point| {
+                    point.bucket_start >= today_start && point.bucket_start < observation.range.end
+                })
+                .map(|point| &point.metrics),
+        );
+        let yesterday = dashboard_period_metrics(std::iter::once(&observation.yesterday));
         let total_billing_usd = observation.totals.billing_usd.clone();
         let total_cached_token_rate = rate_or_zero(
             observation.totals.cached_input_tokens,
@@ -192,6 +201,13 @@ impl DefaultObservabilityService {
 
 #[async_trait]
 impl ObservabilityService for DefaultObservabilityService {
+    async fn export_diagnostics(
+        &self,
+        target: crate::model::diagnostics::DiagnosticTarget,
+    ) -> Result<crate::model::diagnostics::DiagnosticBundle, AdminError> {
+        self.collect_diagnostics(target).await
+    }
+
     async fn dashboard_summary(
         &self,
         range: TimeRange,
@@ -1039,17 +1055,11 @@ fn trend_point(point: RequestMetricPoint) -> TrendPoint {
     }
 }
 
-fn dashboard_period_metrics(
-    points: &[RequestMetricPoint],
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+fn dashboard_period_metrics<'a>(
+    metrics: impl IntoIterator<Item = &'a RequestMetrics>,
 ) -> DashboardPeriodMetrics {
     let mut result = DashboardPeriodMetrics::default();
-    for metrics in points
-        .iter()
-        .filter(|point| point.bucket_start >= start && point.bucket_start < end)
-        .map(|point| &point.metrics)
-    {
+    for metrics in metrics {
         result.request_count = result.request_count.saturating_add(metrics.request_count);
         result.input_tokens = result.input_tokens.saturating_add(metrics.input_tokens);
         result.output_tokens = result.output_tokens.saturating_add(metrics.output_tokens);

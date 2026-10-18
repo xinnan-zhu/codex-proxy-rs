@@ -428,7 +428,7 @@ async fn service_chain_preserves_onion_order_parent_scope_and_native_results_wit
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(events.len(), 8);
-    for round in events.chunks_exact(4) {
+    for round in events.as_chunks::<4>().0 {
         let phases = round
             .iter()
             .map(|event| {
@@ -458,4 +458,47 @@ async fn service_chain_preserves_onion_order_parent_scope_and_native_results_wit
     drop(generation);
     runtime.shutdown().await;
     drop(cache);
+}
+
+#[tokio::test]
+async fn usage_sdk_calls_preserve_exact_counts_and_write_actor() {
+    use gateway_admin::model::usage_data::*;
+    let Some(environment) = Environment::create().await else {
+        return;
+    };
+    let (runtime, core) = environment
+        .plugin(json!({"service":true,"mode":"usage_data"}))
+        .await;
+    let admin = environment.bind_admin_accounts(&runtime, &core).await;
+    let services = admin.services();
+    runtime.bind_services(&services.public_services()).unwrap();
+    assert_eq!(
+        services
+            .public_services()
+            .call("settings.admin_api_key_exists", json!(null))
+            .await
+            .unwrap(),
+        json!(true)
+    );
+    let row = services
+        .usage_data()
+        .get_record(GetUsageRecord {
+            id: "sdk-usage".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        row.data.tokens.total_tokens,
+        Some(UsageCount(9_007_199_254_740_993))
+    );
+    assert!(matches!(row.data.cost, UsageCost::Known { .. }));
+    let actors = environment.audit_actor_refs("usage.put").await;
+    assert!(!actors.is_empty());
+    assert!(
+        actors
+            .iter()
+            .all(|actor| actor.starts_with("plugin:test/example:"))
+    );
+
+    runtime.shutdown().await;
 }

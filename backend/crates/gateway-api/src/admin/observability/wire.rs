@@ -86,6 +86,9 @@ pub struct ImageBillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub logical_outcome: String,
     pub client_api_key_name: Option<String>,
     pub id: String,
     pub provider: Option<String>,
@@ -231,14 +234,6 @@ pub struct UsageLatencyDetailsView {
     pub upstream_api_overhead_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_engine_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_tbt_ms: Option<f64>,
 }
 
 /// 单次上游尝试展示
@@ -279,8 +274,6 @@ pub struct UsageAttemptView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordDetailView {
-    pub trace: Option<serde_json::Value>,
-    pub related_requests: Vec<serde_json::Value>,
     #[serde(flatten)]
     pub request: UsageRecordView,
     pub attempts: Vec<UsageAttemptView>,

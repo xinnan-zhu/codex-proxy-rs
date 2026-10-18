@@ -27,8 +27,6 @@ export const fieldsByScope: Partial<Record<PrivacyScope, { value: string, label:
     { value: '$.remotes[*].fetchUrl', label: 'Git 远端地址' },
     { value: '$.headCommitSha', label: 'Git 提交标识' },
     { value: '$.worktreeId', label: '工作区指纹' },
-    { value: '$.appVersion', label: '应用版本' },
-    { value: '$.appServerVersion', label: 'Core 版本' },
   ],
 }
 
@@ -47,23 +45,9 @@ export const presets: { key: string, name: string, steps: Partial<PrivacyStep>[]
     steps: [
       { scope: 'turn_metadata', selector: '$.workspaces', action: 'rename_key', pattern: String.raw`(?i)^((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\]+`, replacement: `\${1}user` },
       { scope: 'environment_text', selector: '$', action: 'regex_replace', pattern: String.raw`(?i)((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\<>"'\r\n]+`, replacement: `\${1}user` },
-      // 项目名取自原路径，不固定到预设样本中的项目
+      // 路径隐藏本机目录布局，项目名和 Git 状态仍取自实际请求
       { scope: 'turn_metadata', selector: '$.workspaces', action: 'rename_key', pattern: String.raw`(?s)^(?:[a-zA-Z]:)?[/\\](?:.*[/\\])?([^/\\]+)[/\\]*$`, replacement: `/workspace/\${1}` },
       { scope: 'environment_text', selector: '$', action: 'regex_replace', pattern: String.raw`(<cwd>\s*)(?:[a-zA-Z]:)?[/\\](?:[^<>\r\n]*[/\\])?([^/\\<>\r\n]+?)[/\\]*\s*(</cwd>)`, replacement: `\${1}/workspace/\${2}\${3}` },
-      { scope: 'turn_metadata', selector: '$.workspaces.*.associated_remote_urls.*', action: 'set_value', pattern: null, value: 'https://example.invalid/repo.git' },
-      { scope: 'turn_metadata', selector: '$.workspaces.*.latest_git_commit_hash', action: 'set_value', pattern: null, value: '0'.repeat(40) },
-    ],
-  },
-  {
-    key: 'desktop',
-    name: '统一 Desktop 信息',
-    steps: [
-      // 统一整个远端集合，避免远端数量、名称和可空 URL 继续暴露差异
-      { scope: 'desktop_git_context', selector: '$.remotes', action: 'set_value', pattern: null, value: [{ name: 'origin', fetchUrl: 'https://example.invalid/repo.git' }] },
-      { scope: 'desktop_git_context', selector: '$.headCommitSha', action: 'set_value', pattern: null, value: '0'.repeat(40) },
-      { scope: 'desktop_git_context', selector: '$.worktreeId', action: 'set_value', pattern: null, value: '0'.repeat(40) },
-      { scope: 'desktop_git_context', selector: '$.appVersion', action: 'set_value', pattern: null, value: '0.0.0' },
-      { scope: 'desktop_git_context', selector: '$.appServerVersion', action: 'set_value', pattern: null, value: '0.0.0' },
     ],
   },
 ]

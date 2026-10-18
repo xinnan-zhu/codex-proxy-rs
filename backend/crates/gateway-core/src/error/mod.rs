@@ -48,6 +48,8 @@ pub enum ProviderErrorKind {
     NoEligibleAccount,
     /// 目标账号仅限 Codex 官方客户端，当前客户端不被允许调度到该账号
     AccountClientRestricted,
+    /// 会话已有的策略限制排除了可用账号，本地选号终止且不允许重放
+    SessionPolicyRestricted,
     /// Provider 的账号存储、租约协调或本地凭据数据不可用
     ProviderInfrastructureUnavailable,
     /// 请求超时
@@ -87,6 +89,7 @@ impl ProviderErrorKind {
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::NoEligibleAccount => "no_eligible_account",
             Self::AccountClientRestricted => "account_client_restricted",
+            Self::SessionPolicyRestricted => "session_policy_restricted",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",
             Self::Timeout => "timeout",
             Self::Transport => "transport",
@@ -1070,6 +1073,8 @@ pub enum GatewayErrorKind {
     NoAvailableProvider,
     /// 符合条件的上游账号暂时没有调度容量
     AccountCapacityUnavailable,
+    /// 中间件在途资源或执行等待队列已满
+    MiddlewareCapacityUnavailable,
     ConcurrencyQueueFull,
     ConcurrencyQueueTimeout,
     /// Provider 的本地账号基础设施不可用
@@ -1101,6 +1106,7 @@ impl GatewayErrorKind {
             Self::ModelNotFound => "model_not_found",
             Self::NoAvailableProvider => "no_available_provider",
             Self::AccountCapacityUnavailable => "account_capacity_unavailable",
+            Self::MiddlewareCapacityUnavailable => "middleware_capacity_unavailable",
             Self::ConcurrencyQueueFull => "concurrency_queue_full",
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",
@@ -1187,6 +1193,10 @@ impl GatewayError {
             ProviderErrorKind::InvalidRequest => {
                 Self::new(GatewayErrorKind::InvalidRequest, "invalid upstream request")
             }
+            ProviderErrorKind::SessionPolicyRestricted => Self::new(
+                GatewayErrorKind::InvalidRequest,
+                "session policy excludes all eligible accounts",
+            ),
             ProviderErrorKind::ContinuationRecoveryRequired => Self::new(
                 GatewayErrorKind::InvalidRequest,
                 "conversation continuation must be rebuilt",
