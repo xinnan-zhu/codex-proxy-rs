@@ -130,6 +130,7 @@ fn model_request(operation: &Operation) -> NewModelRequest {
         requested_model: Some(PublicModelId::new(MODEL).unwrap()),
         client_ip: None,
         user_agent: None,
+        codex_client: None,
         reasoning_effort: None,
         reasoning_preset: None,
         request_kind: None,

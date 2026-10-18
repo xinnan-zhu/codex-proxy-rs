@@ -116,6 +116,7 @@ async fn cyber_policy_rotation_preserves_upstream_response_and_next_request_stay
         requested_model: Some(PublicModelId::new("gpt-5.4").unwrap()),
         client_ip: None,
         user_agent: None,
+        codex_client: None,
         reasoning_effort: None,
         reasoning_preset: None,
         request_kind: None,
