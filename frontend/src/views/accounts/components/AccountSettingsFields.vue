@@ -9,6 +9,7 @@ withDefaults(defineProps<{
   groups: AccountGroupRef[]
   groupsLoading: boolean
   disabled: boolean
+  currentProxyId?: string | null
   endpoint?: string | null
   accountId?: string
   preserveProxy?: boolean
@@ -74,7 +75,7 @@ const codexOnly = defineModel<boolean>('codexOnly', { default: false })
         :disabled="disabled"
       />
     </ZFormItem>
-    <AccountProxyField v-model:mode="proxyMode" v-model:proxy-id="proxyId" :preserve="preserveProxy" :error="proxyError" :endpoint="endpoint" :account-id="accountId" :disabled="disabled" />
+    <AccountProxyField v-model:mode="proxyMode" v-model:proxy-id="proxyId" :preserve="preserveProxy" :error="proxyError" :current-proxy-id="currentProxyId" :endpoint="endpoint" :account-id="accountId" :disabled="disabled" />
     <div v-if="showCodexOnly" class="flex min-h-6 items-center justify-between gap-3">
       <div class="grid gap-1">
         <span class="text-cp leading-none font-medium text-cp-text-secondary">仅限 Codex 客户端</span>

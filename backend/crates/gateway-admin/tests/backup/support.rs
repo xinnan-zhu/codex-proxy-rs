@@ -5,6 +5,7 @@
 //! 供 backup::task 与 use_case::backup 的测试复用
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -91,7 +92,9 @@ pub(crate) fn queued_record(seed: &BackupRecordSeed) -> BackupRecord {
 
 /// 内存版备份仓储
 pub(crate) struct FakeBackupRepository {
+    audits: Mutex<Vec<AdminAuditEvent>>,
     settings: Mutex<BackupSettings>,
+    settings_unavailable: AtomicBool,
     records: Mutex<Vec<BackupRecord>>,
 }
 
@@ -99,8 +102,19 @@ impl FakeBackupRepository {
     pub(crate) fn new(settings: BackupSettings) -> Self {
         Self {
             settings: Mutex::new(settings),
+            audits: Mutex::new(Vec::new()),
+            settings_unavailable: AtomicBool::new(false),
             records: Mutex::new(Vec::new()),
         }
+    }
+
+    pub(crate) fn audit_events(&self) -> Vec<AdminAuditEvent> {
+        self.audits.lock().expect("audits").clone()
+    }
+
+    pub(crate) fn set_settings_unavailable(&self, unavailable: bool) {
+        self.settings_unavailable
+            .store(unavailable, Ordering::SeqCst);
     }
 
     /// 测试辅助：读取当前全部记录
@@ -134,6 +148,13 @@ impl FakeBackupRepository {
 #[async_trait]
 impl BackupRepository for FakeBackupRepository {
     async fn load_settings(&self) -> AdminStoreResult<BackupSettings> {
+        if self.settings_unavailable.load(Ordering::SeqCst) {
+            return Err(AdminStoreError::new(
+                AdminStoreErrorKind::Unavailable,
+                "backup",
+                "test store unavailable",
+            ));
+        }
         Ok(self.settings.lock().expect("settings").clone())
     }
 
@@ -192,7 +213,11 @@ impl BackupRepository for FakeBackupRepository {
         Ok(true)
     }
 
-    async fn insert_backup_record(&self, seed: BackupRecordSeed) -> AdminStoreResult<BackupRecord> {
+    async fn insert_backup_record(
+        &self,
+        seed: BackupRecordSeed,
+        context: &MutationContext,
+    ) -> AdminStoreResult<BackupRecord> {
         let mut records = self.records.lock().expect("records");
         if records.iter().any(|record| record.status.is_active()) {
             return Err(AdminStoreError::new(
@@ -203,6 +228,13 @@ impl BackupRepository for FakeBackupRepository {
         }
         let record = queued_record(&seed);
         records.push(record.clone());
+        self.audits.lock().expect("audits").push(
+            gateway_admin::model::audit::MutationAuditIntent {
+                operation: gateway_admin::model::audit::MutationAuditOperation::BackupCreate,
+                entity_ref: &record.id,
+            }
+            .event(context, vec!["status".to_owned()]),
+        );
         Ok(record)
     }
 
@@ -386,6 +418,7 @@ impl BackupRepository for FakeBackupRepository {
         &self,
         id: &str,
         now: DateTime<Utc>,
+        context: Option<&MutationContext>,
     ) -> AdminStoreResult<Option<BackupRecord>> {
         let mut records = self.records.lock().expect("records");
         let Some(record) = records
@@ -396,6 +429,15 @@ impl BackupRepository for FakeBackupRepository {
         };
         record.status = BackupStatus::Deleting;
         record.updated_at = now;
+        if let Some(context) = context {
+            self.audits.lock().expect("audits").push(
+                gateway_admin::model::audit::MutationAuditIntent {
+                    operation: gateway_admin::model::audit::MutationAuditOperation::BackupDelete,
+                    entity_ref: id,
+                }
+                .event(context, vec!["status".to_owned()]),
+            );
+        }
         Ok(Some(record.clone()))
     }
 

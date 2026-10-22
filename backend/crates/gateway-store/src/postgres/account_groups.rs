@@ -90,6 +90,17 @@ impl PgAccountGroupRepository {
         Ok(record)
     }
 
+    async fn committed_record(&self, id: &AccountGroupId) -> Option<AccountGroupRecord> {
+        // 配置、版本和审计已经提交，展示查询失败不能把成功的变更变成错误返回。
+        match self.required_record(id).await {
+            Ok(record) => Some(record),
+            Err(error) => {
+                tracing::warn!(group_id = %id.as_str(), error = %error, "committed account group projection is unavailable");
+                None
+            }
+        }
+    }
+
     async fn mutate<F>(
         &self,
         audit: super::AdminAuditEvent,
@@ -229,7 +240,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
             "select coalesce(proxy.enabled, true) as outbound_proxy_enabled, coalesce(proxy.max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, proxy.auto_location, proxy.detected_location_json, proxy.location_country, proxy.location_region, proxy.location_city, proxy.location_timezone, membership.account_group_id,
                     account.id, account.provider_kind, account.name, account.notes, account.codex_only, account.email,
                     account.upstream_user_id, account.upstream_account_id, account.plan_type,
-                    account.authentication_kind, account.credential_revision, account.outbound_proxy_url,
+                    account.authentication_kind, account.credential_revision, account.outbound_proxy_id, account.outbound_proxy_url,
                     account.has_refresh_token, account.access_token_expires_at,
                     account.next_refresh_at, account.enabled, account.concurrency_limit,
                     account.weight, account.model_access_json, account.credential_state, account.quota_access_state,
@@ -317,7 +328,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 
@@ -363,7 +374,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 
@@ -399,7 +410,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 

@@ -132,6 +132,7 @@ export interface AccountModelAccess {
 
 export interface Account {
   capabilities: AccountCapabilities
+  outboundProxyId: string | null
   outboundProxyEndpoint: string | null
   id: string
   name: string

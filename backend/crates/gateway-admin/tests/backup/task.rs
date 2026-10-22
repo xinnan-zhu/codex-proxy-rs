@@ -11,6 +11,7 @@ use gateway_admin::{
     ports::backup::{BackupRepository, DatabaseDumpPort, DumpRequest},
 };
 use gateway_core::lifecycle::CancellationToken;
+use gateway_core::task::{DaemonTask, WorkerDaemonContext};
 
 use super::support::{
     DUMP_CONTENT, FakeBackupRepository, FakeDumpPort, FakeObjectStore, backup_id,
@@ -31,7 +32,7 @@ async fn backup_task_runs_full_dump_upload_verify_pipeline() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -72,7 +73,7 @@ async fn backup_task_marks_failed_when_dump_port_fails() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -104,7 +105,7 @@ async fn backup_task_marks_failed_with_the_upload_error() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -137,7 +138,7 @@ async fn backup_task_recovery_marks_failed_with_the_upload_error() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
     let cancellation = CancellationToken::new();
@@ -184,14 +185,14 @@ async fn retention_cleans_expired_scheduled_backups() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(old_seed.clone())
+        .insert_backup_record(old_seed.clone(), &system_context())
         .await
         .expect("insert old");
     // 旧备份 40 天前完成（释放活跃名额），再插入新备份
     let now = Utc::now();
     repository.set_completed(&backup_id("old"), now - Duration::days(40));
     repository
-        .insert_backup_record(new_seed.clone())
+        .insert_backup_record(new_seed.clone(), &system_context())
         .await
         .expect("insert new");
     // 新备份 1 天前完成
@@ -278,7 +279,10 @@ async fn completed_recovery_removes_staging_for_dumping_and_uploading_tasks() {
             object_key: "recovery.dump".to_owned(),
             expires_at: None,
         };
-        repository.insert_backup_record(seed.clone()).await.unwrap();
+        repository
+            .insert_backup_record(seed.clone(), &system_context())
+            .await
+            .unwrap();
         let artifact = dump
             .dump(DumpRequest {
                 backup_id: seed.id.clone(),
@@ -343,7 +347,10 @@ async fn manual_backup_preserves_primary_and_final_delete_failures() {
             object_key: "codex/cleanup-failure.dump".into(),
             expires_at: expiring.then(|| Utc::now() + Duration::hours(1)),
         };
-        repository.insert_backup_record(seed.clone()).await.unwrap();
+        repository
+            .insert_backup_record(seed.clone(), &system_context())
+            .await
+            .unwrap();
         let task = BackupTask::new(repository.clone(), dump.clone(), store.clone());
         task.run_cycle(&CancellationToken::new()).await.unwrap();
         let records = repository.all_records();
@@ -378,4 +385,41 @@ async fn manual_backup_preserves_primary_and_final_delete_failures() {
             record.error_message
         );
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn daemon_reports_success_only_after_a_complete_cycle_and_recovers_after_store_failure() {
+    let repository = Arc::new(FakeBackupRepository::new(configured_settings()));
+    let task = Arc::new(BackupTask::new(
+        repository.clone(),
+        Arc::new(FakeDumpPort::new()),
+        Arc::new(FakeObjectStore::new()),
+    ));
+    let context = WorkerDaemonContext::new(CancellationToken::new());
+    repository.set_settings_unavailable(true);
+    let error = task.run(context.clone()).await.unwrap_err();
+    assert_eq!(error.as_safe_str(), "backup store failed");
+    assert_eq!(context.completed_cycles(), 0);
+
+    repository.set_settings_unavailable(false);
+    let recovered = WorkerDaemonContext::new(CancellationToken::new());
+    let worker = tokio::spawn({
+        let task = task.clone();
+        let context = recovered.clone();
+        async move { task.run(context).await }
+    });
+    recovered.progress_since(0).await;
+    assert_eq!(recovered.completed_cycles(), 1);
+    repository.set_settings_unavailable(true);
+    tokio::time::advance(std::time::Duration::from_secs(30)).await;
+    assert_eq!(
+        worker.await.unwrap().unwrap_err().as_safe_str(),
+        "backup store failed"
+    );
+    assert_eq!(recovered.completed_cycles(), 1);
+
+    let cancelled = WorkerDaemonContext::new(CancellationToken::new());
+    cancelled.cancellation().cancel();
+    task.run(cancelled.clone()).await.unwrap();
+    assert_eq!(cancelled.completed_cycles(), 0);
 }

@@ -270,6 +270,7 @@ pub struct AccountSummaryView {
 #[serde(rename_all = "camelCase")]
 pub struct AccountView {
     pub capabilities: AccountCapabilitiesView,
+    pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_endpoint: Option<String>,
     pub id: String,
     pub name: String,
@@ -1041,8 +1042,7 @@ impl AccountExportData {
         time: crate::time::TimePresenter,
     ) -> Self {
         let filename = format!(
-            "cpr-accounts-selected-{}-{}.json",
-            bundle.documents.len(),
+            "cpr-accounts-{}.json",
             time.label(bundle.exported_at, "%Y-%m-%d")
         );
         let documents = bundle

@@ -24,7 +24,7 @@ use gateway_protocol::openai::sse::SseEventDecoder;
 pub(super) struct EventDecoder {
     sequence: EventSequenceValidator,
     response_id: Option<String>,
-    service_tier: Option<String>,
+    observation: Option<ProviderResponseObservation>,
     usage: Usage,
     contents: usize,
     pub(super) completed: bool,
@@ -35,17 +35,6 @@ pub(super) struct DecodedEvent {
     pub(super) continuation: Option<UpstreamContinuation>,
 }
 
-pub(super) enum EventDecodeError {
-    Invalid(ProviderError),
-    Upstream(ProviderError),
-}
-
-impl From<ProviderError> for EventDecodeError {
-    fn from(error: ProviderError) -> Self {
-        Self::Invalid(error)
-    }
-}
-
 impl EventDecoder {
     pub(super) fn decode(
         &mut self,
@@ -54,33 +43,41 @@ impl EventDecoder {
         transport: &str,
         account: &dyn UpstreamAccountConnection,
         sent: UpstreamSendState,
-    ) -> Result<DecodedEvent, EventDecodeError> {
+        started_at: std::time::Instant,
+    ) -> Result<DecodedEvent, ProviderError> {
         let message = UpstreamAdapterEvent::decode(payload)
             .map_err(|source| invalid(sent).with_source(source))?;
         if self.completed || message.event.facts.len() > 64 {
-            return Err(invalid(sent).into());
+            return Err(invalid(sent));
         }
         let wire = message
             .event
             .wire
             .map(|wire| decode_wire(wire, protocol, sent))
             .transpose()?;
+        let has_observation = self.observation.is_some() || message.observation.is_some();
+        let mut observation = match self.observation.take() {
+            Some(observation) => observation,
+            None => ProviderResponseObservation::new(
+                UpstreamTransport::new(transport)
+                    .map_err(|source| invalid(sent).with_source(source))?,
+            ),
+        };
+        if let Some(update) = message.observation {
+            observation = super::observation::merge(observation, update, sent)?;
+        }
         if let Some(failure) = message.failure {
             if !message.event.facts.is_empty() || message.continuation.is_some() {
-                return Err(invalid(sent).into());
+                return Err(invalid(sent));
             }
-            let mut error = failure_error(failure, sent)?;
+            let mut events = Vec::new();
+            if has_observation {
+                events.push(ProviderEvent::observation(observation));
+            }
             if let Some(wire) = wire {
-                error = error.with_atomic_client_events(vec![ProviderEvent::wire(wire)]);
+                events.push(ProviderEvent::wire(wire));
             }
-            return Err(EventDecodeError::Upstream(error));
-        }
-        if let Some(tier) = message.service_tier {
-            if tier.is_empty() || tier.len() > 64 || tier.chars().any(char::is_control) {
-                return Err(invalid(sent).into());
-            }
-            // 上游可能在完成时才把 auto 解析为实际档位；与原生观测一样保留最新值
-            self.service_tier = Some(tier);
+            return Err(failure_error(failure, sent)?.with_atomic_client_events(events));
         }
         let mut facts = Vec::new();
         for fact in message.event.facts {
@@ -94,7 +91,7 @@ impl EventDecoder {
                 CanonicalEvent::ContentAdded { index, kind } => {
                     self.contents += 1;
                     if self.contents > 4096 {
-                        return Err(invalid(sent).into());
+                        return Err(invalid(sent));
                     }
                     GatewayEvent::ContentAdded(ContentItem::new(
                         index,
@@ -136,7 +133,7 @@ impl EventDecoder {
                         .as_ref()
                         .is_some_and(|name| name.len() > 512 || name.chars().any(char::is_control))
                     {
-                        return Err(invalid(sent).into());
+                        return Err(invalid(sent));
                     }
                     GatewayEvent::ToolCallDelta(ToolCallDelta {
                         content_index: index,
@@ -160,7 +157,7 @@ impl EventDecoder {
                     .flatten()
                     .any(|count| count > i64::MAX as u64)
                     {
-                        return Err(invalid(sent).into());
+                        return Err(invalid(sent));
                     }
                     let usage = Usage {
                         input_tokens: usage.input_tokens,
@@ -178,10 +175,10 @@ impl EventDecoder {
                 CanonicalEvent::Completed { id, model, reason } => {
                     validate_model(model.as_deref(), sent)?;
                     if self.response_id.as_deref() != Some(id.as_str()) {
-                        return Err(invalid(sent).into());
+                        return Err(invalid(sent));
                     }
                     if let Some(cost) =
-                        account.calculate_cost(self.service_tier.as_deref(), &self.usage)
+                        account.calculate_cost(observation.service_tier(), &self.usage)
                     {
                         let cost = GatewayEvent::CalculatedCost(cost);
                         self.sequence
@@ -211,24 +208,28 @@ impl EventDecoder {
             facts.push(fact);
         }
         if message.continuation.is_some() && !self.completed {
-            return Err(invalid(sent).into());
+            return Err(invalid(sent));
         }
+        observation =
+            super::observation::observe_output(observation, &facts, wire.is_some(), started_at);
+        self.observation = Some(observation.clone());
         let mut event = if let Some(wire) = wire {
             ProviderEvent::canonical_with_wire(facts, wire)
         } else {
             let mut facts = facts.into_iter();
-            let first = facts.next().ok_or_else(|| invalid(sent))?;
-            facts.fold(ProviderEvent::canonical(first), ProviderEvent::with_fact)
+            match facts.next() {
+                Some(first) => {
+                    facts.fold(ProviderEvent::canonical(first), ProviderEvent::with_fact)
+                }
+                None => {
+                    return Ok(DecodedEvent {
+                        event: ProviderEvent::observation(observation),
+                        continuation: message.continuation,
+                    });
+                }
+            }
         };
-        if let Some(tier) = &self.service_tier {
-            let observation = ProviderResponseObservation::new(
-                UpstreamTransport::new(transport)
-                    .map_err(|source| invalid(sent).with_source(source))?,
-            )
-            .try_with_service_tier(tier.clone())
-            .map_err(|source| invalid(sent).with_source(source))?;
-            event.attach_observation(observation);
-        }
+        event.attach_observation(observation);
         Ok(DecodedEvent {
             event,
             continuation: message.continuation,
@@ -306,6 +307,20 @@ fn decode_wire(
                 )
             } else {
                 ProtocolWireEvent::json_with_sse_metadata(protocol, event, data, id, retry)
+            }
+        }
+        WirePayload::WebSocket {
+            event,
+            data,
+            message,
+        } => {
+            let message =
+                String::from_utf8(message).map_err(|source| invalid(sent).with_source(source))?;
+            if let Some(data) = data {
+                ProtocolWireEvent::json(protocol, event, data)
+                    .map(|wire| wire.with_raw_websocket_message(message))
+            } else {
+                ProtocolWireEvent::raw_websocket(protocol, message)
             }
         }
         WirePayload::RawSse { frame } => {
