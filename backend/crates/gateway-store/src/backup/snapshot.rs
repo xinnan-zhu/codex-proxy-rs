@@ -109,7 +109,7 @@ impl BusinessSnapshot {
                 FROM native CROSS JOIN LATERAL jsonb_each_text(counts) c
                 WHERE c.key IN ('request_count','success_count','failure_count','cancelled_count','incomplete_count',
                     'completed_request_count','input_tokens','output_tokens','cached_input_tokens','cache_write_input_tokens',
-                    'reasoning_output_tokens','image_input_tokens','image_output_tokens','total_tokens')
+                    'reasoning_output_tokens','image_input_tokens','image_output_tokens','total_tokens','billed_total_tokens')
                 GROUP BY bucket_start,c.key
             ), amounts AS (
                 SELECT bucket_start, c.key, sum(c.value::numeric)::text AS value

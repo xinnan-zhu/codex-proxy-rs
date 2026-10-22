@@ -39,6 +39,7 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
         .unwrap();
     assert_eq!(before.requests.request_count, 9);
     assert_eq!(before.requests.total_tokens, 1140);
+    assert_eq!(before.requests.billed_total_tokens, 240);
     assert_eq!(before.attempts.costs[0].currency, "USD");
     assert_eq!(before.attempts.costs[0].amount.as_str(), "2.25");
     let directory = tempfile::tempdir().unwrap();
@@ -153,6 +154,10 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
             .unwrap();
         assert_eq!(restored.requests.request_count, expected_requests);
         assert_eq!(restored.requests.total_tokens, expected_tokens);
+        assert_eq!(
+            restored.requests.billed_total_tokens,
+            before.requests.billed_total_tokens
+        );
         assert_eq!(restored.attempts.costs, before.attempts.costs);
         if backup_id == "first" {
             seed(
