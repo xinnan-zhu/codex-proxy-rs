@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -89,12 +90,12 @@ jobs:
     uses: ./.github/workflows/_quality.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      run_backend: ${{ needs.changes.outputs.backend == 'true' }}
-      run_frontend: ${{ needs.changes.outputs.frontend == 'true' }}
+      run_backend: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true' }}
+      run_frontend: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.frontend == 'true' }}
 
   container:
     needs: changes
-    if: needs.changes.outputs.container == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.container == 'true'
     permissions:
       contents: read
       security-events: write
@@ -104,7 +105,7 @@ jobs:
 
   source-development:
     needs: changes
-    if: needs.changes.outputs.source == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.source == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
