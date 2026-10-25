@@ -861,6 +861,7 @@ async fn usage_insights_preserve_exact_model_scope() {
             Request::builder()
                 .uri("/api/admin/usage/insights/overview?provider=xai&model=%20grok-4.5%20")
                 .header(header::COOKIE, "cpr_session=valid-session")
+                .header("x-request-id", "req_usage_model_scope")
                 .body(Body::empty())
                 .unwrap(),
         )
