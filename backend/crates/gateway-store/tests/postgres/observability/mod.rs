@@ -1631,9 +1631,14 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
     let filter = admin_observability::UsageFilter::default();
     super::drain_analytics(&database.pool).await;
     let overview = store
-        .usage_summary(range, filter.clone())
+        .usage_insights_observation(
+            range,
+            filter.clone(),
+            admin_observability::Granularity::FifteenMinutes,
+        )
         .await
-        .expect("mixed costs");
+        .expect("mixed costs")
+        .overview;
     assert_eq!(overview.requests.total_tokens, 2_920);
     assert_eq!(overview.requests.billed_total_tokens, 1_120);
     assert_eq!(overview.attempts.costs[0].currency, "USD");
@@ -1662,15 +1667,17 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
     );
 
     let unknown = store
-        .usage_summary(
+        .usage_insights_observation(
             range,
             admin_observability::UsageFilter {
                 request_id: Some("req_observe_uncommitted".to_owned()),
                 ..admin_observability::UsageFilter::default()
             },
+            admin_observability::Granularity::FifteenMinutes,
         )
         .await
-        .expect("unknown-cost filter");
+        .expect("unknown-cost filter")
+        .overview;
     assert_eq!(unknown.requests.total_tokens, 1_800);
     assert_eq!(unknown.requests.billed_total_tokens, 0);
     assert!(unknown.attempts.costs.is_empty());
@@ -1683,9 +1690,14 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
     .expect("foreign-currency cost");
     super::drain_analytics(&database.pool).await;
     let overview = store
-        .usage_summary(range, filter.clone())
+        .usage_insights_observation(
+            range,
+            filter.clone(),
+            admin_observability::Granularity::FifteenMinutes,
+        )
         .await
-        .expect("foreign currency");
+        .expect("foreign currency")
+        .overview;
     assert_eq!(overview.requests.total_tokens, 2_920);
     assert_eq!(overview.requests.billed_total_tokens, 120);
     let usd = overview
@@ -1720,9 +1732,14 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
     .expect("remove remaining USD cost");
     super::drain_analytics(&database.pool).await;
     let overview = store
-        .usage_summary(range, filter)
+        .usage_insights_observation(
+            range,
+            filter,
+            admin_observability::Granularity::FifteenMinutes,
+        )
         .await
-        .expect("no USD costs");
+        .expect("no USD costs")
+        .overview;
     assert_eq!(overview.requests.total_tokens, 2_920);
     assert_eq!(overview.requests.billed_total_tokens, 0);
     assert!(

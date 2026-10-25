@@ -34,9 +34,14 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
     drain_analytics(&database.pool).await;
     let range = ObservabilityRange::new(hour, hour + TimeDelta::hours(1)).unwrap();
     let before = observability_repository(&database.pool)
-        .usage_summary(range, Default::default())
+        .usage_insights_observation(
+            range,
+            Default::default(),
+            gateway_admin::model::observability::Granularity::FifteenMinutes,
+        )
         .await
-        .unwrap();
+        .unwrap()
+        .overview;
     assert_eq!(before.requests.request_count, 9);
     assert_eq!(before.requests.total_tokens, 1140);
     assert_eq!(before.requests.billed_total_tokens, 240);
@@ -149,9 +154,14 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
         assert_eq!(retention_days, 3);
         drain_analytics(&database.pool).await;
         let restored = observability_repository(&database.pool)
-            .usage_summary(range, Default::default())
+            .usage_insights_observation(
+                range,
+                Default::default(),
+                gateway_admin::model::observability::Granularity::FifteenMinutes,
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .overview;
         assert_eq!(restored.requests.request_count, expected_requests);
         assert_eq!(restored.requests.total_tokens, expected_tokens);
         assert_eq!(
