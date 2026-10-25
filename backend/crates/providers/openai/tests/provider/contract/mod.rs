@@ -8,6 +8,8 @@ mod error_details;
 mod image_account_eligibility;
 mod image_model_access;
 mod model_account_eligibility;
+mod outbound;
+pub(super) use outbound::outbound_context;
 mod passthrough;
 mod precommit;
 mod privacy;
@@ -616,7 +618,7 @@ async fn attempt_middleware_can_change_reasoning_before_native_encoding() {
 }
 
 #[tokio::test]
-async fn responses_bill_sent_model_and_observe_unpriced_response_without_rewriting_it() {
+async fn responses_bill_sent_model_and_preserve_returned_model() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
     let server = MockServer::start().await;
@@ -653,7 +655,6 @@ async fn responses_bill_sent_model_and_observe_unpriced_response_without_rewriti
         )
         .await
         .unwrap();
-    let mut observed = None;
     let mut returned = None;
     let mut costs = Vec::new();
     while let Some(event) = stream.next().await {
@@ -662,9 +663,6 @@ async fn responses_bill_sent_model_and_observe_unpriced_response_without_rewriti
             if let GatewayEvent::CalculatedCost(cost) = fact {
                 costs.push(cost.total().amount().scaled());
             }
-        }
-        if let Some(observation) = event.response_observation() {
-            observed = observation.upstream_response_model().map(str::to_owned);
         }
         if let Some(wire) = event.wire_event()
             && wire.data().get("type").and_then(Value::as_str) == Some("response.completed")
@@ -679,12 +677,11 @@ async fn responses_bill_sent_model_and_observe_unpriced_response_without_rewriti
     let requests = server.received_requests().await.expect("upstream requests");
     assert_eq!(captured_request_body(&requests[0])["model"], "gpt-5.4");
     assert_eq!(costs, vec![3_437_500]);
-    assert_eq!(observed.as_deref(), Some("gpt-6-sol"));
-    assert_eq!(returned, observed);
+    assert_eq!(returned.as_deref(), Some("gpt-6-sol"));
 }
 
 #[tokio::test]
-async fn websocket_bills_sent_model_and_observes_internal_model_report() {
+async fn websocket_bills_sent_model_and_preserves_response_metadata() {
     for metadata_type in ["response.metadata", "codex.response.metadata"] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_provider_contract").await;
@@ -727,7 +724,6 @@ async fn websocket_bills_sent_model_and_observes_internal_model_report() {
             )
             .await
             .expect("provider stream");
-        let mut observed = None;
         let mut returned = None;
         let mut costs = Vec::new();
         while let Some(event) = stream.next().await {
@@ -736,9 +732,6 @@ async fn websocket_bills_sent_model_and_observes_internal_model_report() {
                 if let GatewayEvent::CalculatedCost(cost) = fact {
                     costs.push(cost.total().amount().scaled());
                 }
-            }
-            if let Some(observation) = event.response_observation() {
-                observed = observation.upstream_response_model().map(str::to_owned);
             }
             if let Some(wire) = event.wire_event()
                 && wire.data().get("type").and_then(Value::as_str) == Some("response.completed")
@@ -752,11 +745,6 @@ async fn websocket_bills_sent_model_and_observes_internal_model_report() {
         }
         server.await.expect("server task");
         assert_eq!(costs, vec![3_437_500]);
-        assert_eq!(
-            observed.as_deref(),
-            Some("gpt-server-report"),
-            "{metadata_type}"
-        );
         assert_eq!(returned.as_deref(), Some("gpt-6-astra"));
     }
 }
@@ -1552,12 +1540,17 @@ impl MiddlewarePlan for TranslationMiddleware {
         assert_eq!(context.mount(), MiddlewareMount::Attempt);
         assert!(context.account_id().is_some());
         *self.translations.lock().unwrap() += 1;
-        let (_, headers, _) = request.into_parts();
-        next.run(MiddlewareRequest::new(
-            "openai",
-            headers,
-            Bytes::from(serde_json::to_vec(&self.target).unwrap()),
-        ))
+        let headers = request.headers().to_vec();
+        next.run(
+            request
+                .replace_parts(
+                    "openai".into(),
+                    headers,
+                    Bytes::from(serde_json::to_vec(&self.target).unwrap()),
+                    None,
+                )
+                .unwrap(),
+        )
     }
 }
 
@@ -1591,16 +1584,21 @@ impl MiddlewarePlan for RecordingMiddleware {
     ) -> BoxFuture<'static, Result<MiddlewareResponse, MiddlewareError>> {
         assert_eq!(context.mount(), MiddlewareMount::Attempt);
         assert_eq!(request.protocol(), "openai");
-        let (protocol, mut headers, bytes) = request.into_parts();
+        let (protocol, mut headers, bytes) = request.clone().into_parts();
         let mut body: Map<String, Value> = serde_json::from_slice(&bytes).unwrap();
         self.observed.lock().unwrap().push(body.clone());
         body.insert(self.replacement.0.clone(), self.replacement.1.clone());
         headers.extend(self.request_headers.clone());
-        next.run(MiddlewareRequest::new(
-            protocol,
-            headers,
-            Bytes::from(serde_json::to_vec(&body).unwrap()),
-        ))
+        next.run(
+            request
+                .replace_parts(
+                    protocol,
+                    headers,
+                    Bytes::from(serde_json::to_vec(&body).unwrap()),
+                    None,
+                )
+                .unwrap(),
+        )
     }
 }
 
@@ -1873,7 +1871,7 @@ async fn provider_should_send_the_request_snapshot_location_to_the_upstream() {
         "model": "gpt-5.4",
         "input": [{
             "role": "user",
-            "content": [{"type": "input_text", "text": "<environment_context><timezone>UTC</timezone></environment_context>"}],
+            "content": [{"type": "input_text", "text": "<environment_context><current_date>2026-10-22</current_date><timezone>UTC</timezone></environment_context>"}],
             "internal_chat_message_metadata_passthrough": {
                 "content_item_kinds": ["environments.environment_context"],
                 "create_time": 1789293131.822
@@ -1899,7 +1897,7 @@ async fn provider_should_send_the_request_snapshot_location_to_the_upstream() {
     assert_eq!(
         body.pointer("/input/0/content/0/text"),
         Some(&json!(
-            "<environment_context><timezone>Pacific/Auckland</timezone></environment_context>"
+            "<environment_context><current_date>2026-10-22</current_date><timezone>Pacific/Auckland</timezone></environment_context>"
         ))
     );
     assert_eq!(
@@ -1925,8 +1923,8 @@ async fn provider_should_override_unclassified_time_contexts_over_websocket() {
         }).to_string().into())).await.expect("complete response");
         body
     });
-    let environment = "<environment_context><cwd>/home/example/项目</cwd><timezone>Asia/Shanghai</timezone></environment_context>";
-    let desktop = "<codex_apps_client_time_context><timezone>Asia/Shanghai</timezone></codex_apps_client_time_context>";
+    let environment = "<environment_context><cwd>/home/example/项目</cwd><current_date>2026-10-22</current_date><timezone>Asia/Shanghai</timezone></environment_context>";
+    let desktop = "<codex_apps_client_time_context><timezone>Asia/Shanghai</timezone><current_date>2026-10-21</current_date></codex_apps_client_time_context>";
     let payload = ProtocolPayload::json_object(
         "openai",
         json!({
@@ -2789,13 +2787,7 @@ async fn image_endpoints_bypass_only_the_text_catalog_and_preserve_the_current_c
         Mock::given(method("POST"))
             .and(path(*endpoint))
             .and(header("originator", "codex_cli_rs"))
-            .and(|request: &wiremock::Request| {
-                request
-                    .headers
-                    .get("x-codex-image-turn-id")
-                    .and_then(|value| value.to_str().ok())
-                    .is_some_and(|value| uuid::Uuid::parse_str(value).is_ok())
-            })
+            .and(header("x-codex-image-turn-id", "turn_image_contract"))
             .and(header("version", "0.144.0"))
             .and(header("accept", "*/*"))
             .and(body_bytes(body.to_vec()))
@@ -3636,7 +3628,7 @@ async fn standalone_search_preserves_wire_and_scopes_turn_metadata_to_the_select
     let metadata: Value = serde_json::from_slice(&metadata_values[0]).expect("turn metadata JSON");
     assert_scoped_id(metadata["session_id"].as_str().unwrap(), "session");
     assert_scoped_id(metadata["thread_id"].as_str().unwrap(), "thread");
-    assert_scoped_id(metadata["turn_id"].as_str().unwrap(), "turn");
+    assert_eq!(metadata["turn_id"], "turn");
     assert_eq!(metadata.get("future"), Some(&json!(true)));
     assert!(metadata.get("account_id").is_none());
     assert_ne!(
@@ -4110,10 +4102,6 @@ async fn websocket_fast_path_miss_uses_http_and_keeps_background_preconnect() {
                     );
                 }
                 assert_eq!(metadata["upstreamStatus"], 200);
-                assert_eq!(
-                    metadata["upstreamReportedModel"],
-                    "gpt-reported-by-upstream"
-                );
                 assert!(metadata["requestSummary"].is_object());
                 assert!(metadata["upstreamTraceHeaders"].is_array());
                 first_decision = metadata

@@ -87,7 +87,7 @@ pub(super) fn account_view(
     let usage_period = quota.usage_window().map(|(_, period)| period);
     let mut usage = account_usage_view(usage, usage_period, now, time);
     if account.authentication_kind == "api_key" {
-        usage.window_label_display = "通用额度".to_owned();
+        usage.window_kind = AccountUsageWindowKind::General;
     }
     let (quota, refresh_token_expires_at) = account_quota_view(quota, cooldown, now, time);
     AccountView {
@@ -245,6 +245,10 @@ pub(super) fn account_quota_view(
     let recovery_probe_required = cooldown.is_some_and(|value| value.kind.requires_probe());
     (
         AccountQuotaView {
+            refreshed_at: quota.observed_at.map(|value| time.rfc3339(&value)),
+            refreshed_at_relative: quota
+                .observed_at
+                .map(|value| time.relative_view(value, now)),
             refreshed_at_display,
             limit_reached: quota.limit_reached,
             rate_limited_until,
@@ -353,12 +357,11 @@ pub(super) fn account_usage_view(
     let known_count = usage.cost_coverage.known_count();
     let cost_estimate_status = cost_estimate_status(&usage.cost_coverage);
     AccountUsageView {
-        window_label_display: match period {
-            Some(AccountUsagePeriod::Weekly) => "周额度窗口",
-            Some(AccountUsagePeriod::Monthly) => "月额度窗口",
-            None => "周/月额度窗口",
-        }
-        .to_owned(),
+        window_kind: match period {
+            Some(AccountUsagePeriod::Weekly) => AccountUsageWindowKind::Weekly,
+            Some(AccountUsagePeriod::Monthly) => AccountUsageWindowKind::Monthly,
+            None => AccountUsageWindowKind::Quota,
+        },
         request_count: Some(usage.request_count),
         request_count_display: format_number(usage.request_count),
         input_tokens: usage.input_tokens,
@@ -480,7 +483,7 @@ pub(super) fn display_optional_tokens(value: Option<u64>) -> String {
 
 pub(super) fn empty_account_usage() -> AccountUsageView {
     AccountUsageView {
-        window_label_display: "周/月额度窗口".to_owned(),
+        window_kind: AccountUsageWindowKind::Quota,
         request_count: None,
         request_count_display: "—".to_owned(),
         input_tokens: None,

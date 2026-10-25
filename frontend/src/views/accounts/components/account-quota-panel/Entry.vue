@@ -2,11 +2,14 @@
 import type { AccountQuotaWindow } from '@/api'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import AccountRequestTimeline from '@/components/account/account-usage-window/AccountRequestTimeline.vue'
 import AccountQuotaCycleProgress from '@/components/account/account-usage-window/CycleProgress.vue'
 import {
   quotaWindowCost,
   quotaWindowCycleProgress,
+  quotaWindowLabel,
   quotaWindowLocalUsageDisplay,
   quotaWindowPresentation,
   resolveAccountUsageWindowPresentation,
@@ -18,6 +21,7 @@ const props = defineProps<{
   windows: AccountQuotaWindow[]
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
 const now = useUiClock()
 const grouped = computed(() => props.windows.length > 1 && Boolean(props.label))
 const items = computed(() => props.windows.map((window) => {
@@ -37,9 +41,9 @@ const items = computed(() => props.windows.map((window) => {
     timelineTitle: view.local.timelineTitle,
     durationDisplay: view.local.durationDisplay,
     label: grouped.value
-      ? window.windowLabelDisplay
-      : window.labelDisplay,
-    ariaLabel: window.labelDisplay,
+      ? quotaWindowLabel(window, false)
+      : quotaWindowLabel(window),
+    ariaLabel: quotaWindowLabel(window),
     usedPercent: window.usedPercent,
     usedPercentDisplay: window.usedPercentDisplay,
     localUsageDisplay: quotaWindowLocalUsageDisplay(window),
@@ -75,9 +79,9 @@ const items = computed(() => props.windows.map((window) => {
             </span>
             <strong
               class="shrink-0 font-mono font-heavy tabular-nums text-cp-text"
-              :title="`窗口请求：${item.requestDisplay} 次`"
+              :title="t('accounts.quota.requestsInThisWindow', { requestDisplay: item.requestDisplay })"
             >
-              {{ item.requestDisplay }} 次
+              {{ t('accounts.quota.requestCount', { requestDisplay: item.requestDisplay }) }}
             </strong>
           </div>
 
@@ -88,12 +92,12 @@ const items = computed(() => props.windows.map((window) => {
           />
 
           <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
-            <span class="shrink-0 font-emphasis">统计范围</span>
+            <span class="shrink-0 font-emphasis">{{ t('accounts.quota.statisticalRange') }}</span>
             <span
               class="min-w-0 truncate font-mono font-emphasis tabular-nums"
-              :title="`滚动 ${item.durationDisplay}`"
+              :title="t('accounts.quota.rolling', { duration: item.durationDisplay })"
             >
-              滚动 {{ item.durationDisplay }}
+              {{ t('accounts.quota.rolling', { duration: item.durationDisplay }) }}
             </span>
           </p>
         </template>
@@ -106,13 +110,13 @@ const items = computed(() => props.windows.map((window) => {
               <strong
                 v-if="item.localUsageDisplay"
                 class="text-cp-text-quaternary"
-                :title="`窗口消耗：${item.localUsageDisplay}`"
+                :title="t('accounts.quota.usageInThisWindow', { localUsageDisplay: item.localUsageDisplay })"
               >
                 {{ item.localUsageDisplay }}
               </strong>
               <strong
                 :class="item.percentTextClass"
-                :title="`额度已使用：${item.usedPercentDisplay}`"
+                :title="t('accounts.quota.quotaUsed', { rate: item.usedPercentDisplay })"
               >
                 {{ item.usedPercentDisplay }}
               </strong>
@@ -148,14 +152,14 @@ const items = computed(() => props.windows.map((window) => {
             class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
           >
             <span class="flex min-w-0 items-baseline gap-1">
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">距重置</span>
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.untilReset') }}</span>
               <strong class="truncate font-mono font-heavy tabular-nums text-cp-blue-text">
                 {{ item.cycle.remainingDisplay }}
               </strong>
             </span>
             <span
               class="min-w-0 truncate font-mono font-emphasis tabular-nums text-cp-text-tertiary"
-              :title="`重置时间：${item.resetAtDisplay}`"
+              :title="t('accounts.fork.resetTime', { time: item.resetAtDisplay })"
             >
               {{ item.resetAtDisplay }}
             </span>
@@ -166,19 +170,19 @@ const items = computed(() => props.windows.map((window) => {
             class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
           >
             <span class="flex min-w-0 items-baseline gap-1">
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">本周期</span>
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.thisPeriod') }}</span>
               <strong
                 class="truncate font-mono font-heavy tabular-nums text-cp-green-text"
-                :title="item.cost.usedPartial ? '部分请求缺少计费数据，实际费用可能更高' : '本周期网关记录的费用'"
+                :title="item.cost.usedPartial ? t('accounts.fork.partialCost') : t('accounts.fork.recordedCost')"
               >
                 {{ item.cost.usedDisplay }}{{ item.cost.usedPartial ? '+' : '' }}
               </strong>
             </span>
             <span
               class="flex min-w-0 items-baseline gap-1"
-              title="按本周期网关费用 ÷ 已用比例折算；站外用量或账号中途接入会让估值偏低"
+              :title="t('accounts.fork.estimateHelp')"
             >
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">估算总额度</span>
+              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.estimatedQuota') }}</span>
               <strong class="truncate font-mono font-heavy tabular-nums text-cp-text">
                 ≈ {{ item.cost.estimatedTotalDisplay }}
               </strong>
@@ -186,7 +190,7 @@ const items = computed(() => props.windows.map((window) => {
           </p>
 
           <p v-if="!item.cycle" class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
-            <span class="shrink-0 font-emphasis">重置</span>
+            <span class="shrink-0 font-emphasis">{{ t('common.actions.reset') }}</span>
             <span class="min-w-0 truncate font-mono font-emphasis tabular-nums" :title="item.resetAtDisplay">
               {{ item.resetAtDisplay }}
             </span>

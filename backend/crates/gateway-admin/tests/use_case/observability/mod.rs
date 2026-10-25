@@ -23,7 +23,7 @@ use gateway_admin::{
             HealthStatus, LatencyPercentiles, ObservabilityPageSize, OpsErrorPage, OpsErrorQuery,
             PercentileMilliseconds, RequestMetricPoint, RequestMetrics, TimeRange, TrendKind,
             UsageBilling, UsageDetail, UsageFilter, UsageInsightsObservation, UsageListRecord,
-            UsageOverview, UsagePage, UsageProjectedCostPoint, UsageQuery,
+            UsageOverview, UsagePage, UsageProjectedCostPoint, UsageQuery, UsageSummaryObservation,
         },
         settings::{
             AdminApiKey, AdminApiKeyMutation, ReplaceRuntimeSettings, RotationStrategy,
@@ -1171,7 +1171,7 @@ impl ObservabilityStore for FixtureObservabilityStore {
         &self,
         range: TimeRange,
         filter: UsageFilter,
-    ) -> AdminStoreResult<UsageOverview> {
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         self.usage_summary_filters
             .lock()
             .expect("summary filters")
@@ -1183,9 +1183,12 @@ impl ObservabilityStore for FixtureObservabilityStore {
         if self.summary_fail.load(Ordering::SeqCst) {
             return Err(super::unavailable("projection summary failed"));
         }
-        Ok(UsageOverview {
+        let overview = self.overview.lock().expect("overview").clone();
+        Ok(UsageSummaryObservation {
             range,
-            ..self.overview.lock().expect("overview").clone()
+            analytics: overview.analytics,
+            requests: (&overview.requests).into(),
+            attempts: overview.attempts,
         })
     }
 
@@ -1363,7 +1366,6 @@ fn total_record(
         provider_account_authentication_kind: None,
         upstream_model_id: Some("gpt-5.5".to_owned()),
         upstream_transport: None,
-        upstream_response_model: None,
         service_tier: None,
         input_tokens: Some(800),
         output_tokens: Some(200),
@@ -1510,8 +1512,8 @@ async fn usage_summary_cache_should_coalesce_identical_queries_and_invalidate_de
         .usage_summary(range, filter)
         .await
         .expect("generation refresh");
-    assert_eq!(refreshed.overview.analytics.generation, 1);
-    assert_eq!(refreshed.overview.requests.request_count, 7);
+    assert_eq!(refreshed.observation.analytics.generation, 1);
+    assert_eq!(refreshed.observation.requests.request_count, 7);
     assert_eq!(store.usage_summary_filters.lock().unwrap().len(), 2);
 }
 
@@ -1531,13 +1533,17 @@ async fn usage_summary_cache_should_coalesce_when_generation_advances_during_the
         },
     );
     assert_eq!(
-        first.expect("first summary").overview.analytics.generation,
+        first
+            .expect("first summary")
+            .observation
+            .analytics
+            .generation,
         1
     );
     assert_eq!(
         second
             .expect("coalesced summary")
-            .overview
+            .observation
             .analytics
             .generation,
         1

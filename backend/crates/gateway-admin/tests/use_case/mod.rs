@@ -49,7 +49,7 @@ use gateway_admin::{
             DashboardDesktopRelease, DashboardObservation, DashboardQuery, DashboardWireAttribute,
             DashboardWireProfile, DashboardWireTarget, DesktopReleaseStatus, DiagnosticDimension,
             DiagnosticsObservation, Granularity, OpsErrorPage, OpsErrorQuery, RequestMetricPoint,
-            TimeRange, UsageDetail, UsageFilter, UsageOverview, UsagePage, UsageQuery,
+            TimeRange, UsageDetail, UsageFilter, UsagePage, UsageQuery, UsageSummaryObservation,
         },
         provider_credentials::{
             AuthorizationCommit, AuthorizationStarted, CompleteAuthorization, CredentialDetails,
@@ -833,7 +833,11 @@ impl ObservabilityStore for UnavailableStore {
         Err(unavailable("usage detail"))
     }
 
-    async fn usage_summary(&self, _: TimeRange, _: UsageFilter) -> AdminStoreResult<UsageOverview> {
+    async fn usage_summary(
+        &self,
+        _: TimeRange,
+        _: UsageFilter,
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         Err(unavailable("usage summary"))
     }
 
@@ -1040,7 +1044,7 @@ pub(super) fn dashboard_profile_provider() -> Arc<dyn ProviderAdmin> {
             },
             user_agent: "gateway-admin-test".to_owned(),
             attributes: vec![DashboardWireAttribute {
-                label: "Core".to_owned(),
+                key: "core".to_owned(),
                 value: "test".to_owned(),
             }],
             verified_at: Some(chrono::Utc::now()),

@@ -170,8 +170,13 @@ async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates(
 
         super::drain_analytics(&database.pool).await;
         let summary = repository
-            .usage_summary(range, UsageRecordFilter::default())
+            .usage_insights_observation(
+                range,
+                UsageRecordFilter::default(),
+                gateway_admin::model::observability::Granularity::Hour,
+            )
             .await
+            .map(|snapshot| snapshot.overview)
             .expect("throughput summary");
         assert_eq!(summary.requests.estimated_throughput_count, estimated);
         assert_percentile(
@@ -1179,8 +1184,13 @@ async fn recovered_continuation_failure_should_be_visible_in_ops_but_hidden_from
 
     super::drain_analytics(&database.pool).await;
     let overview = repository
-        .usage_summary(range, UsageRecordFilter::default())
+        .usage_insights_observation(
+            range,
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("usage summary without recovered intermediates");
     assert_eq!(overview.requests.request_count, 2);
     assert_eq!(overview.requests.failure_count, 0);
@@ -1906,6 +1916,9 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
             status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
+                model_contains: None,
+                client_api_key_name: None,
+                provider_account_name: None,
                 client_api_key_ref: Some("key_observe".to_owned()),
                 request_id: Some("req_observe_success".to_owned()),
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -1989,8 +2002,13 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
 
     super::drain_analytics(&database.pool).await;
     let overview = store
-        .usage_summary(range, admin_observability::UsageFilter::default())
+        .usage_insights_observation(
+            range,
+            admin_observability::UsageFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("admin usage overview");
     assert_eq!(overview.range, range);
     assert_eq!(overview.providers[0].provider_kind, "openai");
@@ -2472,8 +2490,13 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
 
     super::drain_analytics(&database.pool).await;
     let overview = repository
-        .usage_summary(range, UsageRecordFilter::default())
+        .usage_insights_observation(
+            range,
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("usage summary");
     assert_eq!(overview.attempts.attempt_count, 4);
     assert_eq!(overview.attempts.failure_count, 2);
@@ -2491,14 +2514,16 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
 
     super::drain_analytics(&database.pool).await;
     let succeeded = repository
-        .usage_summary(
+        .usage_insights_observation(
             range,
             UsageRecordFilter {
                 outcome: Some("succeeded".to_owned()),
                 ..UsageRecordFilter::default()
             },
+            gateway_admin::model::observability::Granularity::Hour,
         )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("filtered usage summary");
     assert_eq!(succeeded.requests.cache_eligible_request_count, 1);
     assert_eq!(succeeded.requests.cache_hit_request_count, 1);

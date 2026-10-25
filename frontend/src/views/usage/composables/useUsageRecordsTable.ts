@@ -20,6 +20,7 @@ interface UseUsageRecordsTableOptions {
 }
 
 type UsageLoadScope = 'all' | 'table'
+export type UsageRecordFilterField = 'key' | 'account' | 'model'
 type LoadingAnalytics<T> = Omit<T, 'analytics'> & { analytics: AnalyticsMetadata | null }
 
 interface UsageLoadOptions {
@@ -33,8 +34,16 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const analyticsLoading = shallowRef(true)
   const summary = shallowRef(emptySummary())
   const insights = shallowRef(emptyInsights())
-  const searchQuery = shallowRef('')
-  const search = computed(() => searchQuery.value.trim() || undefined)
+  const filterField = shallowRef<UsageRecordFilterField>('key')
+  const filterValue = shallowRef('')
+  const filterParams = computed(() => {
+    const value = filterValue.value.trim() || undefined
+    return {
+      clientApiKeyName: filterField.value === 'key' ? value : undefined,
+      accountName: filterField.value === 'account' ? value : undefined,
+      model: filterField.value === 'model' ? value : undefined,
+    }
+  })
   const providerQuery = shallowRef('')
   const modelQuery = shallowRef('')
   const modelOptions = shallowRef<string[]>([])
@@ -70,10 +79,17 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     return {
       ...options.latestTimeRangeParams(),
       provider: providerQuery.value || undefined,
-      model: modelQuery.value || undefined,
-      search: search.value,
+      ...filterParams.value,
+      modelExact: modelQuery.value || undefined,
       status: options.status.value,
     }
+  }
+
+  function filterChanged() {
+    const filter = filterParams.value
+    return tableParams.clientApiKeyName !== filter.clientApiKeyName
+      || tableParams.accountName !== filter.accountName
+      || tableParams.model !== filter.model
   }
 
   function resetTable() {
@@ -201,7 +217,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   }
 
   function handlePageChange(nextPage: number) {
-    if (tableParams.search !== search.value) {
+    if (filterChanged()) {
       void reloadLatestTable()
       return
     }
@@ -210,7 +226,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
   function handlePageSizeChange(nextPageSize: number) {
     pageSize.value = nextPageSize
-    if (tableParams.search !== search.value) {
+    if (filterChanged()) {
       void reloadLatestTable()
       return
     }
@@ -237,9 +253,13 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     void reloadLatestTable()
   })
 
-  watch(search, (_value, _previous, onCleanup) => {
+  watch(filterField, () => {
+    filterValue.value = ''
+  }, { flush: 'sync' })
+
+  watch(filterParams, (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      if (tableParams.search !== search.value)
+      if (filterChanged())
         void reloadLatestTable()
     }, 250)
     onCleanup(() => clearTimeout(timer))
@@ -257,7 +277,8 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   return {
     currentPage,
     pageSize,
-    searchQuery,
+    filterField,
+    filterValue,
     providerQuery,
     modelQuery,
     modelOptions,
@@ -287,6 +308,7 @@ function emptySummary() {
     cacheWriteInputTokens: '0',
     totalTokens: '0',
     averageLatencyMs: '0 ms',
+    averageLatencyMsValue: null,
   }
   return summary
 }
@@ -301,7 +323,7 @@ function emptyInsights() {
 function emptyOverview() {
   const overview: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>> = {
     analytics: null,
-    granularity: '1d',
+    granularity: '',
     health: {
       totalRequests: 0,
       successRequests: 0,

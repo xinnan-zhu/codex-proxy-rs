@@ -73,7 +73,7 @@ const avatarToneClass = computed(() => {
     </span>
     <div class="min-w-0 flex-1">
       <div class="flex min-w-0 items-center gap-2">
-        <span class="min-w-0 flex-1 truncate text-cp font-heavy text-cp-text" :title="displayTitle">
+        <span class="min-w-0 truncate text-cp font-heavy text-cp-text" :title="displayTitle">
           {{ displayTitle }}
         </span>
         <span

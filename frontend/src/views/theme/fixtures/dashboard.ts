@@ -4,6 +4,8 @@ import type {
   DashboardTrendPoint,
 } from '@/api/modules/dashboard'
 import type { UsageListRecord } from '@/api/modules/usage'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 
 interface PreviewUsageRecordOptions {
   id: string
@@ -79,21 +81,12 @@ function previewTrendPoint(requestsValue: number, index: number): DashboardTrend
     tokensValue: inputTokensValue + outputTokensValue,
     errors: errorsValue.toLocaleString('zh-CN'),
     errorsValue,
-    latency: `${410 + index * 7} ms`,
     latencyValue: 410 + index * 7,
-    maxLatency: `${760 + index * 12} ms`,
-    maxLatencyValue: 760 + index * 12,
-    minLatency: `${180 + index * 3} ms`,
-    minLatencyValue: 180 + index * 3,
     successRate: `${successRateValue.toFixed(1)}%`,
     successRateValue,
-    firstTokenP50Ms: 210 + index * 3,
     firstTokenP95Ms: 420 + index * 5,
     latencyP95Ms: 760 + index * 12,
     outputThroughputP50: 52 + (index % 5),
-    admissionDecisionP95Ms: 2 + (index % 3),
-    accountSelectionWaitP95Ms: 8 + (index % 4),
-    capacityUtilization: 0.42 + (index % 6) * 0.04,
   }
 }
 
@@ -115,7 +108,7 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
     logicalOutcome: 'succeeded',
     errorCode: null,
     errorMessage: null,
-    clientApiKeyName: '演示 Key',
+    clientApiKeyName: t('appearance.preview.dashboard.demoKey'),
     provider: options.provider,
     authenticationKind: options.authenticationKind,
     accountId: `account_${options.id}`,
@@ -128,7 +121,6 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
     model: options.model,
     requestedModel: options.model,
     upstreamModel: options.model,
-    upstreamResponseModel: null,
     serviceTier: options.provider === 'openai' ? 'priority' : 'standard',
     clientTransport: options.clientTransport,
     upstreamTransport: options.upstreamTransport,
@@ -202,7 +194,7 @@ const themeAnalytics: DashboardSummaryResponse['analytics'] = {
   histogramVersion: 1,
 }
 
-export const themeDashboardSummary: DashboardSummaryResponse = {
+export const themeDashboardSummary = computed<DashboardSummaryResponse>(() => ({
   analytics: themeAnalytics,
   asOf: '2026-08-23T10:30:00+08:00',
   asOfDisplay: '2026-08-23 10:30:00',
@@ -244,8 +236,8 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
     summary: [],
   },
   healthTimeline: {
-    title: '请求健康时间线',
-    description: '有效请求可用性',
+    title: t('appearance.preview.dashboard.requestHealthTimeline'),
+    description: t('appearance.preview.dashboard.validRequestAvailability'),
     reliabilityDisplay: '99.2%',
     status: 'stable',
     successRequests: 46_518,
@@ -285,8 +277,8 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       },
       userAgent: 'codex_cli_rs/0.163.0-alpha.10.2 (Mac OS 27.0.1; arm64) Codex Desktop; 26.1013.40934',
       attributes: [
-        { label: '客户端标识', value: 'Codex Desktop; 26.1013.40934' },
-        { label: 'Token 认证', value: 'bearer' },
+        { key: 'client_identifier', value: 'Codex Desktop; 26.1013.40934' },
+        { key: 'token_auth', value: 'bearer' },
       ],
       verifiedAt: '2026-10-17T20:15:28+08:00',
       verifiedAtDisplay: '2026-10-17 20:15:28',
@@ -309,8 +301,8 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       },
       userAgent: 'grok_cli/0.7.3',
       attributes: [
-        { label: '客户端标识', value: 'grok_cli' },
-        { label: 'Token 认证', value: 'bearer' },
+        { key: 'client_identifier', value: 'grok_cli' },
+        { key: 'token_auth', value: 'bearer' },
       ],
       verifiedAt: '2026-08-23T10:25:00+08:00',
       verifiedAtDisplay: '2026-08-23 10:25:00',
@@ -334,16 +326,18 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       requestCount: 1_284,
       requestBuckets: [],
       quotaUsedPercent: 32,
-      metricLabel: '今日 Token',
+      metricLabel: t('appearance.preview.dashboard.todaySToken'),
       metricValue: '926K',
+      metric: 'tokens',
+      metricValueRaw: 926_000,
       usageWindow: {
         key: 'short',
         group: 'shortTerm',
         limitId: null,
         limitName: null,
         role: 'primary',
-        labelDisplay: '5 小时',
-        windowLabelDisplay: '5 小时',
+        labelDisplay: t('appearance.preview.dashboard.hours'),
+        windowLabelDisplay: t('appearance.preview.dashboard.hours'),
         windowSeconds: 18_000,
         usedPercent: 32,
         usedPercentDisplay: '32%',
@@ -353,7 +347,9 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
         resetAt: null,
         resetAtDisplay: '—',
       },
-      lastUsed: '刚刚',
+      lastUsed: t('appearance.preview.components.justNow'),
+      lastUsedAt: '2026-08-23T10:30:00+08:00',
+      lastUsedRelative: { kind: 'just_now' },
     },
     {
       id: 'preview-xai-1',
@@ -367,19 +363,21 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       requestBuckets: requestSeries.slice(-12).map((requestCount, index) => ({
         bucketStart: `2026-08-23T${String(index + 12).padStart(2, '0')}:00:00+08:00`,
         requestCount: Math.round(requestCount / 3),
-        label: `08-23 ${index + 12}:00–${index + 13}:00 · ${Math.round(requestCount / 3)} 次请求`,
+        label: t('appearance.preview.dashboard.requests', { value: index + 12, value2: index + 13, count: Math.round(requestCount / 3) }),
       })),
       quotaUsedPercent: null,
-      metricLabel: '次数',
+      metricLabel: t('appearance.preview.dashboard.times'),
       metricValue: '894',
+      metric: 'requests',
+      metricValueRaw: 894,
       usageWindow: {
         key: 'free-rolling-24h',
         group: 'shortTerm',
         limitId: null,
         limitName: null,
         role: null,
-        labelDisplay: '日限额',
-        windowLabelDisplay: '日限额',
+        labelDisplay: t('appearance.preview.dashboard.dailyLimit'),
+        windowLabelDisplay: t('appearance.preview.dashboard.dailyLimit'),
         windowSeconds: 86_400,
         usedPercent: null,
         usedPercentDisplay: '—',
@@ -394,11 +392,13 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
           requestBuckets: requestSeries.slice(-12).map((requestCount, index) => ({
             bucketStart: `2026-08-23T${String(index + 12).padStart(2, '0')}:00:00+08:00`,
             requestCount: Math.round(requestCount / 3),
-            label: `08-23 ${index + 12}:00–${index + 13}:00 · ${Math.round(requestCount / 3)} 次请求`,
+            label: t('appearance.preview.dashboard.requests', { value: index + 12, value2: index + 13, count: Math.round(requestCount / 3) }),
           })),
         },
       },
-      lastUsed: '2 分钟前',
+      lastUsed: t('common.time.minutesAgo', { count: 5 }),
+      lastUsedAt: '2026-08-23T10:25:00+08:00',
+      lastUsedRelative: { kind: 'elapsed', value: 5, unit: 'minute' },
     },
     {
       id: 'preview-openai-2',
@@ -411,16 +411,18 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
       requestCount: 742,
       requestBuckets: [],
       quotaUsedPercent: 68,
-      metricLabel: '今日 Token',
+      metricLabel: t('appearance.preview.dashboard.todaySToken'),
       metricValue: '512K',
+      metric: 'tokens',
+      metricValueRaw: 512_000,
       usageWindow: {
         key: 'short',
         group: 'shortTerm',
         limitId: null,
         limitName: null,
         role: 'primary',
-        labelDisplay: '5 小时',
-        windowLabelDisplay: '5 小时',
+        labelDisplay: t('appearance.preview.dashboard.hours'),
+        windowLabelDisplay: t('appearance.preview.dashboard.hours'),
         windowSeconds: 18_000,
         usedPercent: 68,
         usedPercentDisplay: '68%',
@@ -430,7 +432,9 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
         resetAt: null,
         resetAtDisplay: '—',
       },
-      lastUsed: '5 分钟前',
+      lastUsed: t('common.time.minutesAgo', { count: 8 }),
+      lastUsedAt: '2026-08-23T10:22:00+08:00',
+      lastUsedRelative: { kind: 'elapsed', value: 8, unit: 'minute' },
     },
   ],
   usageRecords: [
@@ -460,4 +464,4 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
     availableSlots: 72,
   },
   rotationStrategy: 'smart',
-}
+}))

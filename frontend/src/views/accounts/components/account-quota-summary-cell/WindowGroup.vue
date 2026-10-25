@@ -2,8 +2,9 @@
 import type { AccountQuotaWindow } from '@/api'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AccountQuotaCycleProgress from '@/components/account/account-usage-window/CycleProgress.vue'
-import { quotaWindowCycleProgress, quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
+import { quotaWindowCycleProgress, quotaWindowLabel, quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
 import { useUiClock } from '@/composables/useUiClock'
 
 const props = withDefaults(defineProps<{
@@ -14,10 +15,11 @@ const props = withDefaults(defineProps<{
   showPercentage: true,
 })
 
+const { t } = useI18n({ useScope: 'global' })
 const now = useUiClock()
 const windowItems = computed(() => props.windows.map(window => ({
   key: window.key,
-  labelTooltip: window.labelDisplay,
+  labelTooltip: quotaWindowLabel(window),
   usedPercent: window.usedPercent,
   usedPercentDisplay: window.usedPercentDisplay,
   presentation: quotaWindowPresentation(window, '2px'),
@@ -54,9 +56,9 @@ const trackGridStyle = computed(() => ({
         <span
           v-if="!showPercentage && highestUsageCycle"
           class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary"
-          :title="`${highestUsageWindow?.labelDisplay ?? ''}重置时间：${highestUsageWindow?.resetAtDisplay ?? '—'}`"
+          :title="t('accounts.fork.windowResetTime', { label: highestUsageWindow ? quotaWindowLabel(highestUsageWindow) : '', time: highestUsageWindow?.resetAtDisplay ?? '—' })"
         >
-          距重置
+          {{ t('accounts.fork.untilReset') }}
           <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
         </span>
       </span>

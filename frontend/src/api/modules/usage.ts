@@ -98,7 +98,6 @@ export interface UsageListRecord {
   model: string | null
   requestedModel: string | null
   upstreamModel: string | null
-  upstreamResponseModel: string | null
   serviceTier: string | null
   clientTransport: string
   upstreamTransport: string | null
@@ -133,7 +132,6 @@ export interface UsageRecord {
   model: string | null
   requestedModel: string | null
   upstreamModel: string | null
-  upstreamResponseModel: string | null
   serviceTier: string | null
   statusCode: number | null
   clientTransport: string
@@ -233,6 +231,7 @@ export interface UsageSummaryResponse {
   cacheWriteInputTokens: string
   totalTokens: string
   averageLatencyMs: string
+  averageLatencyMsValue: number | null
 }
 
 export interface UsageOverviewHealthPoint {
@@ -384,7 +383,6 @@ interface UsageRangeQuery {
   endTime: string
   provider?: string
   model?: string
-  statusCode?: number
 }
 
 interface PageQuery {
@@ -392,13 +390,19 @@ interface PageQuery {
   pageSize: number
 }
 
-type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string, status?: UsageRecordStatus }
+type UsagePageQuery = UsageRangeQuery & PageQuery & {
+  clientApiKeyName?: string
+  accountName?: string
+  modelExact?: string
+  model?: string
+  status?: UsageRecordStatus
+}
 
 interface UsageDetailQuery {
   id: string
 }
 
-type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string }
+type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string, model?: string, statusCode?: number }
 
 type DiagnosticsDownloadParams = { requestId: string } | { errorId: string }
 

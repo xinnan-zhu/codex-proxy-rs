@@ -1,7 +1,8 @@
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import { getSystemUpdateProxy, updateSystemUpdateProxy } from '@/api'
 import { useProxyCatalog } from '@/composables/useProxyCatalog'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 const DIRECT = 'direct'
@@ -14,17 +15,17 @@ export function useSystemUpdateProxy() {
 
   const options = computed(() => {
     const items = [
-      { label: '直连', value: DIRECT, description: '不使用代理' },
+      { label: t('systemUpdate.downloadProxy.direct'), value: DIRECT, description: t('systemUpdate.downloadProxy.noProxy') },
       ...proxies.value.map(proxy => ({
-        label: `${proxy.name}${!proxy.enabled ? '（已禁用）' : proxy.lastTest?.success ? '' : proxy.lastTest ? '（测试失败）' : '（未测试）'}`,
+        label: `${proxy.name}${!proxy.enabled ? t('systemUpdate.downloadProxy.disabled') : proxy.lastTest?.success ? '' : proxy.lastTest ? t('systemUpdate.downloadProxy.failed') : t('systemUpdate.downloadProxy.untested')}`,
         value: proxy.id,
-        description: !proxy.enabled && proxy.id === selectedProxyId.value ? '当前直连' : proxy.endpoint,
+        description: !proxy.enabled && proxy.id === selectedProxyId.value ? t('systemUpdate.downloadProxy.currentlyDirect') : proxy.endpoint,
         disabled: !proxy.enabled,
       })),
     ]
     const selected = selectedProxyId.value
     if (selected && !proxies.value.some(proxy => proxy.id === selected))
-      items.push({ label: '已选代理', value: selected, description: selected })
+      items.push({ label: t('systemUpdate.downloadProxy.selected'), value: selected, description: selected })
     return items
   })
 
@@ -56,10 +57,10 @@ export function useSystemUpdateProxy() {
     try {
       const data = await updateSystemUpdateProxy({ proxyId })
       selectedProxyId.value = data.proxyId
-      ZNotification.success({ message: data.proxyId ? '更新将通过所选代理下载' : '更新将直连下载' })
+      ZNotification.success({ message: data.proxyId ? t('systemUpdate.downloadProxy.savedProxy') : t('systemUpdate.downloadProxy.savedDirect') })
     }
     catch (error: unknown) {
-      ZNotification.error({ message: errorMessage(error, '保存下载代理失败') })
+      ZNotification.error({ message: errorMessage(error, t('systemUpdate.downloadProxy.saveFailed')) })
     }
     finally {
       saving.value = false

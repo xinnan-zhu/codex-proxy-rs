@@ -41,7 +41,7 @@ use gateway_admin::{
             DashboardObservation, DashboardQuery, DecimalAmount, DiagnosticDimension,
             DiagnosticsObservation, Granularity, OpsError, OpsErrorPage, OpsErrorQuery,
             RequestMetricPoint, TimeRange, UsageDetail, UsageFilter, UsageListRecord,
-            UsageOverview, UsagePage, UsageQuery,
+            UsageOverview, UsagePage, UsageQuery, UsageSummaryObservation,
         },
         provider_credentials::{
             AuthorizationCommit, AuthorizationStarted, CompleteAuthorization, CredentialDetails,
@@ -112,6 +112,7 @@ pub(super) struct AdminTestFixture {
     pub dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     pub dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
     pub provider_error: Arc<Mutex<Option<ProviderAdminError>>>,
+    pub provider_quota: Arc<Mutex<Option<ProviderQuota>>>,
     pub account: Arc<Mutex<Option<AccountPageItem>>>,
     pub account_usage: Arc<Mutex<Vec<AccountUsage>>>,
 }
@@ -187,9 +188,18 @@ impl AdminTestFixture {
             plugin_ports.clone(),
             plugin_ports.clone(),
         );
+        let provider_quota = Arc::new(Mutex::new(None));
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
-            Arc::new(UnusedProvider::new("openai", Arc::clone(&provider_error))),
-            Arc::new(UnusedProvider::new("xai", Arc::clone(&provider_error))),
+            Arc::new(UnusedProvider::new(
+                "openai",
+                Arc::clone(&provider_error),
+                Arc::clone(&provider_quota),
+            )),
+            Arc::new(UnusedProvider::new(
+                "xai",
+                Arc::clone(&provider_error),
+                Arc::clone(&provider_quota),
+            )),
         ];
         let bundle = gateway_admin::initialize(
             AdminConfig {
@@ -236,6 +246,7 @@ impl AdminTestFixture {
             dashboard_observation,
             dashboard_summary_range,
             provider_error,
+            provider_quota,
             account,
             account_usage,
         }
@@ -1547,12 +1558,17 @@ impl ObservabilityStore for UnusedStore {
         &self,
         range: TimeRange,
         filter: UsageFilter,
-    ) -> AdminStoreResult<UsageOverview> {
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         let mut data = self.observations.lock().expect("observations");
         data.summaries.push((range, filter));
         data.summary
             .clone()
-            .map(|summary| UsageOverview { range, ..summary })
+            .map(|summary| UsageSummaryObservation {
+                range,
+                analytics: summary.analytics,
+                requests: (&summary.requests).into(),
+                attempts: summary.attempts,
+            })
             .ok_or_else(|| unavailable("usage summary"))
     }
 
@@ -1585,13 +1601,19 @@ impl ObservabilityStore for UnusedStore {
 struct UnusedProvider {
     kind: ProviderKind,
     error: Arc<Mutex<Option<ProviderAdminError>>>,
+    quota: Arc<Mutex<Option<ProviderQuota>>>,
 }
 
 impl UnusedProvider {
-    fn new(kind: &str, error: Arc<Mutex<Option<ProviderAdminError>>>) -> Self {
+    fn new(
+        kind: &str,
+        error: Arc<Mutex<Option<ProviderAdminError>>>,
+        quota: Arc<Mutex<Option<ProviderQuota>>>,
+    ) -> Self {
         Self {
             kind: ProviderKind::new(kind).expect("provider kind"),
             error,
+            quota,
         }
     }
 }
@@ -1686,6 +1708,9 @@ impl ProviderAdmin for UnusedProvider {
         &self,
         _: gateway_admin::model::provider_credentials::ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError> {
+        if let Some(quota) = self.quota.lock().expect("provider quota").clone() {
+            return Ok(quota);
+        }
         Err(self
             .error
             .lock()

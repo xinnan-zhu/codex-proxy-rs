@@ -1,4 +1,5 @@
 import type { RequestOptions } from '../request'
+import type { RelativeTimeView } from '../time'
 import type { AccountGroupRef } from './groups'
 import request from '../request'
 
@@ -39,6 +40,8 @@ export interface AccountQuotaCredits {
 }
 
 export interface AccountQuota {
+  refreshedAt: string | null
+  refreshedAtRelative: RelativeTimeView | null
   refreshedAtDisplay: string
   limitReached: boolean
   // 429 临时限流（Redis 冷却）到期时间；非限流中为 null。
@@ -91,7 +94,7 @@ export interface AccountModelUsage {
 }
 
 export interface AccountUsage {
-  windowLabelDisplay: string
+  windowKind: 'general' | 'weekly' | 'monthly' | 'quota'
   requestCount: number | null
   requestCountDisplay: string
   inputTokens: number | null

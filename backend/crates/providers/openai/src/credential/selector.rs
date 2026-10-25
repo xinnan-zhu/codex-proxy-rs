@@ -49,6 +49,7 @@ const CLOUDFLARE_PATH_BLOCK_THRESHOLD: u32 = 3;
 const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(100);
 const CYBER_POLICY_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ACCOUNT_SNAPSHOT_RETRIES: u32 = 3;
+const COOLDOWN_READ_CONCURRENCY: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexAccountFailure {
@@ -164,6 +165,7 @@ impl<'a> CodexSelectionModel<'a> {
 }
 
 struct CredentialSelectionInput<'a> {
+    managed_upstream: bool,
     requires_websocket: bool,
     requires_oauth: bool,
     request_url: &'a Url,
@@ -349,6 +351,7 @@ impl CodexCredentialSelector {
         request: &SelectCodexCredential<'_>,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let input = CredentialSelectionInput {
+            managed_upstream: false,
             requires_websocket: false,
             requires_oauth: false,
             request_url: request.request_url,
@@ -374,6 +377,7 @@ impl CodexCredentialSelector {
         guardian: bool,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let input = CredentialSelectionInput {
+            managed_upstream: true,
             requires_websocket,
             requires_oauth: false,
             request_url: request.request_url,
@@ -449,6 +453,7 @@ impl CodexCredentialSelector {
         request: &SelectCodexProviderEndpointCredential<'_>,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let input = CredentialSelectionInput {
+            managed_upstream: false,
             requires_websocket: false,
             requires_oauth: request.requires_oauth,
             request_url: request.request_url,
@@ -505,6 +510,13 @@ impl CodexCredentialSelector {
         model: CodexSelectionModel<'_>,
         follow_only: bool,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
+        let adapter_model = match model {
+            CodexSelectionModel::Requested(model) if request.managed_upstream => Some(
+                gateway_core::routing::UpstreamModelId::new(model)
+                    .map_err(|_| CredentialSelectionError::NoEligibleCredential)?,
+            ),
+            _ => None,
+        };
         let diagnostic = request.attempt.is_diagnostic_required_account();
         let binding_key = request.session_affinity_key.filter(|_| !diagnostic);
         let affinity_mode = request
@@ -644,7 +656,26 @@ impl CodexCredentialSelector {
                 .collect::<Vec<_>>();
             let mut eligible = Vec::with_capacity(accounts.len());
             for account in accounts {
+                let adapter = if let Some(model) = adapter_model.as_ref() {
+                    match request.attempt.upstream_adapter_for_account(
+                        &self.provider_kind,
+                        model,
+                        account.id(),
+                    ) {
+                        Ok(adapter) => adapter,
+                        // 已匹配但不可用的适配器不能回退到该账号的原生目标
+                        Err(_) => continue,
+                    }
+                } else {
+                    None
+                };
+                if adapter.as_ref().is_some_and(|adapter| {
+                    !adapter.supports_authentication(account.authentication_kind())
+                }) {
+                    continue;
+                }
                 if request.requires_websocket
+                    && adapter.is_none()
                     && pinned_account.as_ref().is_none_or(|id| id == account.id())
                 {
                     let runtime = match self.repository.reload_selected_credential(&account).await {
@@ -694,9 +725,16 @@ impl CodexCredentialSelector {
             }
             let mut rate_limits = HashMap::with_capacity(accounts.len());
             if !diagnostic {
-                for account in &accounts {
-                    let until = self.quota.cooldown(account.id()).await.unwrap_or(None);
-                    rate_limits.insert(account.id().clone(), until);
+                // 同一批候选并发读取实时冷却，避免逐账号累加 Redis 往返
+                // 分批限制在途读取，取消选号时直接释放本批 future，不启动后续批次
+                for batch in accounts.chunks(COOLDOWN_READ_CONCURRENCY) {
+                    rate_limits.extend(
+                        futures::future::join_all(batch.iter().map(|account| async {
+                            let until = self.quota.cooldown(account.id()).await.unwrap_or(None);
+                            (account.id().clone(), until)
+                        }))
+                        .await,
+                    );
                 }
             }
             let account_ids = accounts

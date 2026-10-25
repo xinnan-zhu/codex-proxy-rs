@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import type { TableColumn } from '@codex-proxy/ui'
+
 import type { UsageListRecord, UsageRecordStatus } from '@/api'
 import { useTableColumns, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
 
 import { Eye } from '@lucide/vue'
+
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
@@ -19,18 +22,21 @@ import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
 import { isErrorUsageRecord } from './utils/detail'
 
+const { t } = useI18n({ useScope: 'global' })
+
 const recordView = shallowRef<UsageRecordStatus>('success')
 const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordView.value === 'error'
-  ? usageRecordColumns.flatMap(column => column.key === 'route'
-      ? [column, { key: 'errorMessage', label: '错误', kind: 'custom', size: '4xl', hideable: false }]
+  ? usageRecordColumns.value.flatMap(column => column.key === 'route'
+      ? [column, { key: 'errorMessage', label: t('usage.filters.error'), kind: 'custom', size: '4xl', hideable: false }]
       : [column])
-  : usageRecordColumns)
+  : usageRecordColumns.value)
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-records')
 const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd, latestTimeRangeParams }
   = useUsageTimeRange()
 
 const {
-  searchQuery,
+  filterField,
+  filterValue,
   providerQuery,
   modelQuery,
   modelOptions,
@@ -64,7 +70,7 @@ const modelSelectOptions = computed(() => {
     ? [modelQuery.value, ...modelOptions.value]
     : modelOptions.value
   return [
-    { label: '全部模型', value: '' },
+    { label: t('usage.fork.allModels'), value: '' },
     ...models.map(model => ({ label: model, value: model })),
   ]
 })
@@ -76,30 +82,32 @@ watch(timeRange, () => {
 </script>
 
 <template>
-  <div class="w-full">
-    <ZPageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
+  <div class="@container w-full">
+    <ZPageHeader :title="t('navigation.usage')" :description="t('usage.page.description')">
       <template #actions>
-        <ZDatePicker
-          v-model="timeRange"
-          type="daterange"
-          :clearable="false"
-          :editable="false"
-          :disabled-date="disabledDate"
-          single-panel
-          aria-label="统计日期范围，仅可选择最近 31 天"
-          class="w-60 max-w-full"
-        />
-        <ZSelect
-          v-model="modelQuery"
-          :options="modelSelectOptions"
-          aria-label="按模型筛选"
-          class="w-44"
-        />
-        <ProviderFilter
-          v-model="providerQuery"
-          :disabled="refreshingList"
-          class="shrink-0"
-        />
+        <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[28rem]:w-auto">
+          <ZDatePicker
+            v-model="timeRange"
+            type="daterange"
+            :clearable="false"
+            :editable="false"
+            :disabled-date="disabledDate"
+            single-panel
+            :aria-label="t('usage.page.dateRangeLabel')"
+            class="min-w-0 w-full @min-[28rem]:w-60"
+          />
+          <ZSelect
+            v-model="modelQuery"
+            :options="modelSelectOptions"
+            :aria-label="t('usage.fork.filterModel')"
+            class="min-w-0 flex-1 @min-[28rem]:w-44 @min-[28rem]:flex-none"
+          />
+          <ProviderFilter
+            v-model="providerQuery"
+            :disabled="refreshingList"
+            class="shrink-0"
+          />
+        </div>
       </template>
     </ZPageHeader>
 
@@ -117,12 +125,12 @@ watch(timeRange, () => {
       <template #header>
         <div>
           <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text">
-            请求明细
+            {{ t('usage.page.requestDetails') }}
           </h2>
           <p
             class="mt-1.75 mb-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary"
           >
-            成功请求与失败请求明细
+            {{ t('usage.page.recordsDescription') }}
           </p>
         </div>
       </template>
@@ -132,7 +140,8 @@ watch(timeRange, () => {
           class="grid min-h-130 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"
         >
           <UsageFilters
-            v-model:search="searchQuery"
+            v-model:field="filterField"
+            v-model:value="filterValue"
             :loading="loading"
             :refreshing="refreshingList"
             @refresh="refreshUsageRecords"
@@ -154,13 +163,13 @@ watch(timeRange, () => {
               :columns="visibleColumns"
               :rows="records"
               :loading="loading"
-              :empty-text="error ? `加载失败：${error}` : '所选条件下暂无请求记录'"
+              :empty-text="error ? t('usage.page.failedToLoad', { error }) : t('usage.page.noRequestsMatchTheseFilters')"
             >
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
                   <ZIconButton
                     size="small"
-                    :aria-label="isErrorUsageRecord(row) ? '查看错误详情' : '查看使用记录详情'"
+                    :aria-label="isErrorUsageRecord(row) ? t('usage.page.viewErrorDetails') : t('usage.page.viewUsageRecordDetails')"
                     @click="handleViewDetail(row)"
                   >
                     <Eye class="size-3.5" />
