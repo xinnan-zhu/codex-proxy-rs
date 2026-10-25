@@ -75,7 +75,7 @@ const usageCostDisplay = computed(() => props.account.usage.costs
             <span class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary">·</span>
             <strong
               class="shrink-0 text-cp-xs font-heavy text-cp-green-text"
-              :title="t('accounts.fork.windowCost', { label: account.usage.windowLabelDisplay })"
+              :title="t('accounts.fork.windowCost', { label: usageWindowLabels[account.usage.windowKind] })"
             >
               {{ usageCostDisplay }}
             </strong>
