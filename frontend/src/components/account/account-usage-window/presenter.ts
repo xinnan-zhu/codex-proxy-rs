@@ -145,7 +145,9 @@ export function resolveAccountUsageWindowPresentation(
   const quota = input.window
     ? quotaWindowPresentation(input.window, definition.minimumBarWidth)
     : null
-  const label = input.window ? quotaWindowLabel(input.window) : undefined
+  const label = input.window
+    ? quotaWindowLabel(input.window)
+    : undefined
 
   return {
     mode,
@@ -224,11 +226,13 @@ function requestBuckets(value: unknown) {
     ) {
       return []
     }
-    return [{
-      bucketStart: item.bucketStart,
-      label: item.label,
-      requestCount: item.requestCount,
-    }]
+    return [
+      {
+        bucketStart: item.bucketStart,
+        label: item.label,
+        requestCount: item.requestCount,
+      },
+    ]
   })
 }
 
@@ -277,7 +281,9 @@ export function quotaWindowCycleProgress(
   window: AccountQuotaWindow,
   now: number,
 ): QuotaWindowCycleProgress | null {
-  const resetAt = window.resetAt ? new Date(window.resetAt).getTime() : Number.NaN
+  const resetAt = window.resetAt
+    ? new Date(window.resetAt).getTime()
+    : Number.NaN
   const windowSeconds = window.windowSeconds
   if (!Number.isFinite(resetAt) || typeof windowSeconds !== 'number' || windowSeconds <= 0)
     return null
@@ -300,19 +306,40 @@ function remainingDurationDisplay(milliseconds: number) {
   const days = Math.floor(totalMinutes / (24 * 60))
   const hours = Math.floor(totalMinutes / 60) % 24
   const minutes = totalMinutes % 60
-  if (days > 0)
-    return hours > 0 ? t('accounts.fork.daysHours', { days, hours }) : t('accounts.fork.days', { days })
-  if (hours > 0)
-    return minutes > 0 ? t('accounts.fork.hoursMinutes', { hours, minutes }) : t('accounts.fork.hours', { hours })
+  if (days > 0) {
+    return hours > 0
+      ? t('accounts.fork.daysHours', { days, hours })
+      : t('accounts.fork.days', { days })
+  }
+  if (hours > 0) {
+    return minutes > 0
+      ? t('accounts.fork.hoursMinutes', { hours, minutes })
+      : t('accounts.fork.hours', { hours })
+  }
   return t('accounts.fork.minutes', { minutes })
 }
 
 const quotaWindowPeriods = [
-  { seconds: 18_000, label: () => t('accounts.quota.windows.fiveHour') },
-  { seconds: 86_400, label: () => t('accounts.quota.windows.daily') },
-  { seconds: 604_800, label: () => t('accounts.quota.windows.weekly') },
-  { seconds: 2_592_000, label: () => t('accounts.quota.windows.monthly') },
-  { seconds: 31_536_000, label: () => t('accounts.quota.windows.annual') },
+  {
+    seconds: 18_000,
+    label: () => t('accounts.quota.windows.fiveHour'),
+  },
+  {
+    seconds: 86_400,
+    label: () => t('accounts.quota.windows.daily'),
+  },
+  {
+    seconds: 604_800,
+    label: () => t('accounts.quota.windows.weekly'),
+  },
+  {
+    seconds: 2_592_000,
+    label: () => t('accounts.quota.windows.monthly'),
+  },
+  {
+    seconds: 31_536_000,
+    label: () => t('accounts.quota.windows.annual'),
+  },
 ]
 
 export function quotaWindowLabel(window: AccountQuotaWindow, includeLimitName = true) {
@@ -328,12 +355,21 @@ export function quotaWindowLabel(window: AccountQuotaWindow, includeLimitName = 
     label = period.label()
   }
   else if (seconds !== null && seconds > 0) {
-    if (seconds % 86_400 === 0)
-      label = t('accounts.quota.windows.days', { duration: formatInteger(seconds / 86_400) })
-    else if (seconds % 3_600 === 0)
-      label = t('accounts.quota.windows.hours', { duration: formatInteger(seconds / 3_600) })
-    else
-      label = t('accounts.quota.windows.minutes', { duration: formatInteger(Math.ceil(seconds / 60)) })
+    if (seconds % 86_400 === 0) {
+      label = t('accounts.quota.windows.days', {
+        duration: formatInteger(seconds / 86_400),
+      })
+    }
+    else if (seconds % 3_600 === 0) {
+      label = t('accounts.quota.windows.hours', {
+        duration: formatInteger(seconds / 3_600),
+      })
+    }
+    else {
+      label = t('accounts.quota.windows.minutes', {
+        duration: formatInteger(Math.ceil(seconds / 60)),
+      })
+    }
   }
   else if (window.role === 'monthly') {
     label = t('accounts.quota.windows.monthly')
@@ -358,7 +394,9 @@ function requestCountDisplay(localUsage: AccountLocalUsage | null) {
   if (typeof display === 'string' && display.trim())
     return display.trim()
   const count = localUsage?.requestCount
-  return typeof count === 'number' ? formatInteger(count) : '0'
+  return typeof count === 'number'
+    ? formatInteger(count)
+    : '0'
 }
 
 function rollingWindowDurationDisplay(windowSeconds: number | null | undefined) {
@@ -367,13 +405,24 @@ function rollingWindowDurationDisplay(windowSeconds: number | null | undefined) 
 
   const hourSeconds = 60 * 60
   const daySeconds = 24 * hourSeconds
-  if (windowSeconds <= daySeconds * 2 && windowSeconds % hourSeconds === 0)
-    return t('accounts.quota.h', { duration: formatInteger(windowSeconds / hourSeconds) })
-  if (windowSeconds % daySeconds === 0)
-    return t('accounts.quota.d', { duration: formatInteger(windowSeconds / daySeconds) })
-  if (windowSeconds % hourSeconds === 0)
-    return t('accounts.quota.h', { duration: formatInteger(windowSeconds / hourSeconds) })
-  return t('accounts.quota.s', { duration: formatInteger(windowSeconds) })
+  if (windowSeconds <= daySeconds * 2 && windowSeconds % hourSeconds === 0) {
+    return t('accounts.quota.h', {
+      duration: formatInteger(windowSeconds / hourSeconds),
+    })
+  }
+  if (windowSeconds % daySeconds === 0) {
+    return t('accounts.quota.d', {
+      duration: formatInteger(windowSeconds / daySeconds),
+    })
+  }
+  if (windowSeconds % hourSeconds === 0) {
+    return t('accounts.quota.h', {
+      duration: formatInteger(windowSeconds / hourSeconds),
+    })
+  }
+  return t('accounts.quota.s', {
+    duration: formatInteger(windowSeconds),
+  })
 }
 
 export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth: string) {
@@ -382,7 +431,9 @@ export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth
   return {
     barStyle: {
       width: `${percent}%`,
-      minWidth: percent > 0 ? minimumWidth : '0',
+      minWidth: percent > 0
+        ? minimumWidth
+        : '0',
     },
     barClass: quotaToneClasses[tone].bar,
     percentTextClass: quotaToneClasses[tone].text,
@@ -404,7 +455,9 @@ function requestTimeline(buckets: NonNullable<AccountLocalUsage['requestBuckets'
   return buckets.map(bucket => ({
     key: bucket.bucketStart,
     requestCount: bucket.requestCount,
-    height: bucket.requestCount === 0 ? '0' : `${Math.max(25, Math.round(bucket.requestCount / maximum * 100))}%`,
+    height: bucket.requestCount === 0
+      ? '0'
+      : `${Math.max(25, Math.round(bucket.requestCount / maximum * 100))}%`,
     title: bucket.label,
   }))
 }

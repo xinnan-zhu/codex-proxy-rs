@@ -27,7 +27,16 @@ const { t } = useI18n({ useScope: 'global' })
 const recordView = shallowRef<UsageRecordStatus>('success')
 const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordView.value === 'error'
   ? usageRecordColumns.value.flatMap(column => column.key === 'route'
-      ? [column, { key: 'errorMessage', label: t('usage.filters.error'), kind: 'custom', size: '4xl', hideable: false }]
+      ? [
+          column,
+          {
+            key: 'errorMessage',
+            label: t('usage.filters.error'),
+            kind: 'custom',
+            size: '4xl',
+            hideable: false,
+          },
+        ]
       : [column])
   : usageRecordColumns.value)
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-records')
@@ -70,7 +79,10 @@ const modelSelectOptions = computed(() => {
     ? [modelQuery.value, ...modelOptions.value]
     : modelOptions.value
   return [
-    { label: t('usage.fork.allModels'), value: '' },
+    {
+      label: t('usage.fork.allModels'),
+      value: '',
+    },
     ...models.map(model => ({ label: model, value: model })),
   ]
 })

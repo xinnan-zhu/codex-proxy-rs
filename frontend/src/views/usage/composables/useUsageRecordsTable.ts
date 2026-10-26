@@ -39,9 +39,15 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   const filterParams = computed(() => {
     const value = filterValue.value.trim() || undefined
     return {
-      clientApiKeyName: filterField.value === 'key' ? value : undefined,
-      accountName: filterField.value === 'account' ? value : undefined,
-      model: filterField.value === 'model' ? value : undefined,
+      clientApiKeyName: filterField.value === 'key'
+        ? value
+        : undefined,
+      accountName: filterField.value === 'account'
+        ? value
+        : undefined,
+      model: filterField.value === 'model'
+        ? value
+        : undefined,
     }
   })
   const providerQuery = shallowRef('')
@@ -50,7 +56,10 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   let tableParams = snapshot()
   const table = useStablePagedQuery({
     initialPageSize: 10,
-    load: (pagination, requestOptions) => getUsageRecords({ ...pagination, ...tableParams }, requestOptions),
+    load: (pagination, requestOptions) => getUsageRecords({
+      ...pagination,
+      ...tableParams,
+    }, requestOptions),
   })
   const { currentPage, pageSize, loading, error, items: records, total: totalRecords } = table
   const refreshingList = shallowRef(false)
@@ -63,11 +72,15 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   let modelOptionsController: AbortController | undefined
   const providerParams = () => ({
     ...options.timeRangeParams.value,
-    ...(providerQuery.value ? { provider: providerQuery.value } : {}),
+    ...(providerQuery.value
+      ? { provider: providerQuery.value }
+      : {}),
   })
   const scopedParams = () => ({
     ...providerParams(),
-    ...(modelQuery.value ? { model: modelQuery.value } : {}),
+    ...(modelQuery.value
+      ? { model: modelQuery.value }
+      : {}),
   })
   const usagePagination = computed(() => ({
     currentPage: currentPage.value,
@@ -108,8 +121,16 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 
     await Promise.all([
       table.execute(),
-      ...(scope === 'all' ? [loadUsageAnalytics(globalParams)] : []),
-      ...(scope === 'all' && !keepModelOptions ? [loadModelOptions()] : []),
+      ...(scope === 'all'
+        ? [
+            loadUsageAnalytics(globalParams),
+          ]
+        : []),
+      ...(scope === 'all' && !keepModelOptions
+        ? [
+            loadModelOptions(),
+          ]
+        : []),
     ])
   }
 
@@ -378,7 +399,12 @@ function emptyOverview() {
       totalTokens: 0,
       billedTotalTokens: 0,
       points: [],
-      coverage: { known: 0, partial: 0, unknown: 0, notBillable: 0 },
+      coverage: {
+        known: 0,
+        partial: 0,
+        unknown: 0,
+        notBillable: 0,
+      },
     },
   }
   return overview

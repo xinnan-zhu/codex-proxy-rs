@@ -38,7 +38,9 @@ export function usageTokenDetails(details: UsageTokenDetails): UsageTokenDetails
   return {
     ...details,
     inputTokens,
-    inputTokensDisplay: inputTokens === null ? details.inputTokensDisplay : formatInteger(inputTokens),
+    inputTokensDisplay: inputTokens === null
+      ? details.inputTokensDisplay
+      : formatInteger(inputTokens),
   }
 }
 
@@ -100,7 +102,9 @@ export function usagePerformanceDetails(record: UsagePerformanceRecord) {
   const upstreamMs = upstreamResponseMs(record.latencyDetails)
   const outputTokens = record.tokenDetails?.outputTokens
   const localMs = durationValue(record.latencyMs)
-  const durationMs = upstreamMs ?? (localMs !== null && localMs > 0 ? localMs : null)
+  const durationMs = upstreamMs ?? (localMs !== null && localMs > 0
+    ? localMs
+    : null)
   // 输出已包含推理 Token；网关耗时仅在上游计时缺失时用于估算
   const throughput = typeof outputTokens === 'number' && Number.isFinite(outputTokens) && outputTokens > 0
     && durationMs !== null
@@ -108,7 +112,11 @@ export function usagePerformanceDetails(record: UsagePerformanceRecord) {
     : null
 
   return {
-    throughputDisplay: throughput === null ? '—' : `${formatCompactNumber(throughput)} tok/s${upstreamMs === null ? t('usage.fork.estimated') : ''}`,
+    throughputDisplay: throughput === null
+      ? '—'
+      : `${formatCompactNumber(throughput)} tok/s${upstreamMs === null
+        ? t('usage.fork.estimated')
+        : ''}`,
     firstTokenDisplay: formatDuration(durationValue(record.firstTokenLatencyMs)),
   }
 }
@@ -123,17 +131,25 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
   const requestItems: UsageTimingItem[] = []
 
   if (firstTokenMs !== null && totalMs !== null && firstTokenMs <= totalMs) {
-    requestItems.push({ label: t('usage.status.firstOutputWaiting'), value: formatDuration(firstTokenMs) })
+    requestItems.push({
+      label: t('usage.status.firstOutputWaiting'),
+      value: formatDuration(firstTokenMs),
+    })
 
     if (firstTextMs !== null && firstTextMs >= firstTokenMs && firstTextMs <= totalMs) {
       const beforeTextMs = firstTextMs - firstTokenMs
       if (beforeTextMs > 0) {
         requestItems.push({
-          label: firstReasoningMs === firstTokenMs ? t('usage.status.reasoningToText') : t('usage.status.firstOneIsOutputToText'),
+          label: firstReasoningMs === firstTokenMs
+            ? t('usage.status.reasoningToText')
+            : t('usage.status.firstOneIsOutputToText'),
           value: formatDuration(beforeTextMs),
         })
       }
-      requestItems.push({ label: t('usage.status.textToCompletion'), value: formatDuration(totalMs - firstTextMs) })
+      requestItems.push({
+        label: t('usage.status.textToCompletion'),
+        value: formatDuration(totalMs - firstTextMs),
+      })
     }
     else {
       requestItems.push({
@@ -143,21 +159,43 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
     }
   }
 
-  requestItems.push({ label: t('usage.latency.totalLatency'), value: formatDuration(totalMs), emphasized: true })
+  requestItems.push({
+    label: t('usage.latency.totalLatency'),
+    value: formatDuration(totalMs),
+    emphasized: true,
+  })
 
   const transportItems: UsageTimingItem[] = [
-    { label: t('usage.status.admissionDecision'), value: durationValue(latencyDetails?.admissionDecisionMs) },
-    { label: t('usage.status.accountSelectionWaiting'), value: durationValue(latencyDetails?.accountSelectionWaitMs) },
+    {
+      label: t('usage.status.admissionDecision'),
+      value: durationValue(latencyDetails?.admissionDecisionMs),
+    },
+    {
+      label: t('usage.status.accountSelectionWaiting'),
+      value: durationValue(latencyDetails?.accountSelectionWaitMs),
+    },
     {
       label: t('usage.status.transferDecisionWaiting'),
       value: durationValue(latencyDetails?.transportDecisionWaitMs),
     },
-    { label: t('usage.status.websocketConnection'), value: durationValue(latencyDetails?.wsConnectMs) },
-    { label: t('usage.status.upstreamResponseHeader'), value: durationValue(latencyDetails?.upstreamHeadersMs) },
-    { label: t('usage.status.firstUpstreamEvent'), value: durationValue(latencyDetails?.firstEventMs) },
+    {
+      label: t('usage.status.websocketConnection'),
+      value: durationValue(latencyDetails?.wsConnectMs),
+    },
+    {
+      label: t('usage.status.upstreamResponseHeader'),
+      value: durationValue(latencyDetails?.upstreamHeadersMs),
+    },
+    {
+      label: t('usage.status.firstUpstreamEvent'),
+      value: durationValue(latencyDetails?.firstEventMs),
+    },
   ]
     .filter(item => item.value !== null)
-    .map(item => ({ ...item, value: formatDuration(item.value) }))
+    .map(item => ({
+      ...item,
+      value: formatDuration(item.value),
+    }))
 
   if (
     latencyDetails?.capacityUsedSlots != null
@@ -171,19 +209,37 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
 
   const upstreamDisplay = formatDuration(upstreamMs)
   const upstreamItems: UsageTimingItem[] = []
-  if (upstreamMs !== null)
-    upstreamItems.push({ label: t('accounts.connectionTest.duration'), value: upstreamDisplay })
+  if (upstreamMs !== null) {
+    upstreamItems.push({
+      label: t('accounts.connectionTest.duration'),
+      value: upstreamDisplay,
+    })
+  }
   const processingMs = durationValue(latencyDetails?.openaiProcessingMs)
-  if (processingMs !== null)
-    upstreamItems.push({ label: t('usage.status.processingTime'), value: formatDuration(processingMs) })
+  if (processingMs !== null) {
+    upstreamItems.push({
+      label: t('usage.status.processingTime'),
+      value: formatDuration(processingMs),
+    })
+  }
 
   const performanceItems = [
-    { label: t('usage.status.apiOverhead'), value: durationValue(latencyDetails?.upstreamApiOverheadMs) },
-    { label: t('usage.status.engineTime'), value: durationValue(latencyDetails?.upstreamEngineMs) },
+    {
+      label: t('usage.status.apiOverhead'),
+      value: durationValue(latencyDetails?.upstreamApiOverheadMs),
+    },
+    {
+      label: t('usage.status.engineTime'),
+      value: durationValue(latencyDetails?.upstreamEngineMs),
+    },
   ]
   for (const item of performanceItems) {
-    if (item.value !== null)
-      upstreamItems.push({ label: item.label, value: formatUpstreamDuration(item.value) })
+    if (item.value !== null) {
+      upstreamItems.push({
+        label: item.label,
+        value: formatUpstreamDuration(item.value),
+      })
+    }
   }
 
   const sections: UsageTimingSection[] = []
@@ -194,7 +250,11 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
       items: upstreamItems,
     })
   }
-  sections.push({ title: t('usage.status.requestObservation'), source: 'local', items: requestItems })
+  sections.push({
+    title: t('usage.status.requestObservation'),
+    source: 'local',
+    items: requestItems,
+  })
   if (transportItems.length) {
     sections.push({
       title: t('usage.status.transport'),
@@ -231,7 +291,9 @@ export function usageBillingText(record: Pick<UsageCommonRecord, 'billing'>) {
 }
 
 function durationValue(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null
 }
 
 function formatUpstreamDuration(value: number) {
@@ -244,5 +306,7 @@ function formatUpstreamDuration(value: number) {
 
 function upstreamResponseMs(details: UsageCommonRecord['latencyDetails']) {
   const value = durationValue(details?.upstreamResponseMs)
-  return value !== null && value > 0 ? value : null
+  return value !== null && value > 0
+    ? value
+    : null
 }

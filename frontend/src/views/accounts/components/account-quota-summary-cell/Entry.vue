@@ -29,8 +29,12 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n({ useScope: 'global' })
 const now = useUiClock()
 const detailHeading = computed(() => props.label)
-const detailTitle = computed(() => detailHeading.value ?? (props.windows[0] ? quotaWindowLabel(props.windows[0]) : t('accounts.quota.quotaDetails')))
-const summaryLabel = computed(() => props.label ?? (props.windows[0] ? quotaWindowLabel(props.windows[0]) : t('usage.quota')))
+const detailTitle = computed(() => detailHeading.value ?? (props.windows[0]
+  ? quotaWindowLabel(props.windows[0])
+  : t('accounts.quota.quotaDetails')))
+const summaryLabel = computed(() => props.label ?? (props.windows[0]
+  ? quotaWindowLabel(props.windows[0])
+  : t('usage.quota')))
 const hasQuotaWindow = computed(() => props.windows.some(window => typeof window.usedPercent === 'number'))
 const detailItems = computed(() =>
   props.windows.map((window) => {

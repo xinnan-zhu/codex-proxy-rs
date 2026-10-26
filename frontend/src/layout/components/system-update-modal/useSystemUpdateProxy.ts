@@ -15,24 +15,43 @@ export function useSystemUpdateProxy() {
 
   const options = computed(() => {
     const items = [
-      { label: t('systemUpdate.downloadProxy.direct'), value: DIRECT, description: t('systemUpdate.downloadProxy.noProxy') },
+      {
+        label: t('systemUpdate.downloadProxy.direct'),
+        value: DIRECT,
+        description: t('systemUpdate.downloadProxy.noProxy'),
+      },
       ...proxies.value.map(proxy => ({
-        label: `${proxy.name}${!proxy.enabled ? t('systemUpdate.downloadProxy.disabled') : proxy.lastTest?.success ? '' : proxy.lastTest ? t('systemUpdate.downloadProxy.failed') : t('systemUpdate.downloadProxy.untested')}`,
+        label: `${proxy.name}${!proxy.enabled
+          ? t('systemUpdate.downloadProxy.disabled')
+          : proxy.lastTest?.success
+            ? ''
+            : proxy.lastTest
+              ? t('systemUpdate.downloadProxy.failed')
+              : t('systemUpdate.downloadProxy.untested')}`,
         value: proxy.id,
-        description: !proxy.enabled && proxy.id === selectedProxyId.value ? t('systemUpdate.downloadProxy.currentlyDirect') : proxy.endpoint,
+        description: !proxy.enabled && proxy.id === selectedProxyId.value
+          ? t('systemUpdate.downloadProxy.currentlyDirect')
+          : proxy.endpoint,
         disabled: !proxy.enabled,
       })),
     ]
     const selected = selectedProxyId.value
-    if (selected && !proxies.value.some(proxy => proxy.id === selected))
-      items.push({ label: t('systemUpdate.downloadProxy.selected'), value: selected, description: selected })
+    if (selected && !proxies.value.some(proxy => proxy.id === selected)) {
+      items.push({
+        label: t('systemUpdate.downloadProxy.selected'),
+        value: selected,
+        description: selected,
+      })
+    }
     return items
   })
 
   const selection = computed({
     get: () => selectedProxyId.value ?? DIRECT,
     set: (value: string) => {
-      void save(value === DIRECT ? null : value)
+      void save(value === DIRECT
+        ? null
+        : value)
     },
   })
 
@@ -41,7 +60,10 @@ export function useSystemUpdateProxy() {
   async function load() {
     loadingSelection.value = true
     try {
-      const [data] = await Promise.all([getSystemUpdateProxy(), loadProxies()])
+      const [data] = await Promise.all([
+        getSystemUpdateProxy(),
+        loadProxies(),
+      ])
       selectedProxyId.value = data.proxyId
     }
     catch {}
@@ -57,10 +79,16 @@ export function useSystemUpdateProxy() {
     try {
       const data = await updateSystemUpdateProxy({ proxyId })
       selectedProxyId.value = data.proxyId
-      ZNotification.success({ message: data.proxyId ? t('systemUpdate.downloadProxy.savedProxy') : t('systemUpdate.downloadProxy.savedDirect') })
+      ZNotification.success({
+        message: data.proxyId
+          ? t('systemUpdate.downloadProxy.savedProxy')
+          : t('systemUpdate.downloadProxy.savedDirect'),
+      })
     }
     catch (error: unknown) {
-      ZNotification.error({ message: errorMessage(error, t('systemUpdate.downloadProxy.saveFailed')) })
+      ZNotification.error({
+        message: errorMessage(error, t('systemUpdate.downloadProxy.saveFailed')),
+      })
     }
     finally {
       saving.value = false

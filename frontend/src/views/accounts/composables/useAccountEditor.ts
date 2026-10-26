@@ -29,7 +29,9 @@ export function useAccountEditor(options: {
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
   const apiKey = ref(emptyApiKeyAccountForm())
-  const configurationRequest = useRequestState(() => ZNotification.error({ message: t('accounts.editor.loadError') }))
+  const configurationRequest = useRequestState(() => ZNotification.error({
+    message: t('accounts.editor.loadError'),
+  }))
   const savedConfiguration = shallowRef<ApiKeyConfiguration>()
   const oauthTransport = shallowRef<ApiKeyConfiguration['transport'] | ''>('')
   const savedOAuthTransport = shallowRef<ApiKeyConfiguration['transport']>()
@@ -52,7 +54,10 @@ export function useAccountEditor(options: {
       const configuration = parseApiKeyConfiguration(detail.credentialConfiguration)
       if (!configuration)
         throw new Error(t('accounts.editor.apiKeyUnavailable'))
-      apiKey.value = { ...emptyApiKeyAccountForm(), ...configuration }
+      apiKey.value = {
+        ...emptyApiKeyAccountForm(),
+        ...configuration,
+      }
       savedConfiguration.value = configuration
     }
     catch (error) {
@@ -73,7 +78,10 @@ export function useAccountEditor(options: {
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
-    modelAccess.value = { ...account.modelAccess, models: [...account.modelAccess.models] }
+    modelAccess.value = {
+      ...account.modelAccess,
+      models: [...account.modelAccess.models],
+    }
     selectedGroupIds.value = account.groups.map(group => group.id)
     showEditModal.value = true
     if (isOpenAiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
@@ -86,7 +94,9 @@ export function useAccountEditor(options: {
       return
     const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
     const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
-    const configuration = isApiKey && configurationReady.value ? parseApiKeyConfiguration(apiKey.value) : undefined
+    const configuration = isApiKey && configurationReady.value
+      ? parseApiKeyConfiguration(apiKey.value)
+      : undefined
     if (isApiKey && !configuration)
       return
     if (isApiKey) {
@@ -103,7 +113,9 @@ export function useAccountEditor(options: {
     }
     const scheduling = parseAccountSchedulingForm(concurrencyLimit.value, weight.value)
     if (proxyMode.value === 'proxy' && !proxyId.value.trim()) {
-      ZNotification.warning({ message: t('accounts.batchEdit.proxyRequired') })
+      ZNotification.warning({
+        message: t('accounts.batchEdit.proxyRequired'),
+      })
       return
     }
     if (!scheduling.valid) {
@@ -116,12 +128,18 @@ export function useAccountEditor(options: {
         accountId,
         notes: notes.value,
         codexOnly: codexOnly.value,
-        outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
+        outboundProxyId: proxyMode.value === 'preserve'
+          ? undefined
+          : proxyMode.value === 'direct'
+            ? ''
+            : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
         weight: scheduling.values.weight,
         modelAccess: modelAccess.value,
-        groupIds: [...new Set(selectedGroupIds.value)],
+        groupIds: [
+          ...new Set(selectedGroupIds.value),
+        ],
       }
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
@@ -131,14 +149,23 @@ export function useAccountEditor(options: {
       await updateAccount({
         ...settings,
         connection: connectionChanged && configuration
-          ? { baseUrl: configuration.base_url.trim(), transport: configuration.transport, apiKey: apiKey.value.apiKey || undefined }
+          ? {
+              baseUrl: configuration.base_url.trim(),
+              transport: configuration.transport,
+              apiKey: apiKey.value.apiKey || undefined,
+            }
           : isOAuth && configurationReady.value && oauthTransport.value && oauthTransport.value !== savedOAuthTransport.value
             ? { transport: oauthTransport.value }
             : undefined,
       })
       showEditModal.value = false
-      ZNotification.success({ message: t('accounts.editor.saved') })
-      void Promise.allSettled([options.reloadAccounts(), options.reloadGroups()])
+      ZNotification.success({
+        message: t('accounts.editor.saved'),
+      })
+      void Promise.allSettled([
+        options.reloadAccounts(),
+        options.reloadGroups(),
+      ])
     })
   }
 
@@ -149,7 +176,10 @@ export function useAccountEditor(options: {
 
   function clearCredentials() {
     configurationRequest.invalidate()
-    apiKey.value = { ...emptyApiKeyAccountForm(), transport: '' }
+    apiKey.value = {
+      ...emptyApiKeyAccountForm(),
+      transport: '',
+    }
     savedConfiguration.value = undefined
     oauthTransport.value = ''
     savedOAuthTransport.value = undefined
