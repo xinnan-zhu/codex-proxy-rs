@@ -130,6 +130,7 @@ fn execution_scope_limits_apply_only_when_starting_a_model() {
                         stream: false,
                         client_ip: None,
                         user_agent: None,
+                        codex_client: None,
                         previous_response_id: None,
                     },
                     provider: None,
