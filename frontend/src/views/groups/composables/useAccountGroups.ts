@@ -30,7 +30,6 @@ export interface AccountGroupFormValue {
 
 export function useAccountGroups() {
   const searchQuery = shallowRef('')
-  const statusQuery = shallowRef('')
   const showFormModal = shallowRef(false)
   const showDeleteModal = shallowRef(false)
   const showBatchDeleteModal = shallowRef(false)
@@ -56,9 +55,6 @@ export function useAccountGroups() {
         page,
         pageSize,
         search: searchQuery.value.trim() || undefined,
-        enabled: statusQuery.value
-          ? statusQuery.value === 'enabled'
-          : undefined,
       }, options),
   })
 
@@ -308,9 +304,6 @@ export function useAccountGroups() {
     }, 250)
     onCleanup(() => clearTimeout(timer))
   })
-  watch(statusQuery, () => {
-    void query.reloadFromStart()
-  })
   onMounted(() => {
     void Promise.all([
       query.execute(),
@@ -323,7 +316,6 @@ export function useAccountGroups() {
     loading: query.loading,
     pagination,
     searchQuery,
-    statusQuery,
     showFormModal,
     showDeleteModal,
     showBatchDeleteModal,

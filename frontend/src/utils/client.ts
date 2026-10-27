@@ -21,6 +21,7 @@ service_tier = "default"
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = ${JSON.stringify(baseUrl)}
+model_catalog_url = ${JSON.stringify(`${baseUrl}/models`)}
 wire_api = "responses"
 supports_websockets = ${websocketEnabled}
 requires_openai_auth = false
