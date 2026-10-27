@@ -97,7 +97,7 @@ watch(timeRange, () => {
   <div class="@container w-full">
     <ZPageHeader class="justify-end" :title="t('navigation.usage')" :description="t('usage.page.description')">
       <template #actions>
-        <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[21rem]:flex-nowrap @min-[28rem]:w-auto">
+        <div class="flex w-[100cqw] max-w-[100cqw] flex-wrap items-center justify-end gap-2 @min-[28rem]:w-auto">
           <ZDatePicker
             v-model="timeRange"
             type="daterange"
@@ -106,7 +106,7 @@ watch(timeRange, () => {
             :disabled-date="disabledDate"
             single-panel
             :aria-label="t('usage.page.dateRangeLabel')"
-            class="min-w-0 flex-1 basis-full @min-[21rem]:basis-auto @min-[28rem]:w-60 @min-[28rem]:flex-none @max-[28rem]:[&>div]:gap-1.5 @max-[28rem]:[&>div]:px-2"
+            class="min-w-0 flex-1 basis-full @min-[28rem]:w-60 @min-[28rem]:flex-none @max-[28rem]:[&>div]:gap-1.5 @max-[28rem]:[&>div]:px-2"
           />
           <ZSelect
             v-model="modelQuery"
