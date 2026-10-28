@@ -137,7 +137,7 @@ fn scope_changes_recompute_defaults_and_inherit_only_explicit_overrides() {
         &profiles(&[("openai", "parent"), ("xai", "second")])
     );
     assert_eq!(parent_values.fast_mode, FastMode::Default);
-    let effective_parent = rebased.apply_policy(parent.clone());
+    let effective_parent = rebased.apply_policy(parent);
     let provider = ProviderKind::new("openai").unwrap();
     assert_eq!(
         effective_parent.account_scope().model_fast_modes().resolve(
