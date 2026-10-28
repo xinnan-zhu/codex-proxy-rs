@@ -211,6 +211,8 @@ jobs:
 
       - name: Validate and build frontend
         uses: ./.github/actions/build-frontend
+        with:
+          upload-artifact: 'true'
 
   workflow-lint:
     runs-on: ubuntu-26.04
