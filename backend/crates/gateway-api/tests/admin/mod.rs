@@ -1070,6 +1070,8 @@ impl ClientKeyStore for MemoryClientKeyStore {
         let now = Utc::now();
         Ok(Some(ClientKeySecret::new(
             ClientKeyRecord {
+                fast_mode_reset: None,
+                model_fast_modes: Default::default(),
                 request_profile_overrides: Default::default(),
                 budget: Default::default(),
                 id: id.clone(),

@@ -108,6 +108,8 @@ pub struct ClientKeyListQuery {
 /// 不含完整明文 Key 的管理投影
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientKeyRecord {
+    pub fast_mode_reset: Option<super::client_key_fast_reset::ClientKeyFastResetPlan>,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -121,6 +123,16 @@ pub struct ClientKeyRecord {
     pub last_used_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Key Fast 编辑使用的实际上游模型与当前目录能力
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientKeyFastModel {
+    pub provider: ProviderKind,
+    pub model: String,
+    pub label: String,
+    pub supports_priority: bool,
 }
 
 /// Client Key 列表页
@@ -167,6 +179,8 @@ impl fmt::Debug for ClientKeySecret {
 /// API 提交的 Client Key 创建命令
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateClientKey {
+    pub reset_fast_mode_on_quota_reset: bool,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub custom_key: Option<PlaintextClientApiKey>,
     pub name: String,
@@ -179,6 +193,8 @@ pub struct CreateClientKey {
 /// 管理用例生成 ID 与明文后的持久化命令
 #[derive(Clone, PartialEq, Eq)]
 pub struct NewClientKey {
+    pub fast_mode_reset: Option<super::client_key_fast_reset::ClientKeyFastResetPlan>,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -204,6 +220,12 @@ impl fmt::Debug for NewClientKey {
 /// 修改 Client Key 的公开策略字段
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateClientKey {
+    pub expected_fast_mode_reset:
+        Option<Option<super::client_key_fast_reset::ClientKeyFastResetPlan>>,
+    pub reset_fast_mode_on_quota_reset: Option<bool>,
+    pub fast_mode_reset_update:
+        Option<Option<super::client_key_fast_reset::ClientKeyFastResetPlan>>,
+    pub model_fast_modes: Option<gateway_core::account::ModelFastModes>,
     pub request_profile_override_updates: ProviderRequestProfileOverrideUpdates,
     pub id: ClientApiKeyId,
     pub name: String,

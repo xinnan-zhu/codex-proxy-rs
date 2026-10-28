@@ -17,6 +17,7 @@ use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 
 pub mod backup;
+mod client_key_fast_reset;
 pub mod freeze_recovery;
 pub mod model;
 pub mod ports;
@@ -501,7 +502,7 @@ async fn initialize_inner(
             PluginDistributionPorts::new(plugin_distribution, store.proxies()),
             snapshot.clone(),
             plugin_preparation,
-            published_snapshot,
+            published_snapshot.clone(),
             store.plugin_state(),
         )),
         key_usage,
@@ -522,6 +523,12 @@ async fn initialize_inner(
             store.client_keys(),
             snapshot.clone(),
             registry.clone(),
+            Some(published_snapshot),
+            Some(use_case::client_keys::fast_reset::FastResetSource {
+                accounts: store.accounts(),
+                runtime: store.account_runtime(),
+                providers: registry.clone(),
+            }),
         )),
         client_distribution: Arc::new(DefaultClientDistributionService::new(client_distribution)),
         observability: Arc::new(DefaultObservabilityService::new(
@@ -589,6 +596,37 @@ async fn initialize_inner(
         )
         .map_err(|_| AdminError::internal("重置卡 Worker 注册失败"))?,
     ));
+    let id = WorkerId::try_new(WorkerKind::ClientKeyFastReset, "admin")
+        .map_err(|_| AdminError::internal("Key Fast Worker ID 不合法"))?;
+    let schedule = WorkerSchedule::try_new(
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        Duration::from_secs(90),
+        Duration::from_secs(30),
+    )
+    .map_err(|_| AdminError::internal("Key Fast Worker 调度不合法"))?;
+    let lease = WorkerLeaseRequest::try_new(id.clone(), Duration::from_secs(90))
+        .map_err(|_| AdminError::internal("Key Fast Worker 租约不合法"))?;
+    worker_contributions.push(WorkerContribution::Registration(
+        WorkerRegistration::try_new(
+            id,
+            WorkerRunnable::Scheduled {
+                schedule,
+                lease: Some(lease),
+                task: Box::new(client_key_fast_reset::ClientKeyFastResetTask {
+                    source: use_case::client_keys::fast_reset::FastResetSource {
+                        accounts: store.accounts(),
+                        runtime: store.account_runtime(),
+                        providers: registry,
+                    },
+                    keys: store.client_keys(),
+                    snapshot,
+                }),
+            },
+        )
+        .map_err(|_| AdminError::internal("Key Fast Worker 注册失败"))?,
+    ));
     Ok(AdminBundle {
         services,
         worker_contributions,
@@ -613,8 +651,9 @@ pub fn initialize_plugin_client_keys(
     store: Arc<dyn ports::store::ClientKeyStore>,
     snapshot: Arc<dyn SnapshotControl>,
 ) -> Arc<dyn PluginClientKeyAccess> {
-    let service: Arc<dyn ClientKeyService> =
-        Arc::new(DefaultClientKeyService::new(store, snapshot, providers));
+    let service: Arc<dyn ClientKeyService> = Arc::new(DefaultClientKeyService::new(
+        store, snapshot, providers, None, None,
+    ));
     Arc::new(use_case::plugin_client_keys::DefaultPluginClientKeyAccess::new(service))
 }
 

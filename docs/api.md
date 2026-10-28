@@ -1367,7 +1367,9 @@ GET 和 POST 均返回 `enabled`、`leadMinutes`、`nextDiscoveryAtDisplay`、`n
 分组详情和列表返回 `fastMode`，取值为 `default`（默认）、`enabled`（开启）、`disabled`（关闭）。
 创建时省略默认为 `default`，更新时省略或 `null` 保留现值。
 策略取自 Client Key 绑定的分组，包括已禁用分组；多分组冲突时关闭优先，其次开启，最后默认。
-未绑定分组的 Key 跟随客户端，不按最终所选账号的分组判断
+未绑定分组且未配置模型覆盖的 Key 跟随客户端，不按最终所选账号的分组判断
+
+Client Key 的显式模型 Fast 设置优先于分组策略，未配置的模型继承此处分组规则，见 [Client Key](#7-client-key)
 
 - 默认：保留客户端的 `service_tier`
 - 开启：所选上游模型的目录声明 `priority` 时，将缺失、`null` 或显式 `default` 改为 `priority`；目录未声明则保留原值
@@ -1375,7 +1377,7 @@ GET 和 POST 均返回 `enabled`、`leadMinutes`、`nextDiscoveryAtDisplay`、`n
 
 策略只作用于 OpenAI Responses 的顶层 `service_tier`，不改变 `flex`、`ultrafast` 等其他显式档位、嵌套字段或其他 Provider。
 宿主策略在 request 中间件之后应用，形成 attempt 输入基线；attempt 中间件继续改写档位时，以改写后的实际发送值为准。
-HTTP 和每个 WebSocket `response.create` 均使用请求开始时的分组策略，同一请求重试保持该策略；
+HTTP 和每个 WebSocket `response.create` 均使用请求开始时冻结的 Key 模型规则与分组策略，同一请求重试保持该策略；
 HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造；复用 WS 时不重发握手头，
 每个 `response.create` 仍独立应用档位策略，请求档位统计与本地费用估算使用各帧的最终出站档位
 
@@ -1413,6 +1415,7 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | 方法 | 路由 | 主要 query/body | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/admin/client-keys` | `cursor`、`limit`、`search`、`sortBy`、`sortDirection` | 游标分页查询 |
+| `GET` | `/api/admin/client-keys/fast-models` | 无 | 返回当前 OpenAI 实际上游模型及 `supportsPriority`，不包含公开别名 |
 | `POST` | `/api/admin/client-keys/create` | 创建字段 | 创建带账号范围的 Client Key |
 | `GET` | `/api/admin/client-keys/reveal` | `id` | 显式读取完整明文 Key |
 | `POST` | `/api/admin/client-keys/update` | 更新字段 | 原子更新名称、分组范围和限额 |
@@ -1422,11 +1425,29 @@ HTTP 返回 `403` 和 `image_generation_disabled`，WebSocket 每个 `response.c
 | `POST` | `/api/admin/client-keys/delete` | `{ id }` | 删除 |
 
 创建字段为 `name`、可选 `label`、`groupIds`、`maxConcurrency`、`requestsPerMinute`、可选
-`dailyLimitUsd`、`weeklyLimitUsd`、`customKey` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
+`dailyLimitUsd`、`weeklyLimitUsd`、`customKey`、`modelFastModes`、`resetFastModeOnQuotaReset` 和 `providerRequestProfileOverrides`。更新请求携带 `id`，不接受 `customKey`。
 `groupIds` 必须显式提交：空数组派生 `routingScope: "all"`，非空数组派生
 `routingScope: "groups"`。响应同时返回分组引用 `groups`，以及从当前有效账号池派生、仅供展示的
 `providerKinds`。创建和 reveal 响应会返回完整明文 Key，调用方
 必须立即安全保存
+
+`modelFastModes` 是按 Provider ID、实际上游模型 ID 两层精确索引的 Fast 设置，列表返回同名对象，例如
+`{"openai":{"gpt-5.5":"enabled","gpt-5.4":"disabled"}}`。取值为 `enabled`、`disabled` 或 `default`，
+`default` 与未配置均表示继承分组策略，保存时不保留该项；显式开启或关闭覆盖分组设置。
+创建时省略默认为 `{}`，更新时省略或 `null` 保留现值，提交对象则整体替换，`{}` 清除全部模型覆盖。
+最多保存 256 项，模型 ID 为不含通配符、控制字符及首尾空白的精确文本，最多 256 字节。
+匹配使用路由解析后的实际 Provider 与上游模型，公开别名和全局模型映射共用目标模型设置，不影响其他 Key 或 Provider 的同名模型。
+目前仅 OpenAI Responses 执行此策略，开启仍须模型目录声明 `priority`，其他显式档位保持原值；协议边界见 [账号分组](#6-账号分组)。
+插件显式覆盖请求 Fast 设置时覆盖该请求的整个 Key 默认策略，attempt 中间件仍可修改最终出站档位
+
+`GET /api/admin/client-keys/fast-models` 返回 `[{ provider, model, label, supportsPriority }]`，仅包含当前发布目录中的
+OpenAI 实际上游模型。`supportsPriority=false` 表示目录没有声明 Fast 能力，开启策略不会自动升为 `priority`；已保存但暂未出现在目录中的规则仍保留
+
+`resetFastModeOnQuotaReset` 默认 `false`，更新省略或 `null` 保留原设置。启用时使用 Key 范围内当前可用 OpenAI 账号的有效周/月额度观测，持久化最早未来重置时间与确认基线；缺少有效重置时间或没有单独启用的 Fast 模型时拒绝开启。只消费已有本地额度缓存，不为推理请求额外访问上游。到期或新额度观测确认提前重置时，一次性清除 `enabled` 模型规则，保留 `disabled`，未配置模型继续继承分组，分组开启时仍可能使用 Fast。
+
+提前重置确认要求同账号、同凭证版本、同周/月窗口的严格更新观测，重置边界推进同时伴随实际下降到低用量，或同边界连续两次确认用量从正值归零。单次用量波动、短期限流与单独的重置卡成功状态不触发；上游强制重置和主动重置卡在现有额度刷新取得这些新证据后识别。凭证刷新只重建该账号基线。账号离开当前 Key 范围后，其观测不再触发提前恢复。
+
+列表返回 `resetFastModeOnQuotaReset`、`fastModeResetsAt`、`fastModeResetsAtDisplay` 和 `fastModeResetCompleted`，确认基线不出现在 API 中。计划、已恢复状态与确认进度跨重启保留。普通编辑不延长计划，新增单独启用规则或修改 Key 分组范围会重新计划；关闭最后一条单独启用规则会完成计划。到期后列表显示有效继承规则，新调用冻结恢复结果，同次重试不重新判断时钟；下一次 WebSocket `response.create` 读取当前快照。
 
 `providerRequestProfileOverrides` 按 Provider ID 保存身份选择，列表返回同名对象。创建时各项为完整配置对象，
 未提供的 Provider 跟随通用设置；更新时省略某项保留原值，设为 `null` 清除该项覆盖。最多 256 项，每项最多 64 KiB。

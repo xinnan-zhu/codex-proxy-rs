@@ -99,6 +99,8 @@ impl Environment {
             .client_keys()
             .create_client_key(
                 NewClientKey {
+                    fast_mode_reset: None,
+                    model_fast_modes: Default::default(),
                     request_profile_overrides: BTreeMap::new(),
                     id: ClientApiKeyId::new(id).unwrap(),
                     name: format!("fixture {id}"),

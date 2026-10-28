@@ -83,6 +83,8 @@ impl PluginResourceAccess for DefaultPluginResourceAccess {
                     resource_key,
                     groups,
                     NewClientKey {
+                        fast_mode_reset: None,
+                        model_fast_modes: Default::default(),
                         id,
                         name: command.name,
                         label: None,

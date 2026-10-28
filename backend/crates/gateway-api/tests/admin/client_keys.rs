@@ -434,6 +434,8 @@ fn client_key_responses_should_keep_shape_and_redact_creation_debug() {
         .expect("valid time");
     let view = ClientKeyView::from((
         gateway_admin::model::client_keys::ClientKeyRecord {
+            fast_mode_reset: None,
+            model_fast_modes: Default::default(),
             request_profile_overrides: Default::default(),
             budget: Default::default(),
             id: gateway_core::policy::ClientApiKeyId::new("key_visible").expect("Client Key ID"),
@@ -689,5 +691,93 @@ fn generic_profile_override_clear_rejects_conflicting_legacy_update() {
     assert_eq!(
         request.into_command().unwrap_err().field(),
         "providerRequestProfileOverrides"
+    );
+}
+
+#[test]
+fn model_fast_modes_preserve_omitted_updates_and_accept_explicit_clear() {
+    let base =
+        json!({"name":"model rules", "groupIds":[], "maxConcurrency":0, "requestsPerMinute":0});
+    let mut create = base.clone();
+    create["modelFastModes"] = json!({"openai":{"model-a":"enabled"}});
+    let command = serde_json::from_value::<CreateClientKeyRequest>(create)
+        .unwrap()
+        .into_command()
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(command.model_fast_modes).unwrap(),
+        json!({"openai":{"model-a":"enabled"}})
+    );
+    let mut update = base;
+    update["id"] = json!("key_fast");
+    let command = serde_json::from_value::<UpdateClientKeyRequest>(update.clone())
+        .unwrap()
+        .into_command()
+        .unwrap();
+    assert!(command.model_fast_modes.is_none());
+    update["modelFastModes"] = json!(null);
+    assert!(
+        serde_json::from_value::<UpdateClientKeyRequest>(update.clone())
+            .unwrap()
+            .into_command()
+            .unwrap()
+            .model_fast_modes
+            .is_none()
+    );
+    update["modelFastModes"] = json!({});
+    assert_eq!(
+        serde_json::to_value(
+            serde_json::from_value::<UpdateClientKeyRequest>(update.clone())
+                .unwrap()
+                .into_command()
+                .unwrap()
+                .model_fast_modes
+                .unwrap()
+        )
+        .unwrap(),
+        json!({})
+    );
+    update["modelFastModes"] = json!({"openai":{"model-a":"invalid"}});
+    assert!(serde_json::from_value::<UpdateClientKeyRequest>(update).is_err());
+}
+
+#[test]
+fn fast_reset_option_defaults_off_and_update_omission_preserves_policy() {
+    let mut value =
+        json!({"name":"quota reset", "groupIds":[], "maxConcurrency":0, "requestsPerMinute":0});
+    assert!(
+        !serde_json::from_value::<CreateClientKeyRequest>(value.clone())
+            .unwrap()
+            .into_command()
+            .unwrap()
+            .reset_fast_mode_on_quota_reset
+    );
+    value["resetFastModeOnQuotaReset"] = json!(true);
+    assert!(
+        serde_json::from_value::<CreateClientKeyRequest>(value.clone())
+            .unwrap()
+            .into_command()
+            .unwrap()
+            .reset_fast_mode_on_quota_reset
+    );
+    value["id"] = json!("key_reset_option");
+    value
+        .as_object_mut()
+        .unwrap()
+        .remove("resetFastModeOnQuotaReset");
+    let omitted = serde_json::from_value::<UpdateClientKeyRequest>(value.clone())
+        .unwrap()
+        .into_command()
+        .unwrap();
+    assert!(omitted.reset_fast_mode_on_quota_reset.is_none());
+    assert!(omitted.fast_mode_reset_update.is_none());
+    value["resetFastModeOnQuotaReset"] = json!(false);
+    assert_eq!(
+        serde_json::from_value::<UpdateClientKeyRequest>(value)
+            .unwrap()
+            .into_command()
+            .unwrap()
+            .reset_fast_mode_on_quota_reset,
+        Some(false)
     );
 }

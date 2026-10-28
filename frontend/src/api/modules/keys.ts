@@ -3,10 +3,25 @@ import type { AccountGroupRef } from './groups'
 import type { ClientProfileSelection, ProviderRequestProfile, ProviderRequestProfiles, XaiClientProfileSelection } from './settings/profiles'
 import request from '../request'
 
+export type ModelFastMode = 'default' | 'enabled' | 'disabled'
+export type ModelFastModes = Record<string, Record<string, ModelFastMode>>
+
+export interface ApiKeyFastModel {
+  provider: string
+  model: string
+  label: string
+  supportsPriority: boolean
+}
+
 export type ApiKeyRoutingScope = 'all' | 'groups'
 export type ApiKeyBudgetPeriod = 'daily' | 'weekly' | 'all'
 
 export interface ApiKey {
+  resetFastModeOnQuotaReset: boolean
+  fastModeResetsAt: string | null
+  fastModeResetsAtDisplay: string | null
+  fastModeResetCompleted: boolean
+  modelFastModes: ModelFastModes
   providerRequestProfileOverrides: ProviderRequestProfiles
   openaiClientProfileOverride: ClientProfileSelection | null
   xaiClientProfileOverride: XaiClientProfileSelection | null
@@ -69,6 +84,8 @@ interface ApiKeyListParams {
 }
 
 export interface ApiKeyWriteParam {
+  resetFastModeOnQuotaReset?: boolean
+  modelFastModes?: ModelFastModes
   name: string
   label: string | null
   groupIds: string[]
@@ -94,6 +111,14 @@ interface ApiKeyIdParam {
 
 interface ApiKeyResetBudgetParam extends ApiKeyIdParam {
   period: ApiKeyBudgetPeriod
+}
+
+export function getApiKeyFastModels(options: RequestOptions = {}) {
+  return request<ApiKeyFastModel[]>({
+    url: '/api/admin/client-keys/fast-models',
+    method: 'GET',
+    ...options,
+  })
 }
 
 export function getApiKeys(data: ApiKeyListParams, options: RequestOptions = {}) {

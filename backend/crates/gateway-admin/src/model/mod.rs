@@ -9,6 +9,7 @@ pub mod audit;
 pub mod auth;
 pub mod backup;
 pub mod client_distribution;
+pub mod client_key_fast_reset;
 pub mod client_keys;
 pub mod diagnostics;
 pub mod import_tasks;

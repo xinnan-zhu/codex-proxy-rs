@@ -335,6 +335,26 @@ pub trait AuthStore: Send + Sync {
 /// Client API Key 资料读取与管理写入
 #[async_trait]
 pub trait ClientKeyStore: Send + Sync {
+    /// 原子标记本轮已领取，失败记录也移到队尾，避免长期阻塞后续计划
+    async fn pending_fast_mode_resets(
+        &self,
+        _limit: u16,
+    ) -> AdminStoreResult<Vec<ClientKeyRecord>> {
+        Ok(Vec::new())
+    }
+
+    /// 完整旧计划 CAS，运行态确认不推进配置版本，恢复策略与审计同事务
+    async fn advance_fast_mode_reset(
+        &self,
+        _id: &gateway_core::policy::ClientApiKeyId,
+        _expected: &crate::model::client_key_fast_reset::ClientKeyFastResetPlan,
+        _next: &crate::model::client_key_fast_reset::ClientKeyFastResetPlan,
+        _restore: bool,
+        _context: &MutationContext,
+    ) -> AdminStoreResult<Option<Revision>> {
+        Ok(None)
+    }
+
     /// 按已验证的 ID 读取资料，不读取完整明文 Key
     async fn get_client_key(
         &self,

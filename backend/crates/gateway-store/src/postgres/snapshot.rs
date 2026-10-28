@@ -147,6 +147,8 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                     )
                     .with_name_snapshot(key.name_snapshot)
                     .with_request_profiles(key.request_profiles)
+                    .with_model_fast_modes(key.model_fast_modes)
+                    .with_model_fast_reset_at(key.model_fast_reset_at)
                 })
                 .collect();
             let account_groups = data
@@ -306,12 +308,14 @@ async fn load_client_keys(
             i64,
             sqlx::types::Json<BTreeMap<String, serde_json::Map<String, serde_json::Value>>>,
             String,
+            sqlx::types::Json<gateway_core::account::ModelFastModes>,
+            Option<sqlx::types::Json<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>>,
         ),
     >(
         "select k.id, k.key,
                 coalesce(array_agg(kg.account_group_id order by kg.account_group_id)
                   filter (where kg.account_group_id is not null), '{}') as group_ids,
-                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name
+                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.model_fast_modes_json, k.fast_mode_reset_json
          from client_api_keys k
          left join client_api_key_groups kg on kg.client_api_key_id = k.id
          where k.enabled
@@ -326,6 +330,14 @@ async fn load_client_keys(
             let mut key = ClientApiKeySnapshot::from_persisted(row.0, row.1, row.2, row.3, row.4)?;
             key.request_profiles = decode_request_profiles(row.5.0)?;
             key.name_snapshot = Some(row.6);
+            key.model_fast_modes = row.7.0;
+            if let Some(plan) = row.8 {
+                if plan.completed_at.is_some() {
+                    key.model_fast_modes = key.model_fast_modes.without_enabled();
+                } else {
+                    key.model_fast_reset_at = Some(plan.deadline.into());
+                }
+            }
             Ok(key)
         })
         .collect()

@@ -1769,3 +1769,180 @@ fn key_profiles_replace_whole_global_choice_and_previous_snapshot_stays_frozen()
     assert_eq!(values(&previous), ["global-a", "override"]);
     assert_eq!(values(&build("global-b", false)), ["global-b", "global-b"]);
 }
+
+#[test]
+fn key_model_fast_rules_override_groups_resolve_alias_targets_and_remain_frozen() {
+    use gateway_core::{account::ProviderAccountId, routing::AccountGroupId};
+    let group = AccountGroupId::new("grp_00000000000000000000000000000001").unwrap();
+    let account = ProviderAccountId::new("acct_model_fast").unwrap();
+    let build = |mode, key_mode: &str, version| {
+        let rules = serde_json::from_value(
+            serde_json::json!({"openai":{"shared-model":key_mode,"alias":"disabled"}}),
+        )
+        .unwrap();
+        let facts = SnapshotFacts::new(
+            revision(version),
+            revision(version),
+            super::settings()
+                .with_model_mappings(BTreeMap::from([("alias".into(), "shared-model".into())])),
+            vec![
+                SnapshotClientPolicyFacts::new(
+                    ClientApiKeyId::new("key_model_fast").unwrap(),
+                    PlaintextClientApiKey::new("synthetic-model-fast").unwrap(),
+                    vec![group.clone()],
+                    RateLimits::unlimited(),
+                )
+                .with_model_fast_modes(rules),
+                SnapshotClientPolicyFacts::new(
+                    ClientApiKeyId::new("key_inherited").unwrap(),
+                    PlaintextClientApiKey::new("synthetic-inherited-fast").unwrap(),
+                    vec![group.clone()],
+                    RateLimits::unlimited(),
+                ),
+            ],
+            vec![
+                SnapshotAccountGroupFacts::new(group.clone(), "Model fast".into(), true)
+                    .with_fast_mode(mode),
+            ],
+            vec![
+                SnapshotProviderAccountFacts::new(account.clone(), "openai"),
+                SnapshotProviderAccountFacts::new(
+                    ProviderAccountId::new("acct_xai_fast").unwrap(),
+                    "xai",
+                ),
+            ],
+            vec![
+                SnapshotAccountGroupMemberFacts::new(group.clone(), account.clone()),
+                SnapshotAccountGroupMemberFacts::new(
+                    group.clone(),
+                    ProviderAccountId::new("acct_xai_fast").unwrap(),
+                ),
+            ],
+        );
+        block_on(
+            RuntimeSnapshotCompiler::new(
+                Arc::new(TestSnapshotStore::new(Ok(facts))),
+                Arc::new(MixedCatalog {
+                    xai_available: true,
+                }),
+            )
+            .compile(),
+        )
+        .unwrap()
+    };
+    let make_plan =
+        |snapshot: &gateway_core::routing::RuntimeSnapshot, key: &str, requested: &str| {
+            let scope = snapshot
+                .client_policies()
+                .find(|policy| policy.key_id().as_str() == key)
+                .unwrap()
+                .account_scope()
+                .clone();
+            snapshot
+                .plan(
+                    &PublicModelId::new(requested).unwrap(),
+                    &super::operation(),
+                    scope,
+                    &Default::default(),
+                )
+                .unwrap()
+        };
+    for (group_mode, rule, expected) in [
+        (FastMode::Disabled, "enabled", FastMode::Enabled),
+        (FastMode::Enabled, "disabled", FastMode::Disabled),
+    ] {
+        let snapshot = build(group_mode, rule, 1);
+        for requested in ["shared-model", "alias"] {
+            let plan = make_plan(&snapshot, "key_model_fast", requested);
+            assert_eq!(plan.fast_mode(), group_mode);
+            assert_eq!(plan.candidates().len(), 2);
+            for candidate in plan.candidates() {
+                assert_eq!(candidate.upstream_model().unwrap().as_str(), "shared-model");
+                assert_eq!(
+                    plan.fast_mode_for(candidate),
+                    if candidate.provider().as_str() == "openai" {
+                        expected
+                    } else {
+                        group_mode
+                    }
+                );
+            }
+            let inherited = make_plan(&snapshot, "key_inherited", requested);
+            assert!(
+                inherited
+                    .candidates()
+                    .iter()
+                    .all(|candidate| inherited.fast_mode_for(candidate) == group_mode)
+            );
+        }
+        let absent = make_plan(&snapshot, "key_model_fast", "gpt-5.5");
+        assert_eq!(absent.fast_mode_for(&absent.candidates()[0]), group_mode);
+    }
+    let handle =
+        gateway_core::runtime::RuntimeSnapshotHandle::new(build(FastMode::Disabled, "enabled", 1));
+    let old_plan = make_plan(&handle.acquire().unwrap(), "key_model_fast", "alias");
+    handle.publish(build(FastMode::Disabled, "disabled", 2));
+    let new_plan = make_plan(&handle.acquire().unwrap(), "key_model_fast", "alias");
+    let openai = |plan: &gateway_core::routing::RoutingPlan| {
+        plan.candidates()
+            .iter()
+            .position(|candidate| candidate.provider().as_str() == "openai")
+            .unwrap()
+    };
+    // 同一请求重试复用旧计划，持续 WS 下一轮取得发布后的新计划
+    assert_eq!(
+        old_plan.fast_mode_for(&old_plan.candidates()[openai(&old_plan)]),
+        FastMode::Enabled
+    );
+    assert_eq!(
+        new_plan.fast_mode_for(&new_plan.candidates()[openai(&new_plan)]),
+        FastMode::Disabled
+    );
+}
+
+#[test]
+fn upstream_catalog_keeps_priority_evidence_without_public_aliases() {
+    use gateway_core::routing::{ModelServiceTier, RuntimeSnapshot};
+    let openai = ProviderKind::new("openai").unwrap();
+    let snapshot = RuntimeSnapshot::new(
+        revision(1),
+        super::settings()
+            .with_model_mappings(BTreeMap::from([("alias".into(), "fast-model".into())])),
+        vec![openai.clone()],
+        vec![
+            super::model("openai", "fast-model", super::capabilities()).with_presentation(
+                ModelPresentation::new(Some("Fast model".into()), None)
+                    .with_service_tiers(vec![ModelServiceTier::new("priority", "Fast", "")]),
+            ),
+            super::model("openai", "no-presentation", super::capabilities()),
+        ],
+        vec![],
+    )
+    .unwrap();
+    let profiles = snapshot.upstream_model_profiles_for_provider(&openai);
+    assert_eq!(
+        profiles
+            .iter()
+            .map(|profile| profile.model().as_str())
+            .collect::<Vec<_>>(),
+        vec!["fast-model", "no-presentation"]
+    );
+    assert_eq!(
+        profiles[0].presentation().display_name(),
+        Some("Fast model")
+    );
+    assert!(
+        profiles[0]
+            .presentation()
+            .service_tiers()
+            .iter()
+            .any(|tier| tier.id() == "priority")
+    );
+    assert!(profiles[1].presentation().service_tiers().is_empty());
+    assert!(
+        snapshot
+            .public_models_for_provider(&openai)
+            .iter()
+            .any(|id| id.as_str() == "alias")
+    );
+}

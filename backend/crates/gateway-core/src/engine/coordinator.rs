@@ -1156,7 +1156,7 @@ where
                 .with_lease_metadata(Arc::clone(&self.lease_metadata))
                 .with_response_control(self.response_control.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
-                .with_fast_mode(self.plan.fast_mode())
+                .with_fast_mode(self.plan.fast_mode_for(&candidate))
                 .with_pricing(self.plan.pricing())
                 .with_request_location(self.plan.request_location().cloned())
                 .with_codex_client(self.codex_client)

@@ -3,6 +3,7 @@
 mod account_groups;
 mod audit;
 mod backup;
+mod client_key_fast_reset;
 mod client_keys;
 mod observability;
 mod plugins;

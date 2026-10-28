@@ -25,6 +25,8 @@ use gateway_admin::{
 
 #[derive(Default)]
 struct TestClientKeyStore {
+    record: Mutex<Option<ClientKeyRecord>>,
+    updates: Mutex<Vec<UpdateClientKey>>,
     plaintexts: Mutex<Vec<String>>,
     list_queries: Mutex<Vec<ClientKeyListQuery>>,
     list_response: Mutex<Option<ClientKeyPage>>,
@@ -56,9 +58,28 @@ impl ClientKeyStore for TestClientKeyStore {
 
     async fn get_client_key(
         &self,
-        _: &ClientApiKeyId,
+        id: &ClientApiKeyId,
     ) -> AdminStoreResult<Option<ClientKeyRecord>> {
-        Err(unused())
+        if let Some(record) = self.record.lock().unwrap().clone() {
+            return Ok(Some(record));
+        }
+        Ok(Some(ClientKeyRecord {
+            fast_mode_reset: None,
+            model_fast_modes: Default::default(),
+            request_profile_overrides: Default::default(),
+            id: id.clone(),
+            name: "existing".into(),
+            label: None,
+            groups: vec![],
+            provider_kinds: vec![],
+            prefix: String::new(),
+            enabled: true,
+            limits: RateLimits::unlimited(),
+            budget: Default::default(),
+            last_used_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }))
     }
 
     async fn list_client_keys(&self, query: ClientKeyListQuery) -> AdminStoreResult<ClientKeyPage> {
@@ -96,6 +117,8 @@ impl ClientKeyStore for TestClientKeyStore {
         }
         self.plaintexts.lock().unwrap().push(key.plaintext);
         let record = ClientKeyRecord {
+            fast_mode_reset: None,
+            model_fast_modes: Default::default(),
             request_profile_overrides: Default::default(),
             id: key.id,
             name: key.name,
@@ -115,7 +138,7 @@ impl ClientKeyStore for TestClientKeyStore {
 
     async fn update_client_key(
         &self,
-        _: UpdateClientKey,
+        command: UpdateClientKey,
         _: &MutationContext,
     ) -> AdminStoreResult<(Revision, ClientKeyRecord)> {
         if let Some(kind) = self.update_error {
@@ -124,6 +147,16 @@ impl ClientKeyStore for TestClientKeyStore {
                 "client key",
                 "test update failure",
             ));
+        }
+        self.updates.lock().unwrap().push(command.clone());
+        if let Some(record) = self.record.lock().unwrap().as_mut() {
+            if let Some(modes) = command.model_fast_modes {
+                record.model_fast_modes = modes;
+            }
+            if let Some(plan) = command.fast_mode_reset_update {
+                record.fast_mode_reset = plan;
+            }
+            return Ok((Revision::new(3).unwrap(), record.clone()));
         }
         Err(unused())
     }
@@ -234,6 +267,8 @@ async fn plugin_client_key_list_projects_only_public_identity_and_uses_stable_na
         list_response: Mutex::new(Some(ClientKeyPage {
             config_revision: Revision::new(7).expect("revision"),
             items: vec![ClientKeyRecord {
+                fast_mode_reset: None,
+                model_fast_modes: Default::default(),
                 request_profile_overrides: Default::default(),
                 id: key_id.clone(),
                 name: "Public identity".to_owned(),
@@ -370,6 +405,10 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
         .update(
             &mutation_context(),
             UpdateClientKey {
+                expected_fast_mode_reset: None,
+                reset_fast_mode_on_quota_reset: None,
+                fast_mode_reset_update: None,
+                model_fast_modes: None,
                 request_profile_override_updates: Default::default(),
                 id: ClientApiKeyId::new("key_existing").unwrap(),
                 name: "Migration".to_owned(),
@@ -390,6 +429,8 @@ async fn duplicate_names_report_the_same_actionable_conflict_on_create_and_updat
 
 fn create_command(key: Option<&str>) -> CreateClientKey {
     CreateClientKey {
+        reset_fast_mode_on_quota_reset: false,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         custom_key: key.map(|value| PlaintextClientApiKey::new(value).unwrap()),
         name: "Migration".to_owned(),
@@ -436,6 +477,10 @@ async fn duplicate_group_ids_are_rejected_before_key_creation_or_update() {
         .update(
             &mutation_context(),
             UpdateClientKey {
+                expected_fast_mode_reset: None,
+                reset_fast_mode_on_quota_reset: None,
+                fast_mode_reset_update: None,
+                model_fast_modes: None,
                 request_profile_override_updates: Default::default(),
                 id: ClientApiKeyId::new("key_existing").unwrap(),
                 name: "Migration".to_owned(),
@@ -451,4 +496,99 @@ async fn duplicate_group_ids_are_rejected_before_key_creation_or_update() {
     assert_eq!(created.kind(), AdminErrorKind::Invalid);
     assert_eq!(updated.kind(), AdminErrorKind::Invalid);
     assert!(store.plaintexts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn fast_reset_edits_preserve_schedule_cancel_expired_rules_and_complete_when_last_enable_removed()
+ {
+    use gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan;
+    let store = Arc::new(TestClientKeyStore::default());
+    let id = ClientApiKeyId::new("key_reset_edits").unwrap();
+    let mut record = store.get_client_key(&id).await.unwrap().unwrap();
+    let now = Utc::now();
+    let plan = ClientKeyFastResetPlan {
+        generation: "edit-plan".into(),
+        armed_at: now,
+        deadline: now + chrono::Duration::hours(1),
+        checked_at: now,
+        completed_at: None,
+        baselines: vec![],
+    };
+    record.model_fast_modes =
+        serde_json::from_value(serde_json::json!({"openai":{"a":"enabled","b":"disabled"}}))
+            .unwrap();
+    record.fast_mode_reset = Some(plan.clone());
+    *store.record.lock().unwrap() = Some(record.clone());
+    let services = super::AdminHarness::new()
+        .client_keys(store.clone())
+        .build()
+        .await;
+    let update = || UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes: None,
+        request_profile_override_updates: Default::default(),
+        id: id.clone(),
+        name: "changed name".into(),
+        label: None,
+        group_ids: vec![],
+        limits: RateLimits::unlimited(),
+        daily_limit_usd: None,
+        weekly_limit_usd: None,
+    };
+    services
+        .client_keys()
+        .update(&mutation_context(), update())
+        .await
+        .unwrap();
+    let sent = store.updates.lock().unwrap().last().unwrap().clone();
+    assert!(sent.fast_mode_reset_update.is_none());
+    assert_eq!(
+        store
+            .record
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .fast_mode_reset,
+        Some(plan.clone())
+    );
+    let mut expired = plan.clone();
+    expired.deadline = now - chrono::Duration::seconds(1);
+    store
+        .record
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .fast_mode_reset = Some(expired);
+    let mut cancel = update();
+    cancel.reset_fast_mode_on_quota_reset = Some(false);
+    services
+        .client_keys()
+        .update(&mutation_context(), cancel)
+        .await
+        .unwrap();
+    let sent = store.updates.lock().unwrap().last().unwrap().clone();
+    assert_eq!(sent.fast_mode_reset_update, Some(None));
+    assert_eq!(
+        serde_json::to_value(sent.model_fast_modes.unwrap()).unwrap(),
+        serde_json::json!({"openai":{"b":"disabled"}})
+    );
+    *store.record.lock().unwrap() = Some(record);
+    let mut disable_last = update();
+    disable_last.model_fast_modes = Some(
+        serde_json::from_value(serde_json::json!({"openai":{"a":"disabled","b":"disabled"}}))
+            .unwrap(),
+    );
+    services
+        .client_keys()
+        .update(&mutation_context(), disable_last)
+        .await
+        .unwrap();
+    let sent = store.updates.lock().unwrap().last().unwrap().clone();
+    let completed = sent.fast_mode_reset_update.unwrap().unwrap();
+    assert_eq!(completed.deadline, plan.deadline);
+    assert!(completed.completed_at.is_some());
 }

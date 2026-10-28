@@ -2,7 +2,9 @@
 
 mod error;
 mod fast_mode;
+mod model_fast_modes;
 pub use fast_mode::FastMode;
+pub use model_fast_modes::{InvalidModelFastModes, ModelFastModes};
 mod location;
 pub use location::{InvalidRequestLocation, RequestLocation};
 mod model;

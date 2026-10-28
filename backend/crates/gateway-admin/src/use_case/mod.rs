@@ -32,4 +32,4 @@ use credential_mutation::{
     validate_prepared_rotation_facts,
 };
 use error::{map_provider_error, map_store_error};
-use publication::publish_committed;
+pub(crate) use publication::publish_committed;

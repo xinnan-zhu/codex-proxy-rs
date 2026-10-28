@@ -53,6 +53,8 @@ const CLIENT_API_KEY_LAST_USED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeySnapshot {
+    pub model_fast_reset_at: Option<std::time::SystemTime>,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub name_snapshot: Option<String>,
     pub request_profiles: std::collections::BTreeMap<
         gateway_core::routing::ProviderKind,
@@ -74,6 +76,8 @@ impl ClientApiKeySnapshot {
     ) -> StoreResult<Self> {
         Ok(Self {
             name_snapshot: None,
+            model_fast_reset_at: None,
+            model_fast_modes: Default::default(),
             request_profiles: std::collections::BTreeMap::new(),
             id: ClientApiKeyId::new(id)
                 .map_err(|source| invalid("persisted key ID is invalid").with_source(source))?,
@@ -118,6 +122,9 @@ impl fmt::Debug for ClientApiKeySecret {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientApiKeyRecord {
+    pub fast_mode_reset:
+        Option<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
     pub name: String,
@@ -279,6 +286,9 @@ pub struct ClientApiKeyPage {
 
 #[derive(Clone)]
 pub struct NewClientApiKey {
+    pub fast_mode_reset:
+        Option<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>,
+    pub model_fast_modes: gateway_core::account::ModelFastModes,
     pub request_profile_overrides: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub id: String,
     pub name: String,
@@ -313,6 +323,11 @@ impl NewClientApiKey {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateClientApiKeyDetails {
+    pub expected_fast_mode_reset:
+        Option<Option<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>>,
+    pub fast_mode_reset_update:
+        Option<Option<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>>,
+    pub model_fast_modes: Option<gateway_core::account::ModelFastModes>,
     pub request_profile_override_updates: BTreeMap<ProviderKind, Option<OpaqueProviderData>>,
     pub id: String,
     pub name: String,
@@ -378,7 +393,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         query.validate()?;
         let total = count_client_api_keys(&self.pool, query.search.as_deref()).await?;
         let mut statement = QueryBuilder::<Postgres>::new(
-            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides, k.model_fast_modes_json, k.fast_mode_reset_json,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, '[]'::jsonb as groups, '{}'::text[] as provider_kinds
@@ -438,7 +453,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
     async fn get_client_api_key(&self, id: &str) -> StoreResult<Option<ClientApiKeyRecord>> {
         require_nonempty(ENTITY, "id", id)?;
         let record = sqlx::query(
-            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides,
+            "select k.id, k.name, k.label, k.provider_request_profiles_json as request_profile_overrides, k.model_fast_modes_json, k.fast_mode_reset_json,
                     left(k.key, least(10, length(k.key) / 2)) as prefix, k.enabled,
                     k.max_concurrency, k.requests_per_minute, k.last_used_at, k.created_at,
                     k.updated_at, coalesce(groups.groups, '[]'::jsonb) as groups,
@@ -722,6 +737,112 @@ impl PgAdminClientKeyStore {
 
 #[async_trait]
 impl ClientKeyStore for PgAdminClientKeyStore {
+    async fn pending_fast_mode_resets(
+        &self,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<AdminClientKeyRecord>> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "with batch as (
+                select id from client_api_keys where fast_mode_reset_json is not null
+                and fast_mode_reset_json->>'completedAt' is null
+                order by fast_mode_reset_json->>'checkedAt', id limit $1 for update skip locked
+             ) update client_api_keys k set fast_mode_reset_json = jsonb_set(
+                k.fast_mode_reset_json, '{checkedAt}', to_jsonb(clock_timestamp()))
+             from batch where k.id=batch.id returning k.id",
+        )
+        .bind(i64::from(limit))
+        .fetch_all(&self.keys.pool)
+        .await
+        .map_err(|source| {
+            admin_store_error(
+                ENTITY,
+                postgres_unavailable("read Fast reset plans", source),
+            )
+        })?;
+        let mut records = Vec::with_capacity(ids.len());
+        for id in ids {
+            let id = ClientApiKeyId::new(id).map_err(|source| {
+                admin_store_error(ENTITY, invalid("invalid reset key").with_source(source))
+            })?;
+            if let Some(record) = self.get_client_key(&id).await? {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    async fn advance_fast_mode_reset(
+        &self,
+        id: &ClientApiKeyId,
+        expected: &gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan,
+        next: &gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan,
+        restore: bool,
+        context: &MutationContext,
+    ) -> AdminStoreResult<Option<gateway_admin::model::Revision>> {
+        let map_error = |error| admin_store_error(ENTITY, error);
+        let mut tx =
+            self.keys.pool.begin().await.map_err(|source| {
+                map_error(postgres_unavailable("begin Fast restoration", source))
+            })?;
+        // 与管理员完整编辑维持相同锁顺序；旧 Worker 不能覆盖取消或重新启用
+        sqlx::query("select config_revision from runtime_settings where id=1 for update")
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| {
+                map_error(postgres_unavailable(
+                    "lock Fast restoration revision",
+                    source,
+                ))
+            })?;
+        let current: Option<(Option<sqlx::types::Json<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>>, sqlx::types::Json<gateway_core::account::ModelFastModes>)> =
+            sqlx::query_as("select fast_mode_reset_json, model_fast_modes_json from client_api_keys where id=$1 for update")
+                .bind(id.as_str()).fetch_optional(&mut *tx).await
+                .map_err(|source| map_error(postgres_unavailable("lock Fast restoration key", source)))?;
+        let Some((Some(current), modes)) = current else {
+            return Ok(None);
+        };
+        if current.0 != *expected || expected.completed_at.is_some() {
+            return Ok(None);
+        }
+        let effective = if restore {
+            modes.0.without_enabled()
+        } else {
+            modes.0.clone()
+        };
+        let policy_changed = effective != modes.0;
+        sqlx::query("update client_api_keys set fast_mode_reset_json=$2::jsonb, model_fast_modes_json=$3::jsonb,
+            updated_at=case when $4 then now() else updated_at end where id=$1")
+            .bind(id.as_str()).bind(sqlx::types::Json(next)).bind(sqlx::types::Json(effective)).bind(policy_changed)
+            .execute(&mut *tx).await.map_err(|source| map_error(postgres_unavailable("advance Fast restoration", source)))?;
+        let revision = if policy_changed {
+            let revision = super::bump_config_revision_in_transaction(&mut tx)
+                .await
+                .map_err(map_error)?;
+            super::append_admin_audit_event_in_transaction(
+                &mut tx,
+                mutation_audit(
+                    context,
+                    MutationAuditOperation::ClientApiKeyRestoreFast,
+                    id.as_str(),
+                    vec![
+                        "model_fast_modes_json".to_owned(),
+                        "fast_mode_reset_json".to_owned(),
+                    ],
+                ),
+                revision,
+            )
+            .await
+            .map_err(map_error)?;
+            Some(admin_revision(revision)?)
+        } else {
+            None
+        };
+        tx.commit()
+            .await
+            .map_err(|source| map_error(postgres_unavailable("commit Fast restoration", source)))?;
+        Ok(revision)
+    }
+
     async fn update_client_key_budget_limits(
         &self,
         command: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
@@ -889,6 +1010,8 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .create_client_api_key(
                 NewClientApiKey {
+                    model_fast_modes: command.model_fast_modes,
+                    fast_mode_reset: command.fast_mode_reset,
                     request_profile_overrides: command.request_profile_overrides,
                     id: id.as_str().to_owned(),
                     name: command.name,
@@ -918,6 +1041,8 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "daily_limit_usd",
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
+                        "model_fast_modes_json",
+                        "fast_mode_reset_json",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -939,6 +1064,9 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             .control_plane
             .update_client_api_key(
                 UpdateClientApiKeyDetails {
+                    model_fast_modes: command.model_fast_modes,
+                    fast_mode_reset_update: command.fast_mode_reset_update,
+                    expected_fast_mode_reset: command.expected_fast_mode_reset,
                     request_profile_override_updates: command.request_profile_override_updates,
                     id: id.as_str().to_owned(),
                     name: command.name,
@@ -966,6 +1094,8 @@ impl ClientKeyStore for PgAdminClientKeyStore {
                         "daily_limit_usd",
                         "weekly_limit_usd",
                         "provider_request_profiles_json",
+                        "model_fast_modes_json",
+                        "fast_mode_reset_json",
                     ]
                     .into_iter()
                     .map(str::to_owned)
@@ -1096,6 +1226,8 @@ fn admin_client_key_cursor(cursor: ClientApiKeyCursor) -> AdminStoreResult<Admin
 
 fn admin_client_key_record(record: ClientApiKeyRecord) -> AdminStoreResult<AdminClientKeyRecord> {
     Ok(AdminClientKeyRecord {
+        model_fast_modes: record.model_fast_modes,
+        fast_mode_reset: record.fast_mode_reset,
         request_profile_overrides: record.request_profile_overrides,
         id: ClientApiKeyId::new(record.id)
             .map_err(|_| admin_store_error(ENTITY, invalid("invalid client key id")))?,
@@ -1148,8 +1280,8 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     sqlx::query(
         "insert into client_api_keys (
            id, name, label, key, enabled, max_concurrency, requests_per_minute,
-           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json
-         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb)",
+           last_used_at, created_at, updated_at, daily_limit_usd, weekly_limit_usd, provider_request_profiles_json, model_fast_modes_json, fast_mode_reset_json
+         ) values ($1, $2, $3, $4, true, $5, $6, null, now(), now(), $7::text::numeric, $8::text::numeric, $9::jsonb, $10::jsonb, $11::jsonb)",
     )
     .bind(&key.id)
     .bind(key.name.trim())
@@ -1160,6 +1292,8 @@ pub(crate) async fn insert_client_api_key_in_transaction(
     .bind(key.budget.daily_usd.canonical())
     .bind(key.budget.weekly_usd.canonical())
     .bind(sqlx::types::Json(request_profile_overrides))
+    .bind(sqlx::types::Json(&key.model_fast_modes))
+    .bind(key.fast_mode_reset.as_ref().map(sqlx::types::Json))
     .execute(&mut **transaction)
     .await
     .map_err(|error| {
@@ -1211,8 +1345,12 @@ pub(crate) async fn update_client_api_key_in_transaction(
              daily_limit_usd = coalesce($6::text::numeric, daily_limit_usd),
              weekly_limit_usd = coalesce($7::text::numeric, weekly_limit_usd),
              provider_request_profiles_json = (provider_request_profiles_json - $8::text[])
-                 || $9::jsonb
-         where id = $1",
+                 || $9::jsonb,
+             model_fast_modes_json = coalesce($10::jsonb, model_fast_modes_json),
+             fast_mode_reset_json = case when $11::boolean then $12::jsonb else fast_mode_reset_json end
+         where id = $1 and (not $13::boolean or (
+             fast_mode_reset_json->>'generation' is not distinct from $14::text
+             and fast_mode_reset_json->'completedAt' is not distinct from $15::jsonb))",
     )
     .bind(&key.id)
     .bind(key.name.trim())
@@ -1223,9 +1361,24 @@ pub(crate) async fn update_client_api_key_in_transaction(
     .bind(key.weekly_limit_usd.map(|amount| amount.canonical()))
     .bind(removed_profiles)
     .bind(sqlx::types::Json(replacement_profiles))
+    .bind(key.model_fast_modes.as_ref().map(sqlx::types::Json))
+    .bind(key.fast_mode_reset_update.is_some())
+    .bind(key.fast_mode_reset_update.as_ref().and_then(Option::as_ref).map(sqlx::types::Json))
+    .bind(key.expected_fast_mode_reset.is_some())
+    .bind(key.expected_fast_mode_reset.as_ref().and_then(Option::as_ref).map(|plan| plan.generation.as_str()))
+    .bind(key.expected_fast_mode_reset.as_ref().and_then(Option::as_ref)
+        .map(|plan| sqlx::types::Json(plan.completed_at)))
     .execute(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update client API key in transaction", source))?;
+    if result.rows_affected() == 0 && key.expected_fast_mode_reset.is_some() {
+        return Err(StoreError::Conflict {
+            source: None,
+            entity: ENTITY,
+            id: key.id.clone(),
+            kind: crate::ConflictKind::InvalidTransition,
+        });
+    }
     require_changed(result.rows_affected(), &key.id)?;
     replace_client_api_key_groups_in_transaction(transaction, &key.id, &key.group_ids).await
 }
@@ -1420,6 +1573,20 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
         .map_err(|source| invalid("invalid groups").with_source(source))?;
     Ok(
         ClientApiKeyRecord {
+            fast_mode_reset: row
+                .try_get::<Option<
+                    sqlx::types::Json<
+                        gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan,
+                    >,
+                >, _>("fast_mode_reset_json")
+                .map_err(|source| invalid("invalid Fast reset plan").with_source(source))?
+                .map(|value| value.0),
+            model_fast_modes: row
+                .try_get::<sqlx::types::Json<gateway_core::account::ModelFastModes>, _>(
+                    "model_fast_modes_json",
+                )
+                .map_err(|source| invalid("invalid model Fast rules").with_source(source))?
+                .0,
             request_profile_overrides:
                 decode_request_profiles(
                     row.try_get::<sqlx::types::Json<

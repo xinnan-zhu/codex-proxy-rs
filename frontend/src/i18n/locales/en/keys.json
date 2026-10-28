@@ -77,7 +77,18 @@
       },
       "enterApiKeyName": "Please enter API key name",
       "invalidKey": "Use visible HTTP header characters, without spaces or line breaks",
-      "requestsPerMinute": "Requests per minute"
+      "requestsPerMinute": "Requests per minute",
+      "modelFastMode": "Fast mode by model",
+      "inheritFastMode": "Inherit",
+      "modelFastModeHint": "OpenAI Responses only, model settings override groups, unspecified models inherit the group policy",
+      "searchFastModels": "Search upstream models",
+      "fastUnavailable": "Current catalog does not declare Fast support, enabling is unavailable",
+      "modelFastModeFor": "Fast mode for {model}",
+      "noFastModels": "No matching models",
+      "resetFastOnQuota": "Restore group Fast settings at quota reset",
+      "resetFastOnQuotaHint": "Clears separately enabled Fast once at the earliest weekly or monthly reset in this key’s available accounts, including early resets confirmed by new quota observations",
+      "fastResetCompleted": "Restored to group settings",
+      "fastResetScheduled": "Scheduled to restore by {time}"
     },
     "fields": {
       "copyFullKey": "Copy full key",

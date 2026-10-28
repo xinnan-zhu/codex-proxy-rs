@@ -3,7 +3,7 @@
 use crate::model::AdminError;
 use gateway_core::{routing::ConfigRevision, runtime::SnapshotControl};
 
-pub(super) async fn publish_committed(
+pub(crate) async fn publish_committed(
     snapshot: &dyn SnapshotControl,
     revision: crate::model::Revision,
 ) -> Result<(), AdminError> {

@@ -1,6 +1,7 @@
 import type { ApiKey } from '@/api'
+import type { ModelFastModes } from '@/api/modules/keys'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { cloneDeep } from 'es-toolkit'
+import { cloneDeep, isEqual } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
 import { createApiKey, updateApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -8,6 +9,10 @@ import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
+  resetFastModeOnQuotaReset: boolean
+  fastModeResetsAtDisplay: string | null
+  fastModeResetCompleted: boolean
+  modelFastModes: ModelFastModes
   providerRequestProfileOverrides: ProviderRequestProfiles
   customKey: string
   name: string
@@ -39,6 +44,10 @@ export function useApiKeyEditor(options: {
   function openEdit(key: ApiKey) {
     editingKey.value = key
     form.value = {
+      modelFastModes: cloneDeep(key.modelFastModes),
+      resetFastModeOnQuotaReset: key.resetFastModeOnQuotaReset,
+      fastModeResetsAtDisplay: key.fastModeResetsAtDisplay,
+      fastModeResetCompleted: key.fastModeResetCompleted,
       providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
       customKey: '',
       name: key.name,
@@ -74,6 +83,7 @@ export function useApiKeyEditor(options: {
     await savingKeyAction.run(
       async () => {
         const payload = {
+          modelFastModes: cloneDeep(form.value.modelFastModes),
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
           groupIds: [
@@ -89,7 +99,13 @@ export function useApiKeyEditor(options: {
         if (current) {
           await updateApiKey({
             id: current.id,
+            resetFastModeOnQuotaReset: current.resetFastModeOnQuotaReset === form.value.resetFastModeOnQuotaReset
+              ? undefined
+              : form.value.resetFastModeOnQuotaReset,
             ...payload,
+            modelFastModes: isEqual(current.modelFastModes, form.value.modelFastModes)
+              ? undefined
+              : payload.modelFastModes,
             providerRequestProfileOverrides: profileOverrideUpdates(
               current.providerRequestProfileOverrides,
               form.value.providerRequestProfileOverrides,
@@ -98,6 +114,7 @@ export function useApiKeyEditor(options: {
         }
         else {
           const result = await createApiKey({
+            resetFastModeOnQuotaReset: form.value.resetFastModeOnQuotaReset,
             ...payload,
             providerRequestProfileOverrides: cloneDeep(form.value.providerRequestProfileOverrides),
             customKey: form.value.customKey || undefined,
@@ -145,6 +162,10 @@ export function useApiKeyEditor(options: {
 
 function emptyForm(): ApiKeyFormValue {
   return {
+    modelFastModes: {},
+    resetFastModeOnQuotaReset: false,
+    fastModeResetsAtDisplay: null,
+    fastModeResetCompleted: false,
     providerRequestProfileOverrides: {},
     customKey: '',
     name: '',

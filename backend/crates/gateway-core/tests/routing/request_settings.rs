@@ -46,7 +46,10 @@ fn policy(id: &str) -> ClientPolicy {
         Arc::new(
             FrozenAccountScope::new(Arc::default(), ClientRoutingScope::all_accounts())
                 .with_request_profiles(profiles(&[("openai", id)]))
-                .with_fast_mode(FastMode::Disabled),
+                .with_fast_mode(FastMode::Disabled)
+                .with_model_fast_modes(
+                    serde_json::from_value(json!({"openai":{id:"enabled"}})).unwrap(),
+                ),
         ),
         true,
         RateLimits {
@@ -134,6 +137,25 @@ fn scope_changes_recompute_defaults_and_inherit_only_explicit_overrides() {
         &profiles(&[("openai", "parent"), ("xai", "second")])
     );
     assert_eq!(parent_values.fast_mode, FastMode::Default);
+    let effective_parent = rebased.apply_policy(parent.clone());
+    let provider = ProviderKind::new("openai").unwrap();
+    assert_eq!(
+        effective_parent.account_scope().model_fast_modes().resolve(
+            &provider,
+            "parent",
+            effective_parent.account_scope().fast_mode()
+        ),
+        FastMode::Default
+    );
+    // 隐藏模型规则不修改 Key 原始默认值
+    assert_eq!(
+        effective_parent.defaults().model_fast_modes.resolve(
+            &provider,
+            "parent",
+            FastMode::Disabled
+        ),
+        FastMode::Enabled
+    );
     let child_settings = rebased.with_execution(&child, Some(60_000));
     let child_values = child_settings.execution_values().unwrap();
     assert_eq!(
@@ -141,6 +163,23 @@ fn scope_changes_recompute_defaults_and_inherit_only_explicit_overrides() {
         &profiles(&[("openai", "child"), ("xai", "second")])
     );
     assert_eq!(child_values.fast_mode, FastMode::Disabled);
+    let effective_child = child_settings.apply_policy(child.clone());
+    assert_eq!(
+        effective_child.account_scope().model_fast_modes().resolve(
+            &provider,
+            "child",
+            FastMode::Disabled
+        ),
+        FastMode::Enabled
+    );
+    assert_eq!(
+        effective_child.account_scope().model_fast_modes().resolve(
+            &provider,
+            "parent",
+            FastMode::Disabled
+        ),
+        FastMode::Disabled
+    );
     assert_eq!(child_values.client_limits, child.limits());
     assert_eq!(child_values.timeout_ms, Some(60_000));
     assert_eq!(child_settings.snapshot().mapped_model("alias"), "model");

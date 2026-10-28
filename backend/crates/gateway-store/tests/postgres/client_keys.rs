@@ -53,6 +53,8 @@ async fn custom_keys_persist_exactly_and_keep_short_keys_masked() {
         let (_, record) = store
             .create_client_key(
                 NewClientKey {
+                    fast_mode_reset: None,
+                    model_fast_modes: Default::default(),
                     request_profile_overrides: Default::default(),
                     id: id.clone(),
                     name: format!("Custom {index}"),
@@ -108,6 +110,8 @@ async fn duplicate_custom_keys_conflict_atomically_without_extra_audits() {
     };
     let key = "custom-key-case-sensitive!";
     let command = |id: &str| NewClientKey {
+        fast_mode_reset: None,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: id.to_owned(),
@@ -144,6 +148,8 @@ async fn duplicate_custom_keys_conflict_atomically_without_extra_audits() {
 #[test]
 fn generated_client_key_format_remains_valid() {
     let key = NewClientApiKey {
+        fast_mode_reset: None,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -177,6 +183,8 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
         request_id: "duplicate-name-test".to_owned(),
     };
     let create = |id: &str, name: &str| NewClientKey {
+        fast_mode_reset: None,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: name.to_owned(),
@@ -187,6 +195,10 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
         plaintext: format!("synthetic-credential-{id}"),
     };
     let update = |id: ClientApiKeyId, name: &str| UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes: None,
         request_profile_override_updates: Default::default(),
         id,
         name: name.to_owned(),
@@ -650,6 +662,8 @@ async fn dedicated_reveal_returns_plaintext_without_debug_exposure() {
 fn client_key_debug_redacts_plaintext() {
     let secret = format!("sk_{}", "s".repeat(43));
     let key = NewClientApiKey {
+        fast_mode_reset: None,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -723,6 +737,8 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
     let (_, record) = store
         .create_client_key(
             NewClientKey {
+                fast_mode_reset: None,
+                model_fast_modes: Default::default(),
                 id: id.clone(),
                 name: "profile".to_owned(),
                 label: None,
@@ -745,6 +761,10 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
     );
     assert_eq!(record.request_profile_overrides.get(&xai), Some(&profile));
     let update = |override_value: Option<Option<OpaqueProviderData>>| UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes: None,
         id: id.clone(),
         name: "profile".to_owned(),
         label: None,
@@ -800,5 +820,236 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
         .await
         .unwrap();
     assert!(snapshot.client_api_keys[0].request_profiles.is_empty());
+    database.close().await;
+}
+
+#[tokio::test]
+async fn model_fast_modes_persist_preserve_and_clear_in_key_records_and_snapshots() {
+    use gateway_admin::model::{
+        MutationActor, MutationContext,
+        client_keys::{NewClientKey, UpdateClientKey},
+    };
+    use gateway_core::policy::RateLimits;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("model_fast_modes").await else {
+        return;
+    };
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "fast-model-test".into(),
+    };
+    let rules = serde_json::from_value::<gateway_core::account::ModelFastModes>(
+        serde_json::json!({"openai":{"model-a":"enabled","model-b":"disabled"}}),
+    )
+    .unwrap();
+    let id = ClientApiKeyId::new("key_model_fast").unwrap();
+    let (_, record) = store
+        .create_client_key(
+            NewClientKey {
+                fast_mode_reset: None,
+                model_fast_modes: rules.clone(),
+                request_profile_overrides: Default::default(),
+                id: id.clone(),
+                name: "model fast".into(),
+                label: None,
+                group_ids: vec![],
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                plaintext: "synthetic-model-fast-key".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(record.model_fast_modes, rules);
+    let update = |model_fast_modes| UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes,
+        request_profile_override_updates: Default::default(),
+        id: id.clone(),
+        name: "model fast".into(),
+        label: None,
+        group_ids: vec![],
+        limits: RateLimits::unlimited(),
+        daily_limit_usd: None,
+        weekly_limit_usd: None,
+    };
+    let (_, preserved) = store
+        .update_client_key(update(None), &context)
+        .await
+        .unwrap();
+    assert_eq!(preserved.model_fast_modes, rules);
+    let repository = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    let snapshot = repository.load_runtime_snapshot().await.unwrap();
+    assert_eq!(snapshot.client_api_keys[0].model_fast_modes, rules);
+    let (_, cleared) = store
+        .update_client_key(update(Some(Default::default())), &context)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(cleared.model_fast_modes).unwrap(),
+        serde_json::json!({})
+    );
+    assert_eq!(
+        serde_json::to_value(
+            repository
+                .load_runtime_snapshot()
+                .await
+                .unwrap()
+                .client_api_keys[0]
+                .model_fast_modes
+                .clone()
+        )
+        .unwrap(),
+        serde_json::json!({})
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn fast_restore_plan_persists_and_cas_protects_rearm_and_stale_admin_edits() {
+    use gateway_admin::model::{
+        MutationActor, MutationContext,
+        client_key_fast_reset::ClientKeyFastResetPlan,
+        client_keys::{NewClientKey, UpdateClientKey},
+    };
+    use gateway_core::{
+        account::{FastMode, ModelFastModes},
+        identity::ProviderKind,
+        policy::RateLimits,
+    };
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("fast_reset_plan").await else {
+        return;
+    };
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "synthetic-fast-reset".into(),
+    };
+    let now = chrono::Utc::now();
+    let plan = ClientKeyFastResetPlan {
+        generation: "first".into(),
+        armed_at: now,
+        deadline: now + chrono::Duration::hours(1),
+        checked_at: now,
+        completed_at: None,
+        baselines: vec![],
+    };
+    let id = ClientApiKeyId::new("key_reset_plan").unwrap();
+    let rules: ModelFastModes =
+        serde_json::from_value(serde_json::json!({"openai":{"a":"enabled","b":"disabled"}}))
+            .unwrap();
+    store
+        .create_client_key(
+            NewClientKey {
+                fast_mode_reset: Some(plan.clone()),
+                model_fast_modes: rules.clone(),
+                request_profile_overrides: Default::default(),
+                id: id.clone(),
+                name: "reset plan".into(),
+                label: None,
+                group_ids: vec![],
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                plaintext: "synthetic-reset-test-key".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    let repository = PgRuntimeSnapshotRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_snapshot()
+            .await
+            .unwrap()
+            .client_api_keys[0]
+            .model_fast_reset_at,
+        Some(plan.deadline.into())
+    );
+    let batch = store.pending_fast_mode_resets(100).await.unwrap();
+    let expected = batch[0].fast_mode_reset.clone().unwrap();
+    let mut completed = expected.clone();
+    completed.completed_at = Some(now);
+    let revision = store
+        .advance_fast_mode_reset(&id, &expected, &completed, true, &context)
+        .await
+        .unwrap()
+        .unwrap();
+    let record = store.get_client_key(&id).await.unwrap().unwrap();
+    let provider = ProviderKind::new("openai").unwrap();
+    assert_eq!(
+        record
+            .model_fast_modes
+            .resolve(&provider, "a", FastMode::Disabled),
+        FastMode::Disabled
+    );
+    assert_eq!(
+        record
+            .model_fast_modes
+            .resolve(&provider, "b", FastMode::Enabled),
+        FastMode::Disabled
+    );
+    assert!(
+        store
+            .pending_fast_mode_resets(100)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        store
+            .advance_fast_mode_reset(&id, &expected, &completed, true, &context)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let update = |expected_plan, next_plan| UpdateClientKey {
+        expected_fast_mode_reset: Some(Some(expected_plan)),
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: Some(Some(next_plan)),
+        model_fast_modes: Some(rules.clone()),
+        request_profile_override_updates: Default::default(),
+        id: id.clone(),
+        name: "reset plan".into(),
+        label: None,
+        group_ids: vec![],
+        limits: RateLimits::unlimited(),
+        daily_limit_usd: None,
+        weekly_limit_usd: None,
+    };
+    assert!(
+        store
+            .update_client_key(update(expected.clone(), expected.clone()), &context)
+            .await
+            .is_err()
+    );
+    let mut rearmed = plan;
+    rearmed.generation = "rearmed".into();
+    let (next_revision, _) = store
+        .update_client_key(update(completed, rearmed.clone()), &context)
+        .await
+        .unwrap();
+    assert!(next_revision > revision);
+    assert!(
+        store
+            .advance_fast_mode_reset(&id, &expected, &rearmed, true, &context)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .get_client_key(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .fast_mode_reset,
+        Some(rearmed)
+    );
     database.close().await;
 }

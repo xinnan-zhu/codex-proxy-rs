@@ -153,6 +153,10 @@ impl ClientKeySort {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateClientKeyRequest {
     #[serde(default)]
+    reset_fast_mode_on_quota_reset: bool,
+    #[serde(default)]
+    model_fast_modes: gateway_core::account::ModelFastModes,
+    #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
     xai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -190,6 +194,8 @@ impl CreateClientKeyRequest {
             self.xai_client_profile_override,
         )?;
         Ok(CreateClientKey {
+            model_fast_modes: self.model_fast_modes,
+            reset_fast_mode_on_quota_reset: self.reset_fast_mode_on_quota_reset,
             request_profile_overrides,
             custom_key: self
                 .custom_key
@@ -217,6 +223,8 @@ impl CreateClientKeyRequest {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateClientKeyRequest {
+    reset_fast_mode_on_quota_reset: Option<bool>,
+    model_fast_modes: Option<gateway_core::account::ModelFastModes>,
     #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrideUpdates,
     #[serde(default, deserialize_with = "deserialize_profile_override")]
@@ -248,6 +256,10 @@ impl UpdateClientKeyRequest {
             self.xai_client_profile_override,
         )?;
         Ok(UpdateClientKey {
+            expected_fast_mode_reset: None,
+            reset_fast_mode_on_quota_reset: self.reset_fast_mode_on_quota_reset,
+            fast_mode_reset_update: None,
+            model_fast_modes: self.model_fast_modes,
             request_profile_override_updates,
             id: client_key_id(self.id, "clientKeyMutationNotFound")?,
             name: self.name,
@@ -334,6 +346,11 @@ impl ClientKeyMutationRequest {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientKeyView {
+    reset_fast_mode_on_quota_reset: bool,
+    fast_mode_resets_at: Option<DateTime<Utc>>,
+    fast_mode_resets_at_display: Option<String>,
+    fast_mode_reset_completed: bool,
+    model_fast_modes: gateway_core::account::ModelFastModes,
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     /// 固定兼容字段；值始终从 provider_request_profile_overrides 派生
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -379,6 +396,25 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
             .map(|(provider, profile)| (provider.as_str().to_owned(), profile.into_inner()))
             .collect::<ProviderRequestProfileOverrides>();
         Self {
+            reset_fast_mode_on_quota_reset: record.fast_mode_reset.is_some(),
+            fast_mode_resets_at: record.fast_mode_reset.as_ref().map(|plan| plan.deadline),
+            fast_mode_resets_at_display: record
+                .fast_mode_reset
+                .as_ref()
+                .map(|plan| time.datetime(&plan.deadline)),
+            fast_mode_reset_completed: record
+                .fast_mode_reset
+                .as_ref()
+                .is_some_and(|plan| plan.expired(time.now())),
+            model_fast_modes: if record
+                .fast_mode_reset
+                .as_ref()
+                .is_some_and(|plan| plan.expired(time.now()))
+            {
+                record.model_fast_modes.without_enabled()
+            } else {
+                record.model_fast_modes
+            },
             openai_client_profile_override: provider_request_profile_overrides
                 .get("openai")
                 .cloned(),
@@ -861,6 +897,10 @@ where
     Router::new()
         .route("/api/admin/client-keys", get(list_client_keys::<S>))
         .route(
+            "/api/admin/client-keys/fast-models",
+            get(client_key_fast_models::<S>),
+        )
+        .route(
             "/api/admin/client-keys/create",
             post(create_client_key::<S>),
         )
@@ -885,6 +925,21 @@ where
             "/api/admin/client-keys/delete",
             post(delete_client_key::<S>),
         )
+}
+
+async fn client_key_fast_models<S>(
+    _auth: AdminAuth,
+    State(state): State<S>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let data = state
+        .admin_services()
+        .client_keys()
+        .fast_models()
+        .map_err(map_service_error)?;
+    Ok(AdminResponse::new(StatusCode::OK, AdminEnvelope::ok(data)))
 }
 
 async fn list_client_keys<S>(

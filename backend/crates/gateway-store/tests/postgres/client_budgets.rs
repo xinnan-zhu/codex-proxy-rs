@@ -746,6 +746,10 @@ async fn budget_updates_preserve_omitted_limits_and_do_not_clear_usage() {
         .await
         .unwrap();
     let update = UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes: None,
         request_profile_override_updates: Default::default(),
         id: ClientApiKeyId::new("key").unwrap(),
         name: "key".to_owned(),

@@ -1,8 +1,8 @@
-//! 账号分组的 Fast 三态策略与多分组优先级
+//! 分组与 Client Key 共用的 Fast 三态值及多分组优先级
 
 use serde::{Deserialize, Serialize};
 
-/// 分组冻结的 Fast 策略；默认保留客户端选择
+/// Fast 覆盖值；默认保留继承策略或客户端选择
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FastMode {

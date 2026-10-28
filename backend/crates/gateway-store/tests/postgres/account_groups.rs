@@ -199,6 +199,10 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
     let (scope_revision, widened) = keys
         .update_client_key(
             UpdateClientKey {
+                expected_fast_mode_reset: None,
+                reset_fast_mode_on_quota_reset: None,
+                fast_mode_reset_update: None,
+                model_fast_modes: None,
                 request_profile_override_updates: Default::default(),
                 daily_limit_usd: None,
                 weekly_limit_usd: None,
@@ -225,6 +229,10 @@ async fn groups_aggregate_cross_provider_members_and_key_bindings_without_multip
     let (restricted_revision, restricted) = keys
         .update_client_key(
             UpdateClientKey {
+                expected_fast_mode_reset: None,
+                reset_fast_mode_on_quota_reset: None,
+                fast_mode_reset_update: None,
+                model_fast_modes: None,
                 request_profile_override_updates: Default::default(),
                 daily_limit_usd: None,
                 weekly_limit_usd: None,
@@ -441,6 +449,8 @@ async fn group_costs_should_include_statusless_websocket_but_reject_statusless_h
 fn new_key(id: &str, group_ids: Vec<AccountGroupId>) -> NewClientKey {
     let marker = char::from(id.as_bytes().last().copied().unwrap_or(b'k'));
     NewClientKey {
+        fast_mode_reset: None,
+        model_fast_modes: Default::default(),
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: client_key_id(id),

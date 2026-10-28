@@ -2,7 +2,7 @@
 import type { ApiKeyFormValue } from '../composables/useApiKeyEditor'
 
 import type { AccountGroupRef } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
 import { DollarSign, KeyRound } from '@lucide/vue'
 
 import { computed, useTemplateRef, watch } from 'vue'
@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
 import { useApiKeyFormRules } from '../composables/useApiKeyFormRules'
+import ApiKeyModelFastModesEditor from './ApiKeyModelFastModesEditor.vue'
 
 const props = defineProps<{
   groups: AccountGroupRef[]
@@ -104,6 +105,30 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
           :disabled="saving"
           @update:model-value="updateForm('groupIds', $event)"
         />
+      </ZFormItem>
+
+      <ZFormItem :label="t('keys.editor.modelFastMode')">
+        <ApiKeyModelFastModesEditor
+          :model-value="form.modelFastModes"
+          :active="open"
+          :disabled="saving"
+          @update:model-value="updateForm('modelFastModes', $event)"
+        />
+        <div class="mt-3 grid gap-2">
+          <ZCheckbox
+            :model-value="form.resetFastModeOnQuotaReset"
+            :disabled="saving"
+            @update:model-value="updateForm('resetFastModeOnQuotaReset', $event)"
+          >
+            {{ t('keys.editor.resetFastOnQuota') }}
+          </ZCheckbox>
+          <p class="text-sm text-cp-text-secondary">
+            {{ t('keys.editor.resetFastOnQuotaHint') }}
+          </p>
+          <p v-if="form.resetFastModeOnQuotaReset && form.fastModeResetsAtDisplay" class="text-sm text-cp-text-secondary">
+            {{ form.fastModeResetCompleted ? t('keys.editor.fastResetCompleted') : t('keys.editor.fastResetScheduled', { time: form.fastModeResetsAtDisplay }) }}
+          </p>
+        </div>
       </ZFormItem>
 
       <ZFormItem :label="t('keys.editor.upstreamIdentity')">

@@ -589,6 +589,21 @@ impl RoutingPlan {
         self.account_scope.fast_mode()
     }
 
+    /// 按本次候选的实际归属和上游模型解析 Key 覆盖，未配置时继承分组策略
+    #[must_use]
+    pub fn fast_mode_for(&self, candidate: &ProviderCandidate) -> FastMode {
+        candidate.upstream_model().map_or_else(
+            || self.fast_mode(),
+            |model| {
+                self.account_scope.model_fast_modes().resolve(
+                    candidate.provider(),
+                    model.as_str(),
+                    self.fast_mode(),
+                )
+            },
+        )
+    }
+
     /// 本次请求冻结的已编译规则，重试不读取新的全局策略
     #[must_use]
     pub fn privacy(&self) -> Option<Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>> {

@@ -30,6 +30,8 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
     name_snapshot: Option<String>,
+    model_fast_modes: crate::account::ModelFastModes,
+    model_fast_reset_at: Option<std::time::SystemTime>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     key_id: ClientApiKeyId,
     plaintext_key: PlaintextClientApiKey,
@@ -38,6 +40,18 @@ pub struct SnapshotClientPolicyFacts {
 }
 
 impl SnapshotClientPolicyFacts {
+    #[must_use]
+    pub fn with_model_fast_reset_at(mut self, deadline: Option<std::time::SystemTime>) -> Self {
+        self.model_fast_reset_at = deadline;
+        self
+    }
+
+    #[must_use]
+    pub fn with_model_fast_modes(mut self, modes: crate::account::ModelFastModes) -> Self {
+        self.model_fast_modes = modes;
+        self
+    }
+
     #[must_use]
     pub fn with_name_snapshot(mut self, name: Option<String>) -> Self {
         self.name_snapshot = name;
@@ -63,6 +77,8 @@ impl SnapshotClientPolicyFacts {
         Self {
             key_id,
             name_snapshot: None,
+            model_fast_modes: crate::account::ModelFastModes::default(),
+            model_fast_reset_at: None,
             request_profiles: BTreeMap::new(),
             plaintext_key,
             group_ids,
@@ -554,6 +570,8 @@ async fn compile_runtime_snapshot(
                     account_scope
                         .with_image_generation(allow_image_generation)
                         .with_fast_mode(fast_mode)
+                        .with_model_fast_modes(policy.model_fast_modes)
+                        .with_model_fast_reset_at(policy.model_fast_reset_at)
                         .with_request_profiles(policy.request_profiles),
                 ),
                 true,
@@ -877,6 +895,30 @@ impl RuntimeSnapshot {
         models.into_iter().collect()
     }
 
+    /// 管理端配置使用实际上游模型 ID，不包含全局映射和插件公开别名
+    #[must_use]
+    pub fn upstream_model_profiles_for_provider(
+        &self,
+        provider: &ProviderKind,
+    ) -> Vec<super::PublicModelProfile> {
+        self.provider_models
+            .get(provider)
+            .into_iter()
+            .flat_map(|models| models.keys())
+            .filter_map(|model| {
+                let presentation = self
+                    .provider_model_presentations
+                    .get(provider)
+                    .and_then(|models| models.get(model))
+                    .cloned()
+                    .unwrap_or_default();
+                PublicModelId::new(model.as_str().to_owned())
+                    .ok()
+                    .map(|id| super::PublicModelProfile::new(id, presentation))
+            })
+            .collect()
+    }
+
     /// 返回 Provider 已明确声明画像的公开模型；没有画像时不猜测 Provider 语义
     #[must_use]
     pub fn public_model_profiles_for_provider(
@@ -1180,6 +1222,8 @@ impl RuntimeSnapshot {
         context: &RoutingContext,
         enforce_account_model_policy: bool,
     ) -> Result<RoutingPlan, RoutingError> {
+        let account_scope =
+            Arc::new(account_scope.freeze_model_fast_modes(std::time::SystemTime::now()));
         let requirements = operation.capability_requirements();
         let mut candidates = Vec::new();
 
@@ -1371,6 +1415,8 @@ impl RuntimeSnapshot {
         account_scope: Arc<FrozenAccountScope>,
         context: &RoutingContext,
     ) -> Result<RoutingPlan, RoutingError> {
+        let account_scope =
+            Arc::new(account_scope.freeze_model_fast_modes(std::time::SystemTime::now()));
         let available = !account_scope.provider_kinds().is_empty()
             && account_scope.provider_kinds().contains(provider)
             && self.providers.contains(provider)

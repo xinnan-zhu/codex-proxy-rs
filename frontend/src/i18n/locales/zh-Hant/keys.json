@@ -77,7 +77,18 @@
       },
       "enterApiKeyName": "請輸入 API密鑰名稱",
       "invalidKey": "自定義 API密鑰只能包含 HTTP 可傳輸的可見字符，不能包含空格或換行",
-      "requestsPerMinute": "每分鐘請求數"
+      "requestsPerMinute": "每分鐘請求數",
+      "modelFastMode": "模型 Fast 模式",
+      "inheritFastMode": "繼承",
+      "modelFastModeHint": "僅 OpenAI Responses，模型設定優先於分組，未設定時繼承分組策略",
+      "searchFastModels": "搜尋上游模型",
+      "fastUnavailable": "目前目錄未宣告 Fast 能力，無法開啟",
+      "modelFastModeFor": "{model} 的 Fast 模式",
+      "noFastModels": "暫無符合模型",
+      "resetFastOnQuota": "額度重置後恢復分組 Fast 設定",
+      "resetFastOnQuotaHint": "範圍內可用帳號最早週/月重置時一次性清除單獨啟用，提前重置依賴新額度觀測",
+      "fastResetCompleted": "已恢復繼承分組",
+      "fastResetScheduled": "計劃於 {time} 前恢復繼承分組"
     },
     "fields": {
       "copyFullKey": "複製完整密鑰",

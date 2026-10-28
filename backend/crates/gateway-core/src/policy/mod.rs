@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::account::{FastMode, OpaqueProviderData, scope::FrozenAccountScope};
+use crate::account::{FastMode, ModelFastModes, OpaqueProviderData, scope::FrozenAccountScope};
 use crate::identity::ProviderKind;
 use crate::validation::{IdentifierError, PolicyError, validate_text};
 
@@ -113,6 +113,7 @@ impl RateLimits {
 pub struct ClientSettings {
     pub request_profiles: BTreeMap<ProviderKind, OpaqueProviderData>,
     pub fast_mode: FastMode,
+    pub model_fast_modes: ModelFastModes,
     pub limits: RateLimits,
 }
 
@@ -138,17 +139,20 @@ impl ClientPolicy {
         mut self,
         profiles: &BTreeMap<ProviderKind, OpaqueProviderData>,
         fast_mode: FastMode,
+        model_fast_modes: ModelFastModes,
         limits: RateLimits,
     ) -> Self {
         if self.account_scope.request_profiles() != profiles
             || self.account_scope.fast_mode() != fast_mode
+            || self.account_scope.model_fast_modes() != &model_fast_modes
         {
             self.account_scope = Arc::new(
                 self.account_scope
                     .as_ref()
                     .clone()
                     .with_request_profiles(profiles.clone())
-                    .with_fast_mode(fast_mode),
+                    .with_fast_mode(fast_mode)
+                    .with_model_fast_modes(model_fast_modes),
             );
         }
         self.limits = limits;
@@ -168,6 +172,7 @@ impl ClientPolicy {
             defaults: Arc::new(ClientSettings {
                 request_profiles: account_scope.request_profiles().clone(),
                 fast_mode: account_scope.fast_mode(),
+                model_fast_modes: account_scope.model_fast_modes().clone(),
                 limits,
             }),
             key_id,

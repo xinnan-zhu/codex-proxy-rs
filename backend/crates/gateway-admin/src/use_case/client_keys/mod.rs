@@ -1,5 +1,7 @@
 //! Client API Key 管理用例
 
+pub(crate) mod fast_reset;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,6 +30,9 @@ use super::{map_store_error, publish_committed};
 /// API 消费的 Client Key 管理服务
 #[async_trait]
 pub trait ClientKeyService: Send + Sync {
+    fn fast_models(&self)
+    -> Result<Vec<crate::model::client_keys::ClientKeyFastModel>, AdminError>;
+
     async fn get(&self, id: &ClientApiKeyId) -> Result<ClientKeyRecord, AdminError>;
     async fn list(&self, query: ClientKeyListQuery) -> Result<ClientKeyPage, AdminError>;
     async fn reveal(&self, id: &ClientApiKeyId) -> Result<ClientKeySecret, AdminError>;
@@ -70,6 +75,8 @@ pub(crate) struct DefaultClientKeyService {
     providers: crate::ports::provider::ProviderAdminRegistry,
     store: Arc<dyn ClientKeyStore>,
     snapshot: Arc<dyn SnapshotControl>,
+    published: Option<gateway_core::runtime::RuntimeSnapshotHandle>,
+    fast_reset: Option<fast_reset::FastResetSource>,
 }
 
 impl DefaultClientKeyService {
@@ -78,17 +85,53 @@ impl DefaultClientKeyService {
         store: Arc<dyn ClientKeyStore>,
         snapshot: Arc<dyn SnapshotControl>,
         providers: crate::ports::provider::ProviderAdminRegistry,
+        published: Option<gateway_core::runtime::RuntimeSnapshotHandle>,
+        fast_reset: Option<fast_reset::FastResetSource>,
     ) -> Self {
         Self {
             store,
             snapshot,
             providers,
+            published,
+            fast_reset,
         }
     }
 }
 
 #[async_trait]
 impl ClientKeyService for DefaultClientKeyService {
+    fn fast_models(
+        &self,
+    ) -> Result<Vec<crate::model::client_keys::ClientKeyFastModel>, AdminError> {
+        let snapshot = self
+            .published
+            .as_ref()
+            .ok_or_else(|| AdminError::unavailable("模型目录不可用"))?
+            .acquire()
+            .map_err(|_| AdminError::unavailable("模型目录不可用"))?;
+        // 当前 Fast 正文策略只由 OpenAI Responses 执行，其他 Provider 不展示可配置项
+        let provider = gateway_core::identity::ProviderKind::new("openai")
+            .map_err(|_| AdminError::internal("Provider 不合法"))?;
+        Ok(snapshot
+            .upstream_model_profiles_for_provider(&provider)
+            .into_iter()
+            .map(|profile| crate::model::client_keys::ClientKeyFastModel {
+                provider: provider.clone(),
+                model: profile.model().as_str().to_owned(),
+                label: profile
+                    .presentation()
+                    .display_name()
+                    .unwrap_or(profile.model().as_str())
+                    .to_owned(),
+                supports_priority: profile
+                    .presentation()
+                    .service_tiers()
+                    .iter()
+                    .any(|tier| tier.id() == "priority"),
+            })
+            .collect())
+    }
+
     async fn get(&self, id: &ClientApiKeyId) -> Result<ClientKeyRecord, AdminError> {
         self.store
             .get_client_key(id)
@@ -165,6 +208,17 @@ impl ClientKeyService for DefaultClientKeyService {
                 .and_then(|provider| provider.preview_client_profile(profile))
                 .map_err(|error| super::map_provider_error(error, "client profile"))?;
         }
+        let fast_mode_reset = if command.reset_fast_mode_on_quota_reset {
+            Some(
+                self.fast_reset
+                    .as_ref()
+                    .ok_or_else(|| AdminError::unavailable("自动恢复不可用"))?
+                    .arm(&command.group_ids, &command.model_fast_modes)
+                    .await?,
+            )
+        } else {
+            None
+        };
         let id = ClientApiKeyId::new(format!("key_{}", Uuid::now_v7().simple()))
             .map_err(|_| AdminError::internal("创建 Client API Key ID 失败"))?;
         let plaintext = if let Some(key) = command.custom_key {
@@ -176,6 +230,8 @@ impl ClientKeyService for DefaultClientKeyService {
             .store
             .create_client_key(
                 NewClientKey {
+                    fast_mode_reset,
+                    model_fast_modes: command.model_fast_modes,
                     request_profile_overrides: command.request_profile_overrides,
                     id,
                     name: command.name,
@@ -203,6 +259,64 @@ impl ClientKeyService for DefaultClientKeyService {
     ) -> Result<ClientKeyMutation, AdminError> {
         crate::model::client_keys::validate_group_ids(&command.group_ids)
             .map_err(|_| AdminError::invalid("Client API Key 分组不合法"))?;
+        let mut command = command;
+        let current = self.get(&command.id).await?;
+        command.expected_fast_mode_reset = Some(current.fast_mode_reset.clone());
+        let now = chrono::Utc::now();
+        let expired = current
+            .fast_mode_reset
+            .as_ref()
+            .is_some_and(|plan| plan.expired(now));
+        let prior_modes = if expired {
+            current.model_fast_modes.without_enabled()
+        } else {
+            current.model_fast_modes.clone()
+        };
+        // 到期后省略模型字段也不能在取消计划时重新露出旧 enabled
+        if expired && command.model_fast_modes.is_none() {
+            command.model_fast_modes = Some(prior_modes.clone());
+        }
+        let modes = command.model_fast_modes.as_ref().unwrap_or(&prior_modes);
+        let provider = gateway_core::identity::ProviderKind::new("openai")
+            .map_err(|_| AdminError::internal("Provider 不合法"))?;
+        let enabled = modes.enabled_models(&provider);
+        let reenabled = enabled.iter().any(|model| {
+            prior_modes.resolve(&provider, model, gateway_core::account::FastMode::Default)
+                != gateway_core::account::FastMode::Enabled
+        });
+        let mut requested_groups = command.group_ids.clone();
+        requested_groups.sort();
+        let mut prior_groups: Vec<_> = current
+            .groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect();
+        prior_groups.sort();
+        let opted_in = command
+            .reset_fast_mode_on_quota_reset
+            .unwrap_or(current.fast_mode_reset.is_some());
+        if !opted_in {
+            command.fast_mode_reset_update = Some(None);
+        } else if enabled.is_empty() {
+            if let Some(mut plan) = current.fast_mode_reset.clone() {
+                plan.completed_at.get_or_insert(now);
+                command.fast_mode_reset_update = Some(Some(plan));
+            } else {
+                return Err(AdminError::invalid("请先单独启用模型 Fast，再设置自动恢复"));
+            }
+        } else if (command.reset_fast_mode_on_quota_reset == Some(true)
+            && current.fast_mode_reset.is_none())
+            || reenabled
+            || requested_groups != prior_groups
+        {
+            command.fast_mode_reset_update = Some(Some(
+                self.fast_reset
+                    .as_ref()
+                    .ok_or_else(|| AdminError::unavailable("自动恢复不可用"))?
+                    .arm(&command.group_ids, modes)
+                    .await?,
+            ));
+        }
         for (provider, profile) in &command.request_profile_override_updates {
             if let Some(profile) = profile {
                 self.providers
@@ -216,7 +330,13 @@ impl ClientKeyService for DefaultClientKeyService {
             .store
             .update_client_key(command, context)
             .await
-            .map_err(map_client_key_write_error)?;
+            .map_err(|error| {
+                if error.kind() == AdminStoreErrorKind::Conflict {
+                    AdminError::conflict("Fast 恢复计划已变化，请刷新后重试")
+                } else {
+                    map_client_key_write_error(error)
+                }
+            })?;
         publish_committed(self.snapshot.as_ref(), config_revision).await?;
         Ok(ClientKeyMutation {
             config_revision,

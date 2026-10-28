@@ -186,9 +186,18 @@ impl RequestSettings {
     #[must_use]
     pub fn apply_policy(&self, policy: ClientPolicy) -> ClientPolicy {
         let values = self.resolve_execution(policy.key_id().as_str(), policy.defaults(), None);
+        // 插件显式 Fast 设置覆盖整个 Key 默认；切换 Key 后只使用新 Key 的规则
+        let model_fast_modes = if self.execution.as_ref().is_some_and(|scope| {
+            scope.client_key_id == policy.key_id().as_str() && scope.fast_mode.is_some()
+        }) {
+            crate::account::ModelFastModes::default()
+        } else {
+            policy.defaults().model_fast_modes.clone()
+        };
         policy.with_settings(
             values.runtime.request_profiles(),
             values.fast_mode,
+            model_fast_modes,
             values.client_limits,
         )
     }

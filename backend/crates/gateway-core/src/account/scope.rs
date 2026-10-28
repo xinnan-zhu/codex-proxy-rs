@@ -249,6 +249,8 @@ impl ClientRoutingScope {
 pub struct FrozenAccountScope {
     allow_image_generation: bool,
     fast_mode: FastMode,
+    model_fast_modes: super::ModelFastModes,
+    model_fast_reset_at: Option<std::time::SystemTime>,
     request_profiles: BTreeMap<ProviderKind, super::OpaqueProviderData>,
     directory: Arc<RuntimeAccountDirectory>,
     client_scope: ClientRoutingScope,
@@ -290,6 +292,37 @@ impl FrozenAccountScope {
         &self.request_profiles
     }
 
+    #[must_use]
+    pub fn with_model_fast_reset_at(mut self, deadline: Option<std::time::SystemTime>) -> Self {
+        self.model_fast_reset_at = deadline;
+        self
+    }
+
+    /// 每个新调用冻结一次，到期后重试继续复用同一结果
+    #[must_use]
+    pub fn freeze_model_fast_modes(&self, now: std::time::SystemTime) -> Self {
+        let mut frozen = self.clone();
+        if frozen
+            .model_fast_reset_at
+            .is_some_and(|deadline| deadline <= now)
+        {
+            frozen.model_fast_modes = frozen.model_fast_modes.without_enabled();
+        }
+        frozen.model_fast_reset_at = None;
+        frozen
+    }
+
+    #[must_use]
+    pub fn with_model_fast_modes(mut self, modes: super::ModelFastModes) -> Self {
+        self.model_fast_modes = modes;
+        self
+    }
+
+    #[must_use]
+    pub fn model_fast_modes(&self) -> &super::ModelFastModes {
+        &self.model_fast_modes
+    }
+
     /// Key 绑定分组的冻结 Fast 策略，与账号成员资格无关
     #[must_use]
     pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
@@ -311,6 +344,8 @@ impl FrozenAccountScope {
         Self {
             allow_image_generation: true,
             fast_mode: FastMode::Default,
+            model_fast_modes: super::ModelFastModes::default(),
+            model_fast_reset_at: None,
             request_profiles: BTreeMap::new(),
             directory,
             client_scope,

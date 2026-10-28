@@ -52,6 +52,10 @@ async fn key_facts_read_current_database_groups_without_secrets() {
             .client_keys()
             .update_client_key(
                 UpdateClientKey {
+                    expected_fast_mode_reset: None,
+                    reset_fast_mode_on_quota_reset: None,
+                    fast_mode_reset_update: None,
+                    model_fast_modes: None,
                     request_profile_override_updates: Default::default(),
                     id: ClientApiKeyId::new(id).unwrap(),
                     name: "facts".into(),
