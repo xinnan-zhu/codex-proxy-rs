@@ -117,11 +117,10 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
         <div class="mt-3 grid gap-2">
           <ZCheckbox
             :model-value="form.resetFastModeOnQuotaReset"
+            :label="t('keys.editor.resetFastOnQuota')"
             :disabled="saving"
             @update:model-value="updateForm('resetFastModeOnQuotaReset', $event)"
-          >
-            {{ t('keys.editor.resetFastOnQuota') }}
-          </ZCheckbox>
+          />
           <p class="text-sm text-cp-text-secondary">
             {{ t('keys.editor.resetFastOnQuotaHint') }}
           </p>
