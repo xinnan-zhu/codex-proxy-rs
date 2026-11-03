@@ -1664,6 +1664,7 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
             range,
             filter.clone(),
             admin_observability::Granularity::FifteenMinutes,
+            false,
         )
         .await
         .expect("mixed costs")
@@ -1703,6 +1704,7 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
                 ..admin_observability::UsageFilter::default()
             },
             admin_observability::Granularity::FifteenMinutes,
+            false,
         )
         .await
         .expect("unknown-cost filter")
@@ -1723,6 +1725,7 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
             range,
             filter.clone(),
             admin_observability::Granularity::FifteenMinutes,
+            false,
         )
         .await
         .expect("foreign currency")
@@ -1765,6 +1768,7 @@ async fn billed_tokens_exclude_unknown_costs_foreign_currency_and_uncommitted_us
             range,
             filter,
             admin_observability::Granularity::FifteenMinutes,
+            false,
         )
         .await
         .expect("no USD costs")

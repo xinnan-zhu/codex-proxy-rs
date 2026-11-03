@@ -38,6 +38,7 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
             range,
             Default::default(),
             gateway_admin::model::observability::Granularity::FifteenMinutes,
+            false,
         )
         .await
         .unwrap()
@@ -158,6 +159,7 @@ async fn business_backup_restores_core_state_and_usage_without_request_history()
                 range,
                 Default::default(),
                 gateway_admin::model::observability::Granularity::FifteenMinutes,
+                false,
             )
             .await
             .unwrap()
