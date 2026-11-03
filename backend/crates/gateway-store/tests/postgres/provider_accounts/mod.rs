@@ -469,6 +469,7 @@ async fn profile_changes_survive_inflight_background_and_manual_token_refresh() 
     admin_account_store(&database.pool)
         .update_account(
             UpdateAccount {
+                codex_only: None,
                 account_id: id.to_string(),
                 name: Some("renamed team".to_owned()),
                 notes: None,
@@ -1372,6 +1373,7 @@ async fn account_rename_preserves_facts_and_is_searchable() {
         request_id: "rename-account".to_owned(),
     };
     let command = UpdateAccount {
+        codex_only: None,
         account_id: "acct_rename".to_owned(),
         name: Some("  研发团队  ".to_owned()),
         notes: None,

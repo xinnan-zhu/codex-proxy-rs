@@ -31,6 +31,7 @@ async fn import_name_only_overrides_a_single_account_and_keeps_batch_names() {
             .import_provider_accounts(ImportProviderAccounts {
                 outbound_proxy: None,
                 settings: Some(AccountImportSettings {
+                    codex_only: None,
                     name: name.map(str::to_owned),
                     notes: None,
                     model_access: Default::default(),
