@@ -57,12 +57,13 @@ pub struct UsageAnalyticsQuery {
     pub end_time: Option<String>,
 }
 
-/// 卡片内的指标选择与时间、Provider 范围
+/// 卡片内的指标选择与时间、Provider 和精确模型范围
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageMetricQuery<T> {
     pub metric: T,
     pub provider: Option<String>,
+    pub model: Option<String>,
     pub period: Option<String>,
     pub as_of: Option<i64>,
     pub start_time: Option<String>,
@@ -74,6 +75,7 @@ impl<T> UsageMetricQuery<T> {
         (
             UsageAnalyticsQuery {
                 provider: self.provider,
+                model: self.model,
                 period: self.period,
                 as_of: self.as_of,
                 start_time: self.start_time,
