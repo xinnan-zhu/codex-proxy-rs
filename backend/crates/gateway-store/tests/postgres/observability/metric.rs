@@ -31,6 +31,8 @@ async fn usage_metrics_preserve_selected_values_for_aggregate_and_exact_reads() 
             .await
             .unwrap();
         assert!(full.overview.requests.request_count > 0);
+        assert!(full.overview.requests.billed_total_tokens > 0);
+        assert!(full.overview.requests.estimated_throughput_count > 0);
         for metric in [
             Metric::Health,
             Metric::Latency,
@@ -89,12 +91,14 @@ fn assert_selected_metrics(
             (
                 actual.output_throughput_p10,
                 actual.output_throughput_p50,
-                actual.output_throughput_p90
+                actual.output_throughput_p90,
+                actual.estimated_throughput_count
             ),
             (
                 expected.output_throughput_p10,
                 expected.output_throughput_p50,
-                expected.output_throughput_p90
+                expected.output_throughput_p90,
+                expected.estimated_throughput_count
             )
         ),
         Metric::Load => {
@@ -145,6 +149,10 @@ fn assert_costs(
 ) {
     if matches!(metric, Metric::Cost | Metric::Savings | Metric::Cache) {
         assert_eq!(
+            actual.overview.requests.billed_total_tokens,
+            expected.overview.requests.billed_total_tokens
+        );
+        assert_eq!(
             actual.overview.attempts.costs,
             expected.overview.attempts.costs
         );
@@ -155,6 +163,10 @@ fn assert_costs(
         assert_eq!(actual.costs, expected.costs);
         for (actual, expected) in actual.trend.iter().zip(&expected.trend) {
             assert_eq!(actual.costs, expected.costs);
+            assert_eq!(
+                actual.metrics.billed_total_tokens,
+                expected.metrics.billed_total_tokens
+            );
             assert_eq!(actual.cost_coverage, expected.cost_coverage);
         }
     } else {
