@@ -93,6 +93,7 @@ async fn fixture(sharing: ClientPeerSharing, plaintext: &str) -> (AdminTestFixtu
         },
         projection: resolve_account_status(&facts, now.into()),
         account: AccountRecord {
+            codex_only: false,
             id: "acct_private_sentinel".into(),
             provider_kind: provider,
             groups: vec![group.clone()],
