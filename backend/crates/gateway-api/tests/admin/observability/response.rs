@@ -897,19 +897,27 @@ async fn usage_insights_preserve_exact_model_scope() {
         });
         observations.trend = Some(Vec::new());
     }
-    let response = observability::router::<AdminTestState>()
-        .with_state(fixture.state())
-        .oneshot(
-            Request::builder()
-                .uri("/api/admin/usage/insights/overview?provider=xai&model=%20grok-4.5%20")
-                .header(header::COOKIE, "cpr_session=valid-session")
-                .header("x-request-id", "req_usage_model_scope")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let router = observability::router::<AdminTestState>().with_state(fixture.state());
+    for path in [
+        "overview?provider=xai&model=%20grok-4.5%20",
+        "health?provider=xai&model=%20grok-4.5%20",
+        "performance?metric=throughput&provider=xai&model=%20grok-4.5%20",
+        "cost?metric=cost&provider=xai&model=%20grok-4.5%20",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/admin/usage/insights/{path}"))
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header("x-request-id", "req_usage_model_scope")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
     let observations = fixture.observations.lock().unwrap();
     assert!(!observations.summaries.is_empty());
     for (_, filter) in &observations.summaries {

@@ -2526,11 +2526,8 @@ Dashboard 默认 `period=today`，用量、诊断和错误查询默认 `period=7
 Dashboard 返回原始 `asOf` 及 `asOfDisplay`，作为当前数据的查询锚点
 
 请求明细列表接受 `currentPage`、`pageSize`、时间范围、`provider`、`clientApiKeyName`、`accountName`、`model`、`modelExact` 和 `status`。
-汇总和洞察接受时间范围、`provider` 与精确 `model`；诊断另接受 `dimension` 和 `statusCode`。
+汇总和洞察接受时间范围、`provider` 与精确 `model`；性能和成本另要求 `metric`，诊断另接受 `dimension` 和 `statusCode`。
 各接口拒绝未知参数，明细的名称与模糊模型筛选不改变顶部统计范围，全局精确模型选择同时作用于列表、汇总与洞察
-请求明细列表接受 `currentPage`、`pageSize`、时间范围、`provider`、`clientApiKeyName`、`accountName`、`model` 和 `status`。
-汇总和洞察接受时间范围与 `provider`；性能和成本另要求 `metric`，诊断另接受 `dimension`、`model` 和 `statusCode`。
-各接口拒绝未知参数，明细筛选不改变顶部统计范围
 
 请求列表的 `status` 可取 `success`、`error`、`all`，默认 `success`；未知值返回 `400`。
 `success` 沿用成功用量记录范围，`error` 包含最终 `failed`、`incomplete` 的请求，
