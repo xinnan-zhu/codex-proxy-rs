@@ -75,10 +75,9 @@ async fn scoped_account_reads_follow_current_enabled_groups_without_losing_admin
     };
     let repository = PgProviderAccountRepository::new(database.pool.clone());
     for id in ["acct_first", "acct_second", "acct_outside"] {
-        repository
-            .insert_provider_account(account(id, id))
-            .await
-            .unwrap();
+        let mut record = account(id, id);
+        record.codex_only = Some(id == "acct_first");
+        repository.insert_provider_account(record).await.unwrap();
     }
     let active = AccountGroupId::new(format!("grp_{}", "1".repeat(32))).unwrap();
     let disabled = AccountGroupId::new(format!("grp_{}", "2".repeat(32))).unwrap();
@@ -130,12 +129,14 @@ async fn scoped_account_reads_follow_current_enabled_groups_without_losing_admin
         ["acct_first"]
     );
     assert!(accounts[0].groups.is_empty());
+    assert!(accounts[0].codex_only);
     let detail = store
         .load_account("acct_first", AccountRuntimeSnapshot::default())
         .await
         .unwrap()
         .unwrap();
     assert_eq!(detail.account.groups.len(), 2);
+    assert!(detail.account.codex_only);
     assert!(
         detail
             .account
