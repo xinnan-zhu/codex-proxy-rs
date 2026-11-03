@@ -51,27 +51,20 @@
     },
     "configuration": {
       "fillInRequiredConfiguration": "请填写必填配置",
-      "incompatibleSecrets": "目标版本不支持部分已保存的敏感配置，请选择替换或清除",
-      "requiredSecretsCannotClear": "必填敏感配置不能清除：{labels}",
-      "requiredSecretsMissing": "没有可保留的必填敏感配置：{labels}",
+      "incompatibleSecrets": "请清除当前版本不再使用的敏感配置",
       "secretsRequired": "请填写必填敏感配置",
       "checkBasicSettings": "请检查基本设置",
       "noParameters": "无需填写插件参数",
       "sensitiveConfiguration": "敏感配置",
-      "secretsHelp": "用于令牌、密钥等机密参数，已保存的值不会回显",
-      "settingsSaved": "已保存 {count} 项",
-      "emptySecretPlaceholder": "留空将清除此项",
+      "emptySecretPlaceholder": "已保存，留空保留现有值",
       "about": "{name}说明",
-      "enterNewValue": "输入新值",
+      "enterNewValue": "未设置，输入新值",
       "pluginParameters": "插件参数",
       "advancedSettings": "高级设置",
       "clientAuthentication": "客户端认证",
       "applyAndSwitch": "应用并切换",
       "saveAndEnable": "保存并启用",
       "saveSettings": "保存设置",
-      "keepExistingValues": "保留现有值",
-      "replaceAllValues": "替换全部",
-      "clearAllValues": "清除全部",
       "checkPluginParameters": "请检查插件参数",
       "setRequestScopeOrCheckApplyTo": "请设置请求范围，或勾选“应用于所有请求”",
       "invalidIdentityMappings": "请检查客户端认证身份映射",
@@ -79,7 +72,6 @@
       "pluginSettings": "插件设置",
       "unchangedVersion": "当前版本保持不变，修改后再应用",
       "pluginSettingsPartition": "插件设置分区",
-      "secretsModeLabel": "敏感配置保存方式",
       "customScope": "自定义范围",
       "applyGlobally": "全局生效",
       "requestHandling": "请求处理：{value}",
@@ -104,7 +96,11 @@
         "deleteHistoricalConfiguration": "删除历史配置"
       },
       "stale": "插件设置已变更，请刷新后重试",
-      "incompatible": "请调整不兼容的设置后重试"
+      "incompatible": "请调整不兼容的设置后重试",
+      "secretPendingClear": "保存后清除此项",
+      "clearSecret": "清除{name}",
+      "undoClearSecret": "撤销清除{name}",
+      "secretNotDeclared": "当前版本不再使用，请清除"
     },
     "details": {
       "version": "版本",
@@ -203,11 +199,9 @@
       "identityMappingDescription": "身份映射说明",
       "identityHelp": "身份标识必须与插件返回的值完全一致，同一身份只能映射一次",
       "keyHelp": "选择该身份使用的 API密钥，已停用或删除的 API密钥不会获得执行权限",
-      "reloadClientKey": "重新加载 API密钥",
       "addMapping": "添加映射",
       "identityMark": "身份标识",
       "identityPlaceholder": "填写插件返回的身份标识",
-      "failedToLoadTryAgain": "加载失败，请重试",
       "selectClientApiKey": "选择 API密钥",
       "noClientKeyYet": "暂无 API密钥",
       "removeIdentityMapping": "移除第 {value} 条身份映射"
@@ -305,7 +299,6 @@
       "pluginDataLoadingFailed": "插件数据加载失败"
     },
     "frame": {
-      "pluginPageCannotBeLoaded": "插件页面无法加载",
       "versionChanged": "插件页面版本已变更，正在刷新",
       "navigationBlocked": "插件页面尝试离开已隔离的管理文档，已停止加载",
       "invalidQueryParameter": "查询参数无效",
@@ -381,7 +374,6 @@
       "configurationDescription": "使用插件提供的功能，当前配置为「{name}」",
       "description": "加载已启用插件的管理页面",
       "unpublished": "该配置或页面未发布，可能已停用或切换版本",
-      "refreshFailed": "页面目录刷新失败，当前显示上次成功加载的版本：{loadError}",
       "loadingPage": "正在加载页面"
     },
     "refreshPage": "刷新页面",
@@ -392,7 +384,6 @@
       "multipleSelectionsAllowed": "{label}（可多选）",
       "unlimitedPlaceholder": "不限（可多选）",
       "loading": "正在加载",
-      "isTemporarilyUnavailable": "暂时无法获取{label}",
       "noMatches": "没有匹配项",
       "no": "暂无{label}",
       "createOneInFirst": "请先在{value}中创建"

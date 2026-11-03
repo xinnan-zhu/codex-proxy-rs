@@ -2037,6 +2037,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
             zero_attempt_range(&request),
             UsageRecordFilter::default(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2056,6 +2057,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
             zero_attempt_range(&request),
             UsageRecordFilter::default(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2084,6 +2086,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
                 ..Default::default()
             },
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2113,6 +2116,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
             zero_attempt_range(&request),
             filter.clone(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2143,6 +2147,7 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
             zero_attempt_range(&request),
             filter,
             admin_observability::Granularity::FifteenMinutes,
+            true,
         )
         .await
         .expect("billing projection");

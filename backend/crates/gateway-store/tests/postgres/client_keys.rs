@@ -26,6 +26,139 @@ use gateway_store::postgres::{
 use super::TestDatabase;
 
 #[tokio::test]
+async fn peer_sharing_persists_across_reads_and_cannot_lose_its_group_scope() {
+    use gateway_admin::{
+        model::{
+            MutationActor, MutationContext,
+            account_groups::{AccountGroupColor, NewAccountGroup},
+            client_keys::{NewClientKey, UpdateClientKey},
+        },
+        ports::store::{AccountGroupStore as _, AdminStoreErrorKind},
+    };
+    use gateway_core::{
+        account::FastMode,
+        policy::{ClientPeerSharing, RateLimits},
+        routing::AccountGroupId,
+    };
+    use gateway_store::postgres::{
+        ObservabilityQueryBudget, PgAccountGroupRepository, PgRuntimeSnapshotRepository,
+        RuntimeSnapshotRepository as _,
+    };
+    let Some(database) = TestDatabase::create("peer_key_sharing").await else {
+        return;
+    };
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "peer-sharing-test".into(),
+    };
+    let group = AccountGroupId::new(format!("grp_{}", "2".repeat(32))).unwrap();
+    let groups = PgAccountGroupRepository::new(
+        database.pool.clone(),
+        ObservabilityQueryBudget::try_new(4, Duration::from_secs(10), Duration::from_secs(10))
+            .unwrap(),
+    );
+    groups
+        .create_account_group(
+            NewAccountGroup {
+                id: group.clone(),
+                name: "Shared".into(),
+                description: None,
+                color: AccountGroupColor::parse("#2563EBFF").unwrap(),
+                fast_mode: FastMode::Default,
+                allow_image_generation: true,
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    let store = PgAdminClientKeyStore::new(database.pool.clone());
+    let sharing = ClientPeerSharing {
+        enabled: true,
+        share_pool: true,
+        share_quota: true,
+        share_plans: false,
+    };
+    let id = ClientApiKeyId::new("key_peer_shared").unwrap();
+    store
+        .create_client_key(
+            NewClientKey {
+                fast_mode_reset: None,
+                model_fast_modes: Default::default(),
+
+                peer_sharing: sharing,
+                request_profile_overrides: Default::default(),
+                id: id.clone(),
+                name: "Peer".into(),
+                label: None,
+                group_ids: vec![group.clone()],
+                limits: RateLimits::unlimited(),
+                budget: Default::default(),
+                plaintext: "synthetic-peer-sharing-key".into(),
+            },
+            &context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_client_key(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .peer_sharing,
+        sharing
+    );
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert_eq!(snapshot.client_api_keys[0].peer_sharing, sharing);
+    let mut update = UpdateClientKey {
+        expected_fast_mode_reset: None,
+        reset_fast_mode_on_quota_reset: None,
+        fast_mode_reset_update: None,
+        model_fast_modes: None,
+
+        peer_sharing: None,
+        request_profile_override_updates: Default::default(),
+        id: id.clone(),
+        name: "Renamed peer".into(),
+        label: None,
+        group_ids: Vec::new(),
+        limits: RateLimits::unlimited(),
+        daily_limit_usd: None,
+        weekly_limit_usd: None,
+    };
+    let error = store
+        .update_client_key(update.clone(), &context)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), AdminStoreErrorKind::Invalid);
+    assert_eq!(
+        store
+            .get_client_key(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .groups
+            .len(),
+        1
+    );
+    update.group_ids = vec![group];
+    let (_, updated) = store
+        .update_client_key(update.clone(), &context)
+        .await
+        .unwrap();
+    assert_eq!(updated.peer_sharing, sharing);
+    update.group_ids.clear();
+    update.peer_sharing = Some(ClientPeerSharing::default());
+    let (_, updated) = store.update_client_key(update, &context).await.unwrap();
+    assert!(!updated.peer_sharing.enabled);
+    assert!(updated.groups.is_empty());
+    database.close().await;
+}
+
+#[tokio::test]
 async fn custom_keys_persist_exactly_and_keep_short_keys_masked() {
     use gateway_admin::model::{MutationActor, MutationContext, client_keys::NewClientKey};
     use gateway_core::policy::RateLimits;
@@ -55,6 +188,7 @@ async fn custom_keys_persist_exactly_and_keep_short_keys_masked() {
                 NewClientKey {
                     fast_mode_reset: None,
                     model_fast_modes: Default::default(),
+                    peer_sharing: Default::default(),
                     request_profile_overrides: Default::default(),
                     id: id.clone(),
                     name: format!("Custom {index}"),
@@ -112,6 +246,7 @@ async fn duplicate_custom_keys_conflict_atomically_without_extra_audits() {
     let command = |id: &str| NewClientKey {
         fast_mode_reset: None,
         model_fast_modes: Default::default(),
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: id.to_owned(),
@@ -150,6 +285,7 @@ fn generated_client_key_format_remains_valid() {
     let key = NewClientApiKey {
         fast_mode_reset: None,
         model_fast_modes: Default::default(),
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -185,6 +321,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
     let create = |id: &str, name: &str| NewClientKey {
         fast_mode_reset: None,
         model_fast_modes: Default::default(),
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
         name: name.to_owned(),
@@ -199,6 +336,7 @@ async fn client_key_names_are_checked_atomically_on_create_and_rename() {
         reset_fast_mode_on_quota_reset: None,
         fast_mode_reset_update: None,
         model_fast_modes: None,
+        peer_sharing: None,
         request_profile_override_updates: Default::default(),
         id,
         name: name.to_owned(),
@@ -664,6 +802,7 @@ fn client_key_debug_redacts_plaintext() {
     let key = NewClientApiKey {
         fast_mode_reset: None,
         model_fast_modes: Default::default(),
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         budget: Default::default(),
         id: "key-1".to_owned(),
@@ -739,6 +878,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
             NewClientKey {
                 fast_mode_reset: None,
                 model_fast_modes: Default::default(),
+                peer_sharing: Default::default(),
                 id: id.clone(),
                 name: "profile".to_owned(),
                 label: None,
@@ -765,6 +905,7 @@ async fn key_profile_override_roundtrips_and_explicit_clear_restores_inheritance
         reset_fast_mode_on_quota_reset: None,
         fast_mode_reset_update: None,
         model_fast_modes: None,
+        peer_sharing: None,
         id: id.clone(),
         name: "profile".to_owned(),
         label: None,
@@ -847,6 +988,8 @@ async fn model_fast_modes_persist_preserve_and_clear_in_key_records_and_snapshot
     let (_, record) = store
         .create_client_key(
             NewClientKey {
+                peer_sharing: Default::default(),
+
                 fast_mode_reset: None,
                 model_fast_modes: rules.clone(),
                 request_profile_overrides: Default::default(),
@@ -864,6 +1007,8 @@ async fn model_fast_modes_persist_preserve_and_clear_in_key_records_and_snapshot
         .unwrap();
     assert_eq!(record.model_fast_modes, rules);
     let update = |model_fast_modes| UpdateClientKey {
+        peer_sharing: None,
+
         expected_fast_mode_reset: None,
         reset_fast_mode_on_quota_reset: None,
         fast_mode_reset_update: None,
@@ -946,6 +1091,8 @@ async fn fast_restore_plan_persists_and_cas_protects_rearm_and_stale_admin_edits
     store
         .create_client_key(
             NewClientKey {
+                peer_sharing: Default::default(),
+
                 fast_mode_reset: Some(plan.clone()),
                 model_fast_modes: rules.clone(),
                 request_profile_overrides: Default::default(),
@@ -1009,6 +1156,8 @@ async fn fast_restore_plan_persists_and_cas_protects_rearm_and_stale_admin_edits
             .is_none()
     );
     let update = |expected_plan, next_plan| UpdateClientKey {
+        peer_sharing: None,
+
         expected_fast_mode_reset: Some(Some(expected_plan)),
         reset_fast_mode_on_quota_reset: None,
         fast_mode_reset_update: Some(Some(next_plan)),

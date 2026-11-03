@@ -17,8 +17,8 @@
 | `package` | CLI 生成的协议版本、单一目标平台与文件摘要，不需作者手写 |
 
 作者清单不能包含 `package`。使用 `Manifest::from_author_slice()` 校验并规范化；直接反序列化的 `Manifest`
-不会执行作者清单的 ID 与固定阶段推导，声明的可选字段仍使用其默认值。打包后，`main` 和所有资源都必须进入 `package.files`；宿主用
-`package_for(host, os, architecture)` 检查版本与平台。运行模式为 `trustedProcess`，信任边界见[完整信任](#完整信任)
+不会执行作者清单的 ID 与固定阶段推导，声明的可选字段仍使用其默认值。打包后，`main` 和所有资源都必须进入 `package.files`，
+宿主校验包结构、目标平台与文件完整性，宿主范围和能力版本另行进行兼容检查。运行模式为 `trustedProcess`，信任边界见[完整信任](#完整信任)
 
 宿主实际开放的合同由 [plugin-host-compatibility.json](../../runtime/plugin-host-compatibility.json)
 声明，SDK 的 `Capability::contract_versions()` 只表示 SDK 能描述的行为版本，不能代替宿主支持检查

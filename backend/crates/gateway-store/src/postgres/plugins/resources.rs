@@ -205,6 +205,7 @@ impl PluginResourceStore for PgPluginStore {
         let key = NewClientApiKey {
             fast_mode_reset: None,
             model_fast_modes: command.model_fast_modes,
+            peer_sharing: Default::default(),
             request_profile_overrides: command.request_profile_overrides,
             id: command.id.as_str().to_owned(),
             name: command.name,

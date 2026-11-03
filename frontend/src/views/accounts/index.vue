@@ -33,6 +33,7 @@ import { useAccountMutations } from './composables/useAccountMutations'
 import { useAccountsQuery } from './composables/useAccountsQuery'
 import { useAccountsTable } from './composables/useAccountsTable'
 import { accountColumns } from './constants'
+import { accountIdentityLabel } from './utils/accountIdentity'
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -99,7 +100,6 @@ const {
   togglingSchedulingAccountIds,
   deletingAccount,
   creatingAccount,
-  authorizingOAuth,
   authorization,
   authorizationCallback,
   batchDeleting,
@@ -172,6 +172,7 @@ const {
   weight: batchWeight,
   codexOnly: batchCodexOnly,
   modelAccess: batchModelAccess,
+  editedFields: batchEditedFields,
   catalogAccountId: batchCatalogAccountId,
   editingCount: batchEditingCount,
   proxyMode: batchProxyMode,
@@ -193,6 +194,7 @@ const {
   configurationReady,
   showEditModal,
   editingAccount,
+  name: editingName,
   notes: editingNotes,
   schedulingEnabled,
   concurrencyLimit: editingConcurrencyLimit,
@@ -258,7 +260,7 @@ const {
       <template #body>
         <div class="flex min-h-0 flex-col xl:h-full">
           <ZTable
-            class="h-100! min-h-100 flex-none [--cp-table-row-height:72px] xl:h-auto! xl:min-h-0 xl:flex-1"
+            class="h-100! min-h-100 flex-none [--z-table-row-height:72px] xl:h-auto! xl:min-h-0 xl:flex-1"
             :columns="visibleColumns"
             :data="accounts"
             :loading="loading"
@@ -271,7 +273,7 @@ const {
             <template #expander="{ row }">
               <button
                 type="button"
-                class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-cp-text-secondary transition hover:bg-cp-bg-text-hover hover:text-cp-text"
+                class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-z-text-secondary transition hover:bg-z-bg-text-hover hover:text-z-text"
                 :title="expandedAccountIds.has(row.id) ? t('accounts.page.collapseStatistics') : t('accounts.page.expandStatistics')"
                 @click.stop="toggleExpanded(row.id)"
               >
@@ -317,6 +319,7 @@ const {
                 :error-message="row.errorMessage"
                 :rate-limit-recovery-display="row.quota.rateLimitRecoveryDisplay"
                 :rate-limit-reason="row.quota.rateLimitReason"
+                :protection-rules="row.quota.protectionRules"
                 :recovery-probe-required="row.quota.recoveryProbeRequired"
                 :next-refresh-at="row.nextRefreshAt"
                 :next-refresh-at-display="row.nextRefreshAtDisplay"
@@ -325,7 +328,7 @@ const {
 
             <template #planType="{ row }">
               <div class="flex min-w-0 justify-center">
-                <AccountPlanBadge :authentication-kind="row.authenticationKind" :plan-type="row.planType" :plan-type-display="row.planTypeDisplay" />
+                <AccountPlanBadge :upstream="row.upstream" :authentication-kind="row.authenticationKind" :plan-type="row.planType" :plan-type-display="row.planTypeDisplay" />
               </div>
             </template>
 
@@ -364,7 +367,7 @@ const {
             </template>
 
             <template #expanded="{ row }">
-              <div class="grid items-stretch gap-3 p-4 lg:grid-cols-[1.05fr_2.45fr] xl:min-h-77">
+              <div class="grid items-stretch gap-3 p-4 lg:grid-cols-[1.05fr_2.45fr] xl:h-77.5">
                 <AccountQuotaPanel
                   :account="row"
                   :refreshing="refreshingQuotaAccountIds.has(row.id)"
@@ -416,7 +419,6 @@ const {
       :stopping="stoppingImportTask"
       :error="importTaskError"
       @select="importTasks.select"
-      @refresh="importTasks.refresh"
       @stop="importTasks.stop"
       @after-leave="importTasks.refresh(true)"
       @view-accounts="showImportTasks = false; loadAccounts()"
@@ -430,7 +432,6 @@ const {
       :account="reauthorizingAccount"
       :groups="groups"
       :groups-loading="groupsLoading"
-      :oauth-loading="authorizingOAuth"
       :reauthorizing="Boolean(reauthorizingAccount)"
       :saving="creatingAccount"
       @create="handleCreate"
@@ -442,6 +443,7 @@ const {
       v-model="showEditModal"
       v-model:api-key="editingApiKey"
       v-model:oauth-transport="editingOAuthTransport"
+      v-model:name="editingName"
       v-model:notes="editingNotes"
       v-model:enabled="schedulingEnabled"
       v-model:concurrency-limit="editingConcurrencyLimit"
@@ -471,6 +473,7 @@ const {
       v-model:proxy-id="batchProxyId"
       v-model:selected-group-ids="batchGroupIds"
       :catalog-account-id="batchCatalogAccountId"
+      :edited-fields="batchEditedFields"
       :selected-count="batchEditingCount"
       :groups="groups"
       :groups-loading="groupsLoading"
@@ -502,10 +505,7 @@ const {
       @confirm="handleDelete"
     >
       <p class="m-0">
-        {{ t('accounts.page.delete', { value: pendingDeleteAccount?.email
-          || pendingDeleteAccount?.accountId
-          || pendingDeleteAccount?.id
-          || t('accounts.page.thisAccount') }) }}
+        {{ t('accounts.page.delete', { value: pendingDeleteAccount ? accountIdentityLabel(pendingDeleteAccount) : t('accounts.page.thisAccount') }) }}
       </p>
     </ZConfirmDialog>
   </div>

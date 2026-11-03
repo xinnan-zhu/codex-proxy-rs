@@ -9,8 +9,8 @@ import AccountQuotaCycleProgress from '@/components/account/account-usage-window
 import {
   quotaWindowCost,
   quotaWindowCycleProgress,
+  quotaWindowDetails,
   quotaWindowLabel,
-  quotaWindowLocalUsageDisplay,
   quotaWindowPresentation,
   resolveAccountUsageWindowPresentation,
 } from '@/components/account/account-usage-window/presenter'
@@ -22,6 +22,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
+
 const now = useUiClock()
 const grouped = computed(() => props.windows.length > 1 && Boolean(props.label))
 const items = computed(() => props.windows.map((window) => {
@@ -33,6 +34,9 @@ const items = computed(() => props.windows.map((window) => {
   })
 
   return {
+    ...quotaWindowDetails(window),
+    cost: quotaWindowCost(window),
+    cycle: quotaWindowCycleProgress(window, now.value.getTime()),
     key: window.key,
     local: view.mode === 'local',
     localLabel: view.local.label,
@@ -45,11 +49,6 @@ const items = computed(() => props.windows.map((window) => {
       : quotaWindowLabel(window),
     ariaLabel: quotaWindowLabel(window),
     usedPercent: window.usedPercent,
-    usedPercentDisplay: window.usedPercentDisplay,
-    localUsageDisplay: quotaWindowLocalUsageDisplay(window),
-    cost: quotaWindowCost(window),
-    cycle: quotaWindowCycleProgress(window, now.value.getTime()),
-    resetAtDisplay: window.resetAtDisplay,
     percentTextClass: presentation.percentTextClass,
     barClass: presentation.barClass,
     barStyle: presentation.barStyle,
@@ -60,8 +59,8 @@ const items = computed(() => props.windows.map((window) => {
 <template>
   <section class="grid min-w-0 gap-2">
     <h4
-      v-if="grouped && label"
-      class="m-0 truncate text-cp-xs leading-4 font-heavy text-cp-text-secondary"
+      v-if="grouped && label && windows[0]?.limitId !== 'codex'"
+      class="m-0 truncate text-z-xs leading-4 font-heavy text-z-text-secondary"
       :title="label"
     >
       {{ label }}
@@ -73,12 +72,12 @@ const items = computed(() => props.windows.map((window) => {
     >
       <div v-for="item in items" :key="item.key" class="grid min-w-0 gap-1.5">
         <template v-if="item.local">
-          <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs leading-3.5">
-            <span class="min-w-0 truncate font-bold text-cp-text-quaternary">
+          <div class="flex min-w-0 items-baseline justify-between gap-2 text-z-xs leading-3.5">
+            <span class="min-w-0 truncate font-bold text-z-text-quaternary">
               {{ item.localLabel }}
             </span>
             <strong
-              class="shrink-0 font-mono font-heavy tabular-nums text-cp-text"
+              class="shrink-0 font-mono font-heavy tabular-nums text-z-text"
               :title="t('accounts.quota.requestsInThisWindow', { requestDisplay: item.requestDisplay })"
             >
               {{ t('accounts.quota.requestCount', { requestDisplay: item.requestDisplay }) }}
@@ -91,7 +90,7 @@ const items = computed(() => props.windows.map((window) => {
             :label="item.timelineTitle"
           />
 
-          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
+          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-z-text-tertiary">
             <span class="shrink-0 font-emphasis">{{ t('accounts.quota.statisticalRange') }}</span>
             <span
               class="min-w-0 truncate font-mono font-emphasis tabular-nums"
@@ -102,94 +101,64 @@ const items = computed(() => props.windows.map((window) => {
           </p>
         </template>
         <template v-else>
-          <div class="flex min-w-0 items-baseline justify-between gap-2 text-cp-xs leading-3.5">
-            <span class="min-w-0 truncate font-bold text-cp-text-quaternary">
+          <div class="flex min-w-0 items-baseline justify-between gap-2 text-z-xs leading-3.5">
+            <span class="min-w-0 truncate font-bold text-z-text-quaternary" :title="item.observationDisplay || undefined">
               {{ item.label }}
             </span>
             <span class="flex shrink-0 items-baseline gap-1.5 font-mono font-heavy tabular-nums">
+              <template v-if="item.amountUsedDisplay">
+                <strong class="text-z-text-quaternary">
+                  {{ item.amountUsedDisplay }}<template v-if="item.usedPercent === null"> / {{ item.quotaValueDisplay }}</template>
+                </strong>
+                <span v-if="item.localUsageDisplay" class="font-normal text-z-text-quaternary" aria-hidden="true">·</span>
+              </template>
               <strong
                 v-if="item.localUsageDisplay"
-                class="text-cp-text-quaternary"
+                class="text-z-text-quaternary"
                 :title="t('accounts.quota.usageInThisWindow', { localUsageDisplay: item.localUsageDisplay })"
               >
                 {{ item.localUsageDisplay }}
               </strong>
               <strong
+                v-if="!item.amountUsedDisplay || item.usedPercent !== null"
                 :class="item.percentTextClass"
-                :title="t('accounts.quota.quotaUsed', { rate: item.usedPercentDisplay })"
+                :title="item.usedPercent === null ? undefined : t('accounts.quota.quotaUsed', { rate: item.quotaValueDisplay })"
               >
-                {{ item.usedPercentDisplay }}
+                {{ item.quotaValueDisplay }}
               </strong>
             </span>
           </div>
 
-          <div class="grid min-w-0 gap-1">
+          <div
+            class="h-1.5 w-full overflow-hidden rounded-full bg-z-border-secondary"
+            role="progressbar"
+            :aria-label="item.ariaLabel"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-valuenow="item.stale ? undefined : item.usedPercent ?? undefined"
+            :aria-valuetext="item.stale ? `${item.quotaValueDisplay} · ${item.observationDisplay}` : item.quotaValueDisplay"
+          >
             <div
-              class="h-1.5 w-full overflow-hidden rounded-full bg-cp-border-secondary"
-              role="progressbar"
-              :aria-label="item.ariaLabel"
-              aria-valuemin="0"
-              aria-valuemax="100"
-              :aria-valuenow="item.usedPercent ?? undefined"
-              :aria-valuetext="item.usedPercentDisplay"
-            >
-              <div
-                class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
-                :class="item.barClass"
-                :style="item.barStyle"
-              />
-            </div>
-            <AccountQuotaCycleProgress
-              v-if="item.cycle"
-              class="h-1.5"
-              :progress="item.cycle"
-              :label="item.ariaLabel"
+              class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"
+              :class="item.barClass"
+              :style="item.barStyle"
             />
           </div>
 
-          <p
-            v-if="item.cycle"
-            class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
-          >
-            <span class="flex min-w-0 items-baseline gap-1">
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.untilReset') }}</span>
-              <strong class="truncate font-mono font-heavy tabular-nums text-cp-blue-text">
-                {{ item.cycle.remainingDisplay }}
-              </strong>
-            </span>
-            <span
-              class="min-w-0 truncate font-mono font-emphasis tabular-nums text-cp-text-tertiary"
-              :title="t('accounts.fork.resetTime', { time: item.resetAtDisplay })"
-            >
-              {{ item.resetAtDisplay }}
-            </span>
+          <AccountQuotaCycleProgress v-if="item.cycle" class="h-1 w-full" :progress="item.cycle" :label="item.ariaLabel" />
+          <p v-if="item.cost" class="m-0 flex justify-between text-z-xs text-z-text-tertiary">
+            <span>{{ t('accounts.fork.periodCost') }}</span>
+            <strong class="font-mono text-z-green-text">{{ item.cost.usedDisplay }}{{ item.cost.usedPartial ? '+' : '' }}</strong>
           </p>
-
-          <p
-            v-if="item.cost"
-            class="m-0 flex min-w-0 items-baseline justify-between gap-2 text-[10px] leading-3.5"
-          >
-            <span class="flex min-w-0 items-baseline gap-1">
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.thisPeriod') }}</span>
-              <strong
-                class="truncate font-mono font-heavy tabular-nums text-cp-green-text"
-                :title="item.cost.usedPartial ? t('accounts.fork.partialCost') : t('accounts.fork.recordedCost')"
-              >
-                {{ item.cost.usedDisplay }}{{ item.cost.usedPartial ? '+' : '' }}
-              </strong>
-            </span>
-            <span
-              class="flex min-w-0 items-baseline gap-1"
-              :title="t('accounts.fork.estimateHelp')"
-            >
-              <span class="shrink-0 font-emphasis text-cp-text-tertiary">{{ t('accounts.fork.estimatedQuota') }}</span>
-              <strong class="truncate font-mono font-heavy tabular-nums text-cp-text">
-                ≈ {{ item.cost.estimatedTotalDisplay }}
-              </strong>
-            </span>
+          <p v-if="item.cost" class="m-0 flex justify-between text-z-xs text-z-text-tertiary" :title="t('accounts.fork.estimateHelp')">
+            <span>{{ t('accounts.fork.estimatedQuota') }}</span>
+            <strong class="font-mono">≈ {{ item.cost.estimatedTotalDisplay }}</strong>
           </p>
-
-          <p v-if="!item.cycle" class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
+          <p v-if="item.cycle" class="m-0 flex justify-between text-z-xs text-z-text-tertiary">
+            <span>{{ t('accounts.fork.untilReset') }}</span>
+            <strong class="font-mono text-z-blue-text">{{ item.cycle.remainingDisplay }}</strong>
+          </p>
+          <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-z-text-tertiary">
             <span class="shrink-0 font-emphasis">{{ t('common.actions.reset') }}</span>
             <span class="min-w-0 truncate font-mono font-emphasis tabular-nums" :title="item.resetAtDisplay">
               {{ item.resetAtDisplay }}

@@ -157,6 +157,8 @@ pub struct CreateClientKeyRequest {
     #[serde(default)]
     model_fast_modes: gateway_core::account::ModelFastModes,
     #[serde(default)]
+    peer_sharing: gateway_core::policy::ClientPeerSharing,
+    #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
     xai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -196,6 +198,7 @@ impl CreateClientKeyRequest {
         Ok(CreateClientKey {
             model_fast_modes: self.model_fast_modes,
             reset_fast_mode_on_quota_reset: self.reset_fast_mode_on_quota_reset,
+            peer_sharing: self.peer_sharing,
             request_profile_overrides,
             custom_key: self
                 .custom_key
@@ -225,6 +228,7 @@ impl CreateClientKeyRequest {
 pub struct UpdateClientKeyRequest {
     reset_fast_mode_on_quota_reset: Option<bool>,
     model_fast_modes: Option<gateway_core::account::ModelFastModes>,
+    peer_sharing: Option<gateway_core::policy::ClientPeerSharing>,
     #[serde(default)]
     provider_request_profile_overrides: ProviderRequestProfileOverrideUpdates,
     #[serde(default, deserialize_with = "deserialize_profile_override")]
@@ -260,6 +264,7 @@ impl UpdateClientKeyRequest {
             reset_fast_mode_on_quota_reset: self.reset_fast_mode_on_quota_reset,
             fast_mode_reset_update: None,
             model_fast_modes: self.model_fast_modes,
+            peer_sharing: self.peer_sharing,
             request_profile_override_updates,
             id: client_key_id(self.id, "clientKeyMutationNotFound")?,
             name: self.name,
@@ -351,6 +356,8 @@ pub struct ClientKeyView {
     fast_mode_resets_at_display: Option<String>,
     fast_mode_reset_completed: bool,
     model_fast_modes: gateway_core::account::ModelFastModes,
+    #[serde(default)]
+    peer_sharing: gateway_core::policy::ClientPeerSharing,
     provider_request_profile_overrides: ProviderRequestProfileOverrides,
     /// 固定兼容字段；值始终从 provider_request_profile_overrides 派生
     openai_client_profile_override: Option<serde_json::Map<String, serde_json::Value>>,
@@ -420,6 +427,7 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
                 .cloned(),
             xai_client_profile_override: provider_request_profile_overrides.get("xai").cloned(),
             provider_request_profile_overrides,
+            peer_sharing: record.peer_sharing,
             id: record.id.to_string(),
             name: record.name,
             label: record.label,
@@ -1121,13 +1129,28 @@ fn mutation_response(
 }
 
 fn map_wire_error(error: WireValidationError) -> AdminError {
-    match error.field() {
-        "cursor" => AdminError::bad_request("Client API Key 游标不合法"),
+    let message = match error.field() {
+        "cursor" => "API Key 分页游标不合法",
         "clientKeyRevealNotFound" | "clientKeyMutationNotFound" => {
-            AdminError::not_found("Client API Key 不存在")
+            return AdminError::not_found("API Key 不存在");
         }
-        _ => AdminError::bad_request("Client API Key 请求不合法"),
-    }
+        "id" => "API Key ID 不能为空",
+        "name" => "API Key 名称不能为空",
+        "label" => "API Key 标签不能为空",
+        "customKey" => "自定义 API Key 仅支持英文字母、数字和英文符号",
+        "groupIds" => "账号分组无效、重复或数量超限",
+        "maxConcurrency" => "并发请求上限超出支持范围",
+        "requestsPerMinute" => "每分钟请求上限超出支持范围",
+        "dailyLimitUsd" => "每日美元限额须非负，整数和小数各最多 10 位",
+        "weeklyLimitUsd" => "每周美元限额须非负，整数和小数各最多 10 位",
+        "providerRequestProfileOverrides" => "API Key 客户端身份配置无效或字段冲突",
+        "limit" => "每页数量须为 1 至 65535",
+        "search" => "搜索内容过长或包含控制字符",
+        "sortBy" => "排序字段不受支持",
+        "sortDirection" => "排序方向必须为 asc（升序）或 desc（降序）",
+        _ => "API Key 请求参数不合法",
+    };
+    AdminError::bad_request(message)
 }
 
 fn map_service_error(error: gateway_admin::model::AdminError) -> AdminError {

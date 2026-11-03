@@ -12,7 +12,7 @@ const { t } = useI18n({ useScope: 'global' })
 
 <template>
   <div
-    class="w-full overflow-hidden rounded-full bg-cp-border-secondary"
+    class="w-full overflow-hidden rounded-full bg-z-border-secondary"
     role="progressbar"
     :aria-label="t('accounts.fork.cycleLabel', { label })"
     aria-valuemin="0"
@@ -22,7 +22,7 @@ const { t } = useI18n({ useScope: 'global' })
     :title="t('accounts.fork.cycleText', { percent: progress.elapsedPercentDisplay, remaining: progress.remainingDisplay })"
   >
     <div
-      class="h-full rounded-full bg-cp-blue-solid transition-[width] duration-200 motion-reduce:transition-none"
+      class="h-full rounded-full bg-z-blue-solid transition-[width] duration-200 motion-reduce:transition-none"
       :style="progress.barStyle"
     />
   </div>

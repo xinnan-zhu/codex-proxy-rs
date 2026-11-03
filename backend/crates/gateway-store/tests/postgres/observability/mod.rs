@@ -1,5 +1,6 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
+mod metric;
 mod projection;
 
 use std::{
@@ -174,6 +175,7 @@ async fn output_throughput_prefers_upstream_duration_and_labels_local_estimates(
                 range,
                 UsageRecordFilter::default(),
                 gateway_admin::model::observability::Granularity::Hour,
+                true,
             )
             .await
             .map(|snapshot| snapshot.overview)
@@ -513,6 +515,44 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
         diagnostics.items[0].account_plan_type.as_deref(),
         Some("team")
     );
+    for (authentication_kind, plan_type) in [
+        (Some("api_key"), None),
+        (Some("oauth"), Some("team")),
+        (None, None),
+    ] {
+        sqlx::query(
+            "update model_requests set request_observation_json = jsonb_set(
+                request_observation_json, '{account}',
+                (request_observation_json->'account') || jsonb_build_object(
+                    'authenticationKind', $1::text, 'planTypeSnapshot', $2::text
+                )
+             ) where id = 'req_observe_uncommitted'",
+        )
+        .bind(authentication_kind)
+        .bind(plan_type)
+        .execute(&database.pool)
+        .await
+        .expect("update request authentication snapshot");
+        super::drain_analytics(&database.pool).await;
+        let diagnostics = store
+            .usage_diagnostics(
+                range,
+                admin_observability::UsageFilter {
+                    provider_account_ref: Some("acct_team".to_owned()),
+                    ..Default::default()
+                },
+                admin_observability::DiagnosticDimension::Account,
+                100,
+            )
+            .await
+            .expect("deleted account authentication snapshot");
+        assert_eq!(diagnostics.items.len(), 1);
+        assert_eq!(
+            diagnostics.items[0].account_authentication_kind.as_deref(),
+            authentication_kind
+        );
+        assert_eq!(diagnostics.items[0].account_plan_type.as_deref(), plan_type);
+    }
     database.close().await;
 }
 
@@ -1190,6 +1230,7 @@ async fn recovered_continuation_failure_should_be_visible_in_ops_but_hidden_from
             range,
             UsageRecordFilter::default(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -1515,28 +1556,12 @@ impl ProviderCooldownPort for StaticCooldowns {
         Box::pin(async { Ok(false) })
     }
 
-    fn record_capacity_failure<'a>(
-        &'a self,
-        _account_id: &'a ProviderAccountId,
-        _window: Duration,
-        _in_flight: u32,
-    ) -> BoxFuture<'a, Result<u32, ProviderStoreError>> {
-        Box::pin(async { Ok(0) })
-    }
-
     fn clear_after_success<'a>(
         &'a self,
         _account_id: &'a ProviderAccountId,
         _through_revision: gateway_core::account::CredentialRevision,
     ) -> BoxFuture<'a, Result<(), ProviderStoreError>> {
         Box::pin(async { Ok(()) })
-    }
-
-    fn capacity_peak_in_flight<'a>(
-        &'a self,
-        _account_id: &'a ProviderAccountId,
-    ) -> BoxFuture<'a, Result<Option<u32>, ProviderStoreError>> {
-        Box::pin(async { Ok(None) })
     }
 }
 
@@ -1572,6 +1597,7 @@ async fn calculated_usage_billing_facts_keep_only_completed_calculated_costs() {
             range,
             UsageRecordFilter::default(),
             admin_observability::Granularity::FifteenMinutes,
+            true,
         )
         .await
         .expect("projected costs");
@@ -1590,6 +1616,7 @@ async fn calculated_usage_billing_facts_keep_only_completed_calculated_costs() {
             admin_observability::TimeRange::new(range.start, range.end).unwrap(),
             admin_observability::UsageFilter::default(),
             admin_observability::Granularity::FifteenMinutes,
+            true,
         )
         .await
         .expect("admin projected costs");
@@ -2025,6 +2052,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
             range,
             admin_observability::UsageFilter::default(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2513,6 +2541,7 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
             range,
             UsageRecordFilter::default(),
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2540,6 +2569,7 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
                 ..UsageRecordFilter::default()
             },
             gateway_admin::model::observability::Granularity::Hour,
+            true,
         )
         .await
         .map(|snapshot| snapshot.overview)
@@ -2875,6 +2905,7 @@ async fn calendar_trends_share_exact_day_boundaries_for_requests_costs_and_empty
                 range,
                 Default::default(),
                 admin_observability::Granularity::Day,
+                true,
             )
             .await
             .expect("calendar cost buckets");
@@ -3185,7 +3216,7 @@ async fn observability_store_executes_caller_selection_without_replacing_policy(
             .unwrap();
         super::drain_analytics(&database.pool).await;
         let facts = store
-            .usage_insights_observation(range, UsageFilter::default(), granularity)
+            .usage_insights_observation(range, UsageFilter::default(), granularity, true)
             .await
             .unwrap();
         let facts = facts

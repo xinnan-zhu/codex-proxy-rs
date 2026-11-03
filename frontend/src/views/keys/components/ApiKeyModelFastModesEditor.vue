@@ -96,11 +96,11 @@ watch(() => props.active, (active) => {
 
 <template>
   <div class="grid min-w-0 gap-3">
-    <p class="text-sm text-cp-text-secondary">
+    <p class="text-sm text-z-text-secondary">
       {{ t('keys.editor.modelFastModeHint') }}
     </p>
     <ZInput v-model="search" :aria-label="t('keys.editor.searchFastModels')" :placeholder="t('keys.editor.searchFastModels')" :disabled="disabled" />
-    <div v-if="error" class="flex flex-wrap items-center gap-2 text-sm text-cp-text-secondary">
+    <div v-if="error" class="flex flex-wrap items-center gap-2 text-sm text-z-text-secondary">
       <span>{{ error }}</span>
       <ZButton size="small" :disabled="disabled" @click="load">
         {{ t('common.actions.retry') }}
@@ -113,10 +113,10 @@ watch(() => props.active, (active) => {
             <div class="break-all text-sm">
               {{ item.label }}
             </div>
-            <div class="break-all text-xs text-cp-text-secondary">
+            <div class="break-all text-xs text-z-text-secondary">
               {{ item.provider }} · {{ item.model }}
             </div>
-            <p v-if="!item.supportsPriority" class="text-xs text-cp-text-secondary">
+            <p v-if="!item.supportsPriority" class="text-xs text-z-text-secondary">
               {{ t('keys.editor.fastUnavailable') }}
             </p>
           </div>

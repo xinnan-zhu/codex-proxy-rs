@@ -122,7 +122,7 @@ jobs:
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Setup nextest
-        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest@0.9.143
           fallback: none
@@ -176,7 +176,7 @@ jobs:
           cargo nextest run \
             --cargo-metadata "$RUNNER_TEMP/nextest-cargo-metadata.json" \
             --binaries-metadata "$RUNNER_TEMP/nextest-binaries.json" \
-            --no-tests fail
+            --test-threads 8 --no-tests fail
 
       - name: Store tests with Redis ACL authentication
         working-directory: backend
@@ -195,7 +195,7 @@ jobs:
           cargo nextest run \
             --cargo-metadata "$RUNNER_TEMP/nextest-cargo-metadata.json" \
             --binaries-metadata "$RUNNER_TEMP/nextest-binaries.json" \
-            --no-tests fail -E 'package(=gateway-store) & test(/^redis::/)'
+            --test-threads 8 --no-tests fail -E 'package(=gateway-store) & test(/^redis::/)'
 
   frontend:
     if: inputs.run_frontend

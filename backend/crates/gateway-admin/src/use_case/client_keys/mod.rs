@@ -137,7 +137,7 @@ impl ClientKeyService for DefaultClientKeyService {
             .get_client_key(id)
             .await
             .map_err(|error| map_store_error(error, "client API key"))?
-            .ok_or_else(|| AdminError::not_found("Client API Key 不存在"))
+            .ok_or_else(|| AdminError::not_found("API Key 不存在"))
     }
 
     async fn budget(&self, id: &ClientApiKeyId) -> Result<ClientBudgetStatus, AdminError> {
@@ -192,7 +192,7 @@ impl ClientKeyService for DefaultClientKeyService {
             .reveal_client_key(id)
             .await
             .map_err(|error| map_store_error(error, "client API key"))?
-            .ok_or_else(|| AdminError::not_found("Client API Key 不存在"))
+            .ok_or_else(|| AdminError::not_found("API Key 不存在"))
     }
 
     async fn create(
@@ -201,7 +201,7 @@ impl ClientKeyService for DefaultClientKeyService {
         command: CreateClientKey,
     ) -> Result<CreatedClientKey, AdminError> {
         crate::model::client_keys::validate_group_ids(&command.group_ids)
-            .map_err(|_| AdminError::invalid("Client API Key 分组不合法"))?;
+            .map_err(|_| AdminError::invalid("API Key 分组不合法"))?;
         for (provider, profile) in &command.request_profile_overrides {
             self.providers
                 .require(provider)
@@ -219,6 +219,7 @@ impl ClientKeyService for DefaultClientKeyService {
         } else {
             None
         };
+        validate_peer_sharing(command.peer_sharing, &command.group_ids)?;
         let id = ClientApiKeyId::new(format!("key_{}", Uuid::now_v7().simple()))
             .map_err(|_| AdminError::internal("创建 Client API Key ID 失败"))?;
         let plaintext = if let Some(key) = command.custom_key {
@@ -232,6 +233,7 @@ impl ClientKeyService for DefaultClientKeyService {
                 NewClientKey {
                     fast_mode_reset,
                     model_fast_modes: command.model_fast_modes,
+                    peer_sharing: command.peer_sharing,
                     request_profile_overrides: command.request_profile_overrides,
                     id,
                     name: command.name,
@@ -258,7 +260,7 @@ impl ClientKeyService for DefaultClientKeyService {
         command: UpdateClientKey,
     ) -> Result<ClientKeyMutation, AdminError> {
         crate::model::client_keys::validate_group_ids(&command.group_ids)
-            .map_err(|_| AdminError::invalid("Client API Key 分组不合法"))?;
+            .map_err(|_| AdminError::invalid("API Key 分组不合法"))?;
         let mut command = command;
         let current = self.get(&command.id).await?;
         command.expected_fast_mode_reset = Some(current.fast_mode_reset.clone());
@@ -324,6 +326,9 @@ impl ClientKeyService for DefaultClientKeyService {
                     .and_then(|provider| provider.preview_client_profile(profile))
                     .map_err(|error| super::map_provider_error(error, "client profile"))?;
             }
+        }
+        if let Some(sharing) = command.peer_sharing {
+            validate_peer_sharing(sharing, &command.group_ids)?;
         }
         let id = command.id.clone();
         let (config_revision, record) = self
@@ -397,9 +402,7 @@ fn validate_cursor(query: &ClientKeyListQuery) -> Result<(), AdminError> {
         return Ok(());
     };
     if cursor.sort != query.sort {
-        return Err(AdminError::invalid(
-            "Client API Key 游标排序与查询条件不一致",
-        ));
+        return Err(AdminError::invalid("分页游标与排序条件不一致"));
     }
     let matches = matches!(
         (cursor.sort.field, &cursor.value),
@@ -420,7 +423,7 @@ fn validate_cursor(query: &ClientKeyListQuery) -> Result<(), AdminError> {
     if matches {
         Ok(())
     } else {
-        Err(AdminError::invalid("Client API Key 游标不合法"))
+        Err(AdminError::invalid("API Key 分页游标不合法"))
     }
 }
 
@@ -429,4 +432,17 @@ pub(super) fn generate_key() -> String {
     let mut bytes = [0_u8; 32];
     OsRng.fill_bytes(&mut bytes);
     format!("sk_{}", URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn validate_peer_sharing(
+    sharing: gateway_core::policy::ClientPeerSharing,
+    groups: &[gateway_core::routing::AccountGroupId],
+) -> Result<(), AdminError> {
+    sharing.validate(!groups.is_empty()).map_err(|error| {
+        use gateway_core::policy::ClientPeerSharingError;
+        AdminError::invalid(match error {
+            ClientPeerSharingError::MissingGroupScope => "开启 CPR 互联需要指定账号分组",
+            ClientPeerSharingError::PlansWithoutPool => "公开套餐分布需要先公开账号池",
+        })
+    })
 }

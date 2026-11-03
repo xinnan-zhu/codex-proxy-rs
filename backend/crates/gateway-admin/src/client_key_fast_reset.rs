@@ -1,7 +1,7 @@
 //! 独立 Key Fast 恢复任务，不在推理请求刷新上游额度
 
 use crate::{
-    model::{MutationActor, MutationContext, client_keys::ClientKeyRecord},
+    model::{AdminError, MutationActor, MutationContext, client_keys::ClientKeyRecord},
     ports::store::ClientKeyStore,
     use_case::client_keys::fast_reset::{AccountObservations, FastResetSource, in_scope},
 };
@@ -9,7 +9,10 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use gateway_core::{
     runtime::SnapshotControl,
-    task::{ScheduledTask, WorkerCycleContext, WorkerTaskError},
+    task::{
+        ScheduledTask, WorkerContribution, WorkerCycleContext, WorkerId, WorkerKind,
+        WorkerLeaseRequest, WorkerRegistration, WorkerRunnable, WorkerSchedule, WorkerTaskError,
+    },
 };
 use std::{sync::Arc, time::Duration};
 
@@ -85,6 +88,31 @@ impl ScheduledTask for ClientKeyFastResetTask {
 }
 
 impl ClientKeyFastResetTask {
+    pub(crate) fn into_worker(self) -> Result<WorkerContribution, AdminError> {
+        let id = WorkerId::try_new(WorkerKind::ClientKeyFastReset, "admin")
+            .map_err(|_| AdminError::internal("Key Fast Worker ID 不合法"))?;
+        let schedule = WorkerSchedule::try_new(
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+            Duration::from_secs(90),
+            Duration::from_secs(30),
+        )
+        .map_err(|_| AdminError::internal("Key Fast Worker 调度配置不合法"))?;
+        let lease = WorkerLeaseRequest::try_new(id.clone(), Duration::from_secs(90))
+            .map_err(|_| AdminError::internal("Key Fast Worker 租约配置不合法"))?;
+        let registration = WorkerRegistration::try_new(
+            id,
+            WorkerRunnable::Scheduled {
+                schedule,
+                lease: Some(lease),
+                task: Box::new(self),
+            },
+        )
+        .map_err(|_| AdminError::internal("Key Fast Worker 注册失败"))?;
+        Ok(WorkerContribution::Registration(registration))
+    }
+
     async fn advance(
         &self,
         record: ClientKeyRecord,

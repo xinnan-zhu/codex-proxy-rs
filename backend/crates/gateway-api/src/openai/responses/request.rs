@@ -390,7 +390,7 @@ const MAX_ZSTD_WINDOW_LOG: u32 = 26;
 /// 未压缩与 `identity` 借用原始正文；压缩正文在读取过程中限制展开大小，
 /// 避免先完整分配再检查
 /// 只接受单一编码，重复头和叠加编码不能只解释第一项
-fn decompress_request_body<'a>(
+pub(in crate::openai) fn decompress_request_body<'a>(
     body: &'a [u8],
     headers: &HeaderMap,
     max_decompressed_bytes: usize,
@@ -638,8 +638,6 @@ fn passthrough_header_name(name: &str, connection_headers: &[String]) -> bool {
             | "chatgpt-project-id"
             | "openai-organization"
             | "openai-project"
-            | "x-openai-account-routing-override"
-            | "x-openai-fedramp"
             // 上游指纹必须由运行时画像统一生成，客户端 originator/User-Agent/version
             // 不能作为不透明头透传覆盖，避免不同下游客户端暴露不一致的设备指纹
             | "originator"

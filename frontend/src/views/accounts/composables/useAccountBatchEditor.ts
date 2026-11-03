@@ -6,8 +6,7 @@ import { batchUpdateAccounts } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
-import { accountModelAccessError } from '../utils/modelAccess'
-import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
+import { accountSchedulingValues, concurrencyLimitInput } from '../utils/schedulingForm'
 
 export function useAccountBatchEditor(options: {
   accounts: Ref<Account[]>
@@ -18,7 +17,7 @@ export function useAccountBatchEditor(options: {
   const selectedAccountsById = new Map<string, Account>()
   const showBatchEditModal = shallowRef(false)
   const editingCount = shallowRef(0)
-  const schedulingEnabled = shallowRef(false)
+  const schedulingEnabled = shallowRef<boolean>()
   const concurrencyLimit = shallowRef('')
   const weight = shallowRef('1')
   const codexOnly = shallowRef(false)
@@ -61,7 +60,7 @@ export function useAccountBatchEditor(options: {
     modelAccess.value = undefined
     editedFields.value.clear()
     catalogAccountId.value = accounts[0]?.id
-    schedulingEnabled.value = false
+    schedulingEnabled.value = undefined
     codexOnly.value = accounts.every(account => account.codexOnly)
     proxyMode.value = 'preserve'
     proxyId.value = ''
@@ -74,26 +73,16 @@ export function useAccountBatchEditor(options: {
   async function save() {
     if (saving.value || options.selectedIds.value.size === 0)
       return
-    const modelError = accountModelAccessError(modelAccess.value)
-    if (modelError) {
-      ZNotification.warning({ message: modelError })
+    if (schedulingEnabled.value === undefined && modelAccess.value === undefined
+      && editedFields.value.size === 0 && proxyMode.value === 'preserve') {
+      showBatchEditModal.value = false
       return
     }
-    const scheduling = parseAccountSchedulingForm(editedFields.value.has('concurrencyLimit')
+    const scheduling = accountSchedulingValues(editedFields.value.has('concurrencyLimit')
       ? concurrencyLimit.value
       : '', editedFields.value.has('weight')
       ? weight.value
       : '1')
-    if (proxyMode.value === 'proxy' && !proxyId.value.trim()) {
-      ZNotification.warning({
-        message: t('accounts.batchEdit.proxyRequired'),
-      })
-      return
-    }
-    if (!scheduling.valid) {
-      ZNotification.warning({ message: scheduling.message })
-      return
-    }
 
     await saveAction.run(async () => {
       const accountIds = selectedAccounts().map(account => account.id)
@@ -107,10 +96,10 @@ export function useAccountBatchEditor(options: {
             : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         concurrencyLimit: editedFields.value.has('concurrencyLimit')
-          ? scheduling.values.concurrencyLimit
+          ? scheduling.concurrencyLimit
           : undefined,
         weight: editedFields.value.has('weight')
-          ? scheduling.values.weight
+          ? scheduling.weight
           : undefined,
         groupIds: editedFields.value.has('groupIds')
           ? [
@@ -167,6 +156,7 @@ export function useAccountBatchEditor(options: {
     weight,
     codexOnly,
     modelAccess,
+    editedFields,
     catalogAccountId,
     proxyMode,
     proxyId,

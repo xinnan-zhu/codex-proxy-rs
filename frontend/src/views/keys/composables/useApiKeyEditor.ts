@@ -1,4 +1,4 @@
-import type { ApiKey } from '@/api'
+import type { ApiKey, ApiKeyPeerSharing } from '@/api'
 import type { ModelFastModes } from '@/api/modules/keys'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
 import { cloneDeep, isEqual } from 'es-toolkit'
@@ -13,6 +13,7 @@ export interface ApiKeyFormValue {
   fastModeResetsAtDisplay: string | null
   fastModeResetCompleted: boolean
   modelFastModes: ModelFastModes
+  peerSharing: ApiKeyPeerSharing
   providerRequestProfileOverrides: ProviderRequestProfiles
   customKey: string
   name: string
@@ -48,6 +49,7 @@ export function useApiKeyEditor(options: {
       resetFastModeOnQuotaReset: key.resetFastModeOnQuotaReset,
       fastModeResetsAtDisplay: key.fastModeResetsAtDisplay,
       fastModeResetCompleted: key.fastModeResetCompleted,
+      peerSharing: { ...key.peerSharing },
       providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
       customKey: '',
       name: key.name,
@@ -64,7 +66,7 @@ export function useApiKeyEditor(options: {
   function requestSave() {
     if (savingKey.value)
       return
-    if (form.value.groupIds.length === 0) {
+    if (form.value.groupIds.length === 0 && !form.value.peerSharing.enabled) {
       showAllAccountsConfirm.value = true
       return
     }
@@ -84,6 +86,7 @@ export function useApiKeyEditor(options: {
       async () => {
         const payload = {
           modelFastModes: cloneDeep(form.value.modelFastModes),
+          peerSharing: { ...form.value.peerSharing },
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
           groupIds: [
@@ -166,6 +169,12 @@ function emptyForm(): ApiKeyFormValue {
     resetFastModeOnQuotaReset: false,
     fastModeResetsAtDisplay: null,
     fastModeResetCompleted: false,
+    peerSharing: {
+      enabled: false,
+      sharePool: false,
+      shareQuota: false,
+      sharePlans: false,
+    },
     providerRequestProfileOverrides: {},
     customKey: '',
     name: '',

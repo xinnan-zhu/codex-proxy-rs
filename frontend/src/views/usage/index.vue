@@ -51,11 +51,14 @@ const {
   modelOptions,
   usagePagination,
   loading,
-  error,
-  analyticsLoading,
   records,
   summary,
-  insights,
+  health,
+  performance,
+  cost,
+  diagnostics,
+  performanceMetric,
+  costMetric,
   refreshingList,
   diagnosticDimension,
   loadUsageRecords,
@@ -123,12 +126,15 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
-    <UsageSummaryCards :summary="summary" :cost="insights.overview.cost" />
+    <UsageSummaryCards :summary="summary.data" :error="summary.error" :cost="cost.data?.data.summary ?? null" />
     <UsageInsightsGrid
       v-model:diagnostic-dimension="diagnosticDimension"
-      :overview="insights.overview"
-      :diagnostics="insights.diagnostics"
-      :loading="analyticsLoading"
+      v-model:performance-metric="performanceMetric"
+      v-model:cost-metric="costMetric"
+      :health="health"
+      :performance="performance"
+      :cost="cost"
+      :diagnostics="diagnostics"
     />
 
     <ZCard
@@ -136,11 +142,11 @@ watch(timeRange, () => {
     >
       <template #header>
         <div>
-          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text">
+          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-z-text">
             {{ t('usage.page.requestDetails') }}
           </h2>
           <p
-            class="mt-1.75 mb-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary"
+            class="mt-1.75 mb-0 text-z leading-[1.15] font-emphasis text-z-text-secondary"
           >
             {{ t('usage.page.recordsDescription') }}
           </p>
@@ -175,7 +181,7 @@ watch(timeRange, () => {
               :columns="visibleColumns"
               :rows="records"
               :loading="loading"
-              :empty-text="error ? t('usage.page.failedToLoad', { error }) : t('usage.page.noRequestsMatchTheseFilters')"
+              :empty-text="t('usage.page.noRequestsMatchTheseFilters')"
             >
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">

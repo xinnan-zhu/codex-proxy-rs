@@ -42,10 +42,17 @@ pub struct ProcessSystemOperations {
     cancellation: CancellationToken,
     events: Arc<UpdateEvents>,
     config: Arc<SystemUpdateConfig>,
-    operation_lock: Arc<AsyncMutex<Option<OperationFileLock>>>,
+    operation_lock: Arc<AsyncMutex<Option<RestartGuard>>>,
     release_cache: Arc<ReleaseCache>,
     update_proxy: Arc<std::sync::RwLock<Option<OutboundProxy>>>,
     running_files: Arc<Result<ReleaseFiles, OperationError>>,
+    diagnostics: super::diagnostics::Diagnostics,
+}
+
+struct RestartGuard {
+    // 字段按声明顺序释放，先移除更新锁，再通知替换进程开始启动
+    _file_lock: OperationFileLock,
+    _replacement_input: Option<std::process::ChildStdin>,
 }
 
 impl ProcessSystemOperations {
@@ -65,6 +72,7 @@ impl ProcessSystemOperations {
             release_cache: Arc::new(ReleaseCache::default()),
             update_proxy: Arc::new(std::sync::RwLock::new(None)),
             running_files,
+            diagnostics: super::diagnostics::Diagnostics::default(),
         }
     }
 
@@ -75,10 +83,18 @@ impl ProcessSystemOperations {
             .clone()
     }
 
-    fn lock_operation(&self) -> Result<OwnedMutexGuard<Option<OperationFileLock>>, OperationError> {
+    /// Store 就绪后绑定受控诊断端口，不改变 Host 的初始化顺序
+    pub fn set_diagnostics(
+        &self,
+        diagnostics: Arc<dyn gateway_core::diagnostics::OperationalDiagnostics>,
+    ) {
+        self.diagnostics.bind(diagnostics);
+    }
+
+    fn lock_operation(&self) -> Result<OwnedMutexGuard<Option<RestartGuard>>, OperationError> {
         let operation = Arc::clone(&self.operation_lock)
             .try_lock_owned()
-            .map_err(|_| conflict("system operation is already running"))?;
+            .map_err(|_| conflict("已有系统操作正在执行"))?;
         if operation.is_some() {
             return Err(conflict("服务正在重启"));
         }
@@ -105,7 +121,7 @@ impl ProcessSystemOperations {
         let selected = self.resolve_channel(channel)?;
         if let Err(error) = validate_update_target(&self.config.version, &target, selected) {
             self.events
-                .error_terminal(None, Some("preflight"), error.to_string());
+                .error_terminal(None, Some("preflight"), error.message().to_owned());
             return Err(error);
         }
         let status = self.reconcile_installation()?;
@@ -119,6 +135,7 @@ impl ProcessSystemOperations {
             &target,
             &self.config.version,
             file_lock,
+            self.diagnostics.clone(),
         )?;
         let accepted = SystemOperationAccepted::Update {
             operation_id: operation_id.clone(),
@@ -135,7 +152,18 @@ impl ProcessSystemOperations {
                 () = service.cancellation.cancelled() => Err(conflict("服务关闭，更新已中断")),
                 result = service.perform_update_inner(&target, selected, &operation_id, preflight.as_ref()) => result,
             };
-            if let Err(error) = operation.complete(&result) {
+            let completion = operation.complete(&result);
+            if let Err(error) = &result {
+                service
+                    .diagnostics
+                    .record("install", Some(&operation_id), error)
+                    .await;
+            }
+            if let Err(error) = completion {
+                service
+                    .diagnostics
+                    .record("persist_update_status", Some(&operation_id), &error)
+                    .await;
                 tracing::warn!(error = %error, "系统更新终态落盘失败");
                 return;
             }
@@ -148,7 +176,7 @@ impl ProcessSystemOperations {
                 Err(error) => service.events.error_terminal(
                     Some(&operation_id),
                     Some("failed"),
-                    error.to_string(),
+                    error.message().to_owned(),
                 ),
             }
         }));
@@ -166,7 +194,7 @@ impl ProcessSystemOperations {
             .config
             .update_repository
             .as_deref()
-            .ok_or_else(|| conflict("update repository is not configured"))?;
+            .ok_or_else(|| conflict("未配置更新仓库 CPR_UPDATE_REPOSITORY"))?;
         let proxy = self.update_proxy();
         self.events.info(
             Some(operation_id),
@@ -227,22 +255,22 @@ impl ProcessSystemOperations {
         self.events
             .info(Some(operation_id), Some("verify"), "正在校验更新资源");
         if archive.size == 0 || archive.size > MAX_DOWNLOAD_SIZE {
-            return Err(invalid("release archive size is invalid"));
+            return Err(invalid("更新包大小无效或超出限制"));
         }
         let checksum = release
             .assets
             .iter()
             .find(|asset| asset.name == "checksums.txt")
-            .ok_or_else(|| upstream("release checksums.txt is required"))?;
+            .ok_or_else(|| upstream("发行版本缺少 checksums.txt 校验文件，无法安全更新"))?;
         if checksum.size == 0 || checksum.size > MAX_CHECKSUM_SIZE {
-            return Err(invalid("release checksum size is invalid"));
+            return Err(invalid("校验文件大小无效或超出限制"));
         }
         self.events
             .info(Some(operation_id), Some("prepare"), "正在创建临时更新目录");
         fs::create_dir_all(&self.config.update_temp_dir)
-            .map_err(|error| internal(format!("failed to prepare update temp dir: {error}")))?;
+            .map_err(|error| internal("无法创建更新临时目录").with_source(error))?;
         let temp_root = fs::canonicalize(&self.config.update_temp_dir)
-            .map_err(|error| internal(format!("failed to resolve update temp dir: {error}")))?;
+            .map_err(|error| internal("无法确定更新临时目录位置").with_source(error))?;
         let temp = UpdateTempDir::create(&temp_root)?;
         let archive_path = temp.path().join(&archive.name);
         self.events
@@ -301,7 +329,7 @@ impl ProcessSystemOperations {
             self.config.web_dist_dir()?,
             extracted,
         )?;
-        let mut applied = AppliedReleaseGuard::new(&self.config);
+        let mut applied = AppliedReleaseGuard::new(&self.config, &self.diagnostics);
         let applied_manifest = read_release_manifest(&self.config.official_plugins_dir()?)?;
         if applied_manifest.as_ref() != release_manifest.as_ref() {
             return Err(applied.rollback(conflict("已应用的更新候选与预检候选不一致")));
@@ -387,12 +415,15 @@ impl SystemOperations for ProcessSystemOperations {
             .await
         {
             Ok(detail) => Ok(detail),
-            Err(error) => Ok(base_update_detail(
-                &self.config,
-                channel,
-                self.config.update_support_error(),
-                Some(error.to_string()),
-            )),
+            Err(error) => {
+                self.diagnostics.record("check_release", None, &error).await;
+                Ok(base_update_detail(
+                    &self.config,
+                    channel,
+                    self.config.update_support_error(),
+                    Some(error.message().to_owned()),
+                ))
+            }
         }
     }
 
@@ -473,7 +504,7 @@ impl SystemOperations for ProcessSystemOperations {
         )?;
         let result = match rollback_release(&self.config) {
             Ok(()) => {
-                let mut applied = AppliedReleaseGuard::new(&self.config);
+                let mut applied = AppliedReleaseGuard::new(&self.config, &self.diagnostics);
                 let result = match read_release_manifest(&self.config.official_plugins_dir()?) {
                     Ok(manifest) if manifest.as_ref() == release_manifest.as_ref() => {
                         preflight.confirm_revision(plugin_revision).await
@@ -497,24 +528,28 @@ impl SystemOperations for ProcessSystemOperations {
             SystemOperationKind::Rollback,
             None,
             None,
-            result.as_ref().err().map(ToString::to_string),
+            result
+                .as_ref()
+                .err()
+                .map(|error| error.message().to_owned()),
         )?;
         match &result {
             Ok(()) => self.events.success_terminal(
                 Some(&operation_id),
                 Some("done"),
-                "previous release restored",
+                "上一版本已恢复，请重启服务",
             ),
-            Err(error) => {
-                self.events
-                    .error_terminal(Some(&operation_id), Some("failed"), error.to_string())
-            }
+            Err(error) => self.events.error_terminal(
+                Some(&operation_id),
+                Some("failed"),
+                error.message().to_owned(),
+            ),
         }
         drop(file_lock);
         result?;
         Ok(SystemOperationAccepted::Rollback {
             operation_id,
-            message: "回滚完成，请重启服务。".to_owned(),
+            message: "回滚完成，请重启服务".to_owned(),
             need_restart: true,
         })
     }
@@ -532,7 +567,7 @@ impl SystemOperations for ProcessSystemOperations {
         // 载入半成品产物
         let mut operation = self.lock_operation()?;
         if !self.config.self_restart_enabled {
-            return Err(conflict("self restart is disabled"));
+            return Err(conflict("当前部署未启用在线重启"));
         }
         let file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
         let candidate = self.installed_restart_candidate()?;
@@ -549,15 +584,17 @@ impl SystemOperations for ProcessSystemOperations {
         {
             return Err(conflict("重启检查期间安装文件已变化，请重新确认"));
         }
-        let message = if self.config.deployment_mode == "docker" {
-            "已安排进程内重启"
+        let (message, replacement_input) = if self.config.deployment_mode == "docker" {
+            ("已安排进程内重启", None)
         } else {
-            spawn_replacement(&self.config)?;
-            "已安排自重启"
+            ("已安排自重启", spawn_replacement(&self.config)?)
         };
         let operation_id = operation_id("restart");
         // 受理后直到旧服务释放，保留重启状态和跨进程锁；延迟关闭只用于送达响应
-        *operation = Some(file_lock);
+        *operation = Some(RestartGuard {
+            _file_lock: file_lock,
+            _replacement_input: replacement_input,
+        });
         let cancellation = self.cancellation.clone();
         drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -581,36 +618,40 @@ impl SystemOperations for ProcessSystemOperations {
 fn read_release_manifest(directory: &Path) -> Result<Arc<[u8]>, OperationError> {
     let path = directory.join(OFFICIAL_PLUGIN_MANIFEST);
     let metadata = fs::symlink_metadata(&path)
-        .map_err(|error| invalid(format!("official plugin manifest is unavailable: {error}")))?;
+        .map_err(|error| invalid("无法访问官方插件发行清单").with_source(error))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-        return Err(invalid("official plugin manifest is not a regular file"));
+        return Err(invalid("官方插件发行清单必须是普通文件"));
     }
     if metadata.len() == 0 || metadata.len() > MAX_OFFICIAL_PLUGIN_MANIFEST_SIZE {
-        return Err(invalid("official plugin manifest size is invalid"));
+        return Err(invalid("官方插件发行清单大小无效或超出限制"));
     }
     fs::read(path)
         .map(Arc::<[u8]>::from)
-        .map_err(|error| invalid(format!("official plugin manifest cannot be read: {error}")))
+        .map_err(|error| invalid("无法读取官方插件发行清单").with_source(error))
 }
 
 fn restore_applied_release(config: &SystemUpdateConfig, cause: OperationError) -> OperationError {
     match rollback_release(config) {
         Ok(()) => cause,
-        Err(error) => internal(format!(
-            "release verification failed and restoring the previous files failed: {error}"
-        )),
+        Err(error) => internal("更新校验失败，且无法恢复原文件")
+            .with_source(gateway_core::error::ErrorSource::new(cause).with_cleanup(error)),
     }
 }
 
 struct AppliedReleaseGuard<'a> {
     config: &'a SystemUpdateConfig,
+    diagnostics: &'a super::diagnostics::Diagnostics,
     armed: bool,
 }
 
 impl<'a> AppliedReleaseGuard<'a> {
-    const fn new(config: &'a SystemUpdateConfig) -> Self {
+    const fn new(
+        config: &'a SystemUpdateConfig,
+        diagnostics: &'a super::diagnostics::Diagnostics,
+    ) -> Self {
         Self {
             config,
+            diagnostics,
             armed: true,
         }
     }
@@ -631,6 +672,8 @@ impl Drop for AppliedReleaseGuard<'_> {
             && let Err(error) = rollback_release(self.config)
         {
             tracing::error!(error = %error, "系统发行物临界区取消后的恢复失败");
+            self.diagnostics
+                .record_on_drop("restore_cancelled_installation", None, error);
         }
     }
 }

@@ -14,7 +14,6 @@ const props = withDefaults(defineProps<{
 }>(), {
   showPercentage: true,
 })
-
 const { t } = useI18n({ useScope: 'global' })
 const now = useUiClock()
 const windowItems = computed(() => props.windows.map(window => ({
@@ -22,6 +21,7 @@ const windowItems = computed(() => props.windows.map(window => ({
   labelTooltip: quotaWindowLabel(window),
   usedPercent: window.usedPercent,
   usedPercentDisplay: window.usedPercentDisplay,
+  stale: window.stale,
   presentation: quotaWindowPresentation(window, '2px'),
   cycle: quotaWindowCycleProgress(window, now.value.getTime()),
 })))
@@ -35,7 +35,7 @@ const highestUsageWindow = computed(() => props.windows.reduce((highest, window)
 const highestUsageDisplay = computed(() => highestUsageWindow.value?.usedPercentDisplay ?? '—')
 const highestUsageTextClass = computed(() => highestUsageWindow.value
   ? quotaWindowPresentation(highestUsageWindow.value, '2px').percentTextClass
-  : 'text-cp-text-quaternary')
+  : 'text-z-text-quaternary')
 const highestUsageCycle = computed(() => highestUsageWindow.value
   ? quotaWindowCycleProgress(highestUsageWindow.value, now.value.getTime())
   : null)
@@ -50,16 +50,16 @@ const trackGridStyle = computed(() => ({
     <div class="col-span-full grid min-w-0 grid-cols-subgrid items-baseline text-[10px] leading-3 font-bold">
       <!-- 右侧列轨道留给百分比或账号容量标记，重置倒计时放在标签列内靠右 -->
       <span class="flex min-w-0 items-baseline justify-between gap-1">
-        <span class="min-w-0 truncate text-cp-text-quaternary" :title="label">
+        <span class="min-w-0 truncate text-z-text-quaternary" :title="label">
           {{ label }}
         </span>
         <span
           v-if="!showPercentage && highestUsageCycle"
-          class="shrink-0 text-[9px] font-emphasis text-cp-text-quaternary"
+          class="shrink-0 text-[9px] font-emphasis text-z-text-quaternary"
           :title="t('accounts.fork.windowResetTime', { label: highestUsageWindow ? quotaWindowLabel(highestUsageWindow) : '', time: highestUsageWindow?.resetAtDisplay ?? '—' })"
         >
           {{ t('accounts.fork.untilReset') }}
-          <strong class="font-mono font-heavy tabular-nums text-cp-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
+          <strong class="font-mono font-heavy tabular-nums text-z-blue-text">{{ highestUsageCycle.remainingDisplay }}</strong>
         </span>
       </span>
       <strong
@@ -74,13 +74,13 @@ const trackGridStyle = computed(() => ({
     <div class="col-span-full grid min-w-0 gap-x-1" :style="trackGridStyle">
       <div v-for="item in windowItems" :key="item.key" class="grid min-w-0 gap-0.5">
         <div
-          class="h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+          class="h-1 w-full overflow-hidden rounded-full bg-z-border-secondary"
           role="progressbar"
           :aria-label="item.labelTooltip"
           aria-valuemin="0"
           aria-valuemax="100"
-          :aria-valuenow="item.usedPercent ?? undefined"
-          :aria-valuetext="item.usedPercentDisplay"
+          :aria-valuenow="item.stale ? undefined : item.usedPercent ?? undefined"
+          :aria-valuetext="item.stale ? t('accounts.upstream.stale') : item.usedPercentDisplay"
         >
           <div
             class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"

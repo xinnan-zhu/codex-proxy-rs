@@ -436,6 +436,7 @@ fn client_key_responses_should_keep_shape_and_redact_creation_debug() {
         gateway_admin::model::client_keys::ClientKeyRecord {
             fast_mode_reset: None,
             model_fast_modes: Default::default(),
+            peer_sharing: Default::default(),
             request_profile_overrides: Default::default(),
             budget: Default::default(),
             id: gateway_core::policy::ClientApiKeyId::new("key_visible").expect("Client Key ID"),

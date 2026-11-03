@@ -10,7 +10,8 @@ use crate::account::{FastMode, ProviderAccountId};
 use crate::concurrency::ConcurrencyQueuePolicy;
 use crate::operation::{Operation, OperationKind};
 use crate::policy::{
-    ClientApiKeyId, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey, RateLimits,
+    ClientApiKeyId, ClientPeerSharing, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey,
+    RateLimits,
 };
 use crate::settings::{SettingsValues, compiled::CompiledSettings};
 use crate::validation::RoutingError;
@@ -22,13 +23,14 @@ use super::{
     RuntimeAccountDirectory, UpstreamModelId,
 };
 
-const MAXIMUM_CATALOG_STABILITY_ATTEMPTS: usize = 4;
+const MAXIMUM_SNAPSHOT_STABILITY_ATTEMPTS: usize = 4;
 
 type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<ProviderAccountId>>>;
 
 /// Store 读取到的一个启用 Client API Key 策略事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
+    peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     model_fast_modes: crate::account::ModelFastModes,
     model_fast_reset_at: Option<std::time::SystemTime>,
@@ -49,6 +51,12 @@ impl SnapshotClientPolicyFacts {
     #[must_use]
     pub fn with_model_fast_modes(mut self, modes: crate::account::ModelFastModes) -> Self {
         self.model_fast_modes = modes;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_peer_sharing(mut self, sharing: ClientPeerSharing) -> Self {
+        self.peer_sharing = sharing;
         self
     }
 
@@ -75,6 +83,7 @@ impl SnapshotClientPolicyFacts {
         limits: RateLimits,
     ) -> Self {
         Self {
+            peer_sharing: ClientPeerSharing::default(),
             key_id,
             name_snapshot: None,
             model_fast_modes: crate::account::ModelFastModes::default(),
@@ -128,6 +137,7 @@ pub struct SnapshotProviderAccountFacts {
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
+    authentication_kind: String,
 }
 
 impl SnapshotProviderAccountFacts {
@@ -137,11 +147,18 @@ impl SnapshotProviderAccountFacts {
             account_id,
             provider_kind: provider_kind.into(),
             model_access: crate::account::AccountModelAccess::all(),
+            authentication_kind: String::new(),
         }
     }
 }
 
 impl SnapshotProviderAccountFacts {
+    #[must_use]
+    pub fn with_authentication_kind(mut self, authentication_kind: String) -> Self {
+        self.authentication_kind = authentication_kind;
+        self
+    }
+
     #[must_use]
     pub fn with_model_access(mut self, model_access: crate::account::AccountModelAccess) -> Self {
         self.model_access = model_access;
@@ -327,14 +344,17 @@ impl RuntimeSnapshotCompiler {
             ConfigRevision,
             crate::routing::extensions::ExtensionSetReference,
         )> = None;
-        for _ in 0..MAXIMUM_CATALOG_STABILITY_ATTEMPTS {
+        let mut instability = RuntimeSnapshotCompileError::CatalogChanged;
+        for _ in 0..MAXIMUM_SNAPSHOT_STABILITY_ATTEMPTS {
             let facts = self
                 .store
                 .load_snapshot_facts()
                 .await
                 .map_err(|_| RuntimeSnapshotCompileError::StoreUnavailable)?;
             if facts.config_revision != facts.observed_current_revision {
-                return Err(RuntimeSnapshotCompileError::RevisionChanged);
+                // 并发提交使本轮事实过期时重读完整快照，不能混用不同版本的权限
+                instability = RuntimeSnapshotCompileError::RevisionChanged;
+                continue;
             }
             let revision = facts.config_revision;
             let extensions = match &self.extensions {
@@ -346,7 +366,7 @@ impl RuntimeSnapshotCompiler {
                                 *prepared_revision != revision || !prepared.is_ready()
                             });
                     if must_prepare {
-                        let prepared = preparer
+                        let prepared = match preparer
                             .prepare_with_request_body_limit(
                                 revision,
                                 usize::try_from(
@@ -355,7 +375,21 @@ impl RuntimeSnapshotCompiler {
                                 .unwrap_or(usize::MAX),
                             )
                             .await
-                            .map_err(|_| RuntimeSnapshotCompileError::ExtensionsUnavailable)?;
+                        {
+                            Ok(prepared) => prepared,
+                            Err(_) => {
+                                // 扩展读取也可能遇到并发提交；只有版本已变才重读事实
+                                let observed =
+                                    self.store.current_config_revision().await.map_err(|_| {
+                                        RuntimeSnapshotCompileError::StoreUnavailable
+                                    })?;
+                                if observed == revision {
+                                    return Err(RuntimeSnapshotCompileError::ExtensionsUnavailable);
+                                }
+                                instability = RuntimeSnapshotCompileError::RevisionChanged;
+                                continue;
+                            }
+                        };
                         prepared_extensions = Some((revision, prepared));
                     }
                     prepared_extensions
@@ -389,7 +423,8 @@ impl RuntimeSnapshotCompiler {
                         .map_err(|_| RuntimeSnapshotCompileError::StoreUnavailable)?
                         != revision
                 {
-                    return Err(RuntimeSnapshotCompileError::RevisionChanged);
+                    instability = RuntimeSnapshotCompileError::RevisionChanged;
+                    continue;
                 }
                 let snapshot = snapshot
                     .with_provider_catalog_generations(if cached.is_some() && !refresh_catalog {
@@ -400,8 +435,9 @@ impl RuntimeSnapshotCompiler {
                     .with_extensions(extensions);
                 return Ok(snapshot);
             }
+            instability = RuntimeSnapshotCompileError::CatalogChanged;
         }
-        Err(RuntimeSnapshotCompileError::CatalogChanged)
+        Err(instability)
     }
 }
 
@@ -488,12 +524,17 @@ async fn compile_runtime_snapshot(
     for account in facts.provider_accounts {
         let provider_kind = ProviderKind::new(account.provider_kind)
             .map_err(|_| RuntimeSnapshotCompileError::InvalidData)?;
+        let direct_account =
+            catalogs.is_direct_account(&provider_kind, &account.authentication_kind);
         // 账号归属独立于当前执行器集合；Provider 撤下后仍保留账号和分组，路由只选已注册执行器
         if accounts
             .insert(
                 account.account_id.clone(),
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
-                    .with_model_access(account.model_access),
+                    .with_model_access(account.model_access)
+                    .with_direct_authentication_kind(
+                        direct_account.then_some(account.authentication_kind),
+                    ),
             )
             .is_some()
         {
@@ -519,7 +560,10 @@ async fn compile_runtime_snapshot(
             .get_mut(&account_id)
             .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
-            .with_model_access(account.model_access().clone());
+            .with_model_access(account.model_access().clone())
+            .with_direct_authentication_kind(
+                account.direct_authentication_kind().map(str::to_owned),
+            );
     }
     let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));
 
@@ -577,7 +621,8 @@ async fn compile_runtime_snapshot(
                 true,
                 policy.limits,
             )
-            .with_name_snapshot(policy.name_snapshot),
+            .with_name_snapshot(policy.name_snapshot)
+            .with_peer_sharing(policy.peer_sharing),
         );
     }
 
@@ -1056,6 +1101,43 @@ impl RuntimeSnapshot {
                 && !self.is_known_upstream_model(&upstream_model))
     }
 
+    /// 通用模型候选资格，不以原生目录来源限制推理，也不替代操作能力与实时选号检查
+    #[must_use]
+    pub fn allows_public_model_for_account(
+        &self,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+    ) -> bool {
+        let Some(provider) = scope.account_provider(account) else {
+            return false;
+        };
+        let upstream = self.mapped_model(public_model.as_str());
+        if !scope.allows_model(account, &upstream)
+            || !self.contains_public_model_for_provider(public_model, provider)
+        {
+            return false;
+        }
+        let Ok(upstream) = UpstreamModelId::from_client_wire(upstream) else {
+            return false;
+        };
+        let native = self
+            .provider_models
+            .get(provider)
+            .is_some_and(|models| models.contains_key(&upstream));
+        // 仅由适配器贡献的模型仍受声明账号范围限制，不能借发现型目录扩大资格
+        native
+            || !self
+                .contributed_models()
+                .iter()
+                .any(|model| &model.provider == provider && &model.id == public_model)
+            || self.contributed_models().iter().any(|model| {
+                &model.provider == provider
+                    && &model.id == public_model
+                    && model.accounts.contains(account)
+            })
+    }
+
     fn is_known_upstream_model(&self, upstream_model: &UpstreamModelId) -> bool {
         self.provider_models
             .values()
@@ -1389,10 +1471,18 @@ impl RuntimeSnapshot {
 
         Ok(RoutingPlan {
             request_body_limit: self.responses_max_decompressed_body_bytes(),
+            max_retry_after: std::time::Duration::from_secs(u64::from(
+                self.settings.values.max_retry_after_seconds,
+            )),
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
+            account_error_protection: Arc::clone(&self.settings.account_error_protection),
+            account_error_protection_revision: self
+                .settings
+                .values
+                .account_error_protection_revision,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)
@@ -1473,10 +1563,18 @@ impl RuntimeSnapshot {
         };
         Ok(RoutingPlan {
             request_body_limit: self.responses_max_decompressed_body_bytes(),
+            max_retry_after: std::time::Duration::from_secs(u64::from(
+                self.settings.values.max_retry_after_seconds,
+            )),
             config_revision: self.revision,
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
+            account_error_protection: Arc::clone(&self.settings.account_error_protection),
+            account_error_protection_revision: self
+                .settings
+                .values
+                .account_error_protection_revision,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)

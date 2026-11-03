@@ -42,6 +42,7 @@ pub struct SnapshotAccountGroupData {
 pub struct SnapshotProviderAccountData {
     pub id: String,
     pub provider_kind: String,
+    pub authentication_kind: String,
     pub model_access: gateway_core::account::AccountModelAccess,
 }
 
@@ -149,6 +150,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                     .with_request_profiles(key.request_profiles)
                     .with_model_fast_modes(key.model_fast_modes)
                     .with_model_fast_reset_at(key.model_fast_reset_at)
+                    .with_peer_sharing(key.peer_sharing)
                 })
                 .collect();
             let account_groups = data
@@ -168,6 +170,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                         .map(|id| {
                             SnapshotProviderAccountFacts::new(id, account.provider_kind)
                                 .with_model_access(account.model_access)
+                                .with_authentication_kind(account.authentication_kind)
                         })
                         .map_err(|_| SnapshotStoreError::unavailable())
                 })
@@ -216,6 +219,8 @@ struct SnapshotSettingsRow {
     pricing_synced_json: sqlx::types::Json<gateway_core::metering::PricingOverrides>,
     pricing_overrides_json: sqlx::types::Json<gateway_core::metering::PricingOverrides>,
     config_revision: i64,
+    account_error_protection_revision: i64,
+    account_error_protection_json: sqlx::types::Json<gateway_core::account::AccountErrorProtection>,
     max_concurrent_per_account: i64,
     smart_scheduling_json: sqlx::types::Json<gateway_core::account::SmartSchedulingConfig>,
     rotation_strategy: String,
@@ -225,6 +230,7 @@ struct SnapshotSettingsRow {
     max_waiting_per_key: i64,
     max_waiting_per_account: i64,
     concurrency_wait_timeout_seconds: i64,
+    max_retry_after_seconds: i64,
     openai_guardian_reserved_concurrency: i64,
     openai_account_affinity: String,
     max_account_rotations: i64,
@@ -242,7 +248,7 @@ async fn load_settings(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<(Revision, SettingsValues)> {
     let row = sqlx::query_as::<_, SnapshotSettingsRow>(
-        "select config_revision, max_concurrent_per_account, rotation_strategy, smart_scheduling_json, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours, request_location_json, request_location_enabled, codex_privacy_policy_json, responses_max_decompressed_body_bytes, provider_request_profiles_json, pricing_overrides_json, pricing_synced_json from runtime_settings where id = 1",
+        "select config_revision, account_error_protection_revision, account_error_protection_json, max_concurrent_per_account, rotation_strategy, smart_scheduling_json, model_mappings_json, min_codex_desktop_version, min_codex_cli_version, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, max_retry_after_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours, request_location_json, request_location_enabled, codex_privacy_policy_json, responses_max_decompressed_body_bytes, provider_request_profiles_json, pricing_overrides_json, pricing_synced_json from runtime_settings where id = 1",
     )
     .fetch_optional(&mut **transaction)
     .await
@@ -272,6 +278,7 @@ async fn load_settings(
                 .ok_or_else(|| invalid("invalid account affinity"))?,
         )
         .with_max_account_rotations(to_u32(row.max_account_rotations)?)
+        .with_max_retry_after_seconds(to_u32(row.max_retry_after_seconds)?)
         .with_openai_session_affinity_ttl_hours(to_u32(row.openai_session_affinity_ttl_hours)?)
         .with_smart_scheduling(row.smart_scheduling_json.0)
         .with_request_profiles(decode_request_profiles(
@@ -287,6 +294,8 @@ async fn load_settings(
         })
         .with_request_location(row.request_location_json.0, row.request_location_enabled)
         .with_codex_privacy_policy(row.codex_privacy_policy_json.0)
+        .with_account_error_protection(row.account_error_protection_json.0)
+        .with_account_error_protection_revision(to_u64(row.account_error_protection_revision)?)
         .with_concurrency_queues(
             to_u32(row.max_waiting_per_key)?,
             to_u32(row.max_waiting_per_account)?,
@@ -310,12 +319,13 @@ async fn load_client_keys(
             String,
             sqlx::types::Json<gateway_core::account::ModelFastModes>,
             Option<sqlx::types::Json<gateway_admin::model::client_key_fast_reset::ClientKeyFastResetPlan>>,
+            sqlx::types::Json<gateway_core::policy::ClientPeerSharing>,
         ),
     >(
         "select k.id, k.key,
                 coalesce(array_agg(kg.account_group_id order by kg.account_group_id)
                   filter (where kg.account_group_id is not null), '{}') as group_ids,
-                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.model_fast_modes_json, k.fast_mode_reset_json
+                k.max_concurrency, k.requests_per_minute, k.provider_request_profiles_json, k.name, k.model_fast_modes_json, k.fast_mode_reset_json, k.peer_sharing_json
          from client_api_keys k
          left join client_api_key_groups kg on kg.client_api_key_id = k.id
          where k.enabled
@@ -338,6 +348,7 @@ async fn load_client_keys(
                     key.model_fast_reset_at = Some(plan.deadline.into());
                 }
             }
+            key.peer_sharing = row.9.0;
             Ok(key)
         })
         .collect()
@@ -375,18 +386,20 @@ async fn load_provider_accounts(
         (
             String,
             String,
+            String,
             sqlx::types::Json<gateway_core::account::AccountModelAccess>,
         ),
-    >("select id, provider_kind, model_access_json from provider_accounts order by id")
+    >("select id, provider_kind, authentication_kind, model_access_json from provider_accounts order by id")
     .fetch_all(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))
     .map(|rows| {
         rows.into_iter()
             .map(
-                |(id, provider_kind, model_access)| SnapshotProviderAccountData {
+                |(id, provider_kind, authentication_kind, model_access)| SnapshotProviderAccountData {
                     id,
                     provider_kind,
+                    authentication_kind,
                     model_access: model_access.0,
                 },
             )

@@ -85,6 +85,7 @@ impl PluginResourceAccess for DefaultPluginResourceAccess {
                     NewClientKey {
                         fast_mode_reset: None,
                         model_fast_modes: Default::default(),
+                        peer_sharing: Default::default(),
                         id,
                         name: command.name,
                         label: None,

@@ -66,6 +66,7 @@ pub enum CodexFailureCategory {
 
 /// 一次已分类的上游拒绝及其可持久化事实
 pub struct CodexUpstreamFailure {
+    pub(crate) upstream_fields: gateway_core::upstream::UpstreamFailureFields,
     pub(crate) status: Option<StatusCode>,
     pub(crate) code: Option<String>,
     pub(crate) client_message: Option<String>,
@@ -102,7 +103,8 @@ impl CodexUpstreamFailure {
         rate_limit_headers: &[(String, String)],
         send_phase: CodexUpstreamSendPhase,
     ) -> Self {
-        let fields = ParsedUpstreamError::from_http_response(body);
+        let mut fields = ParsedUpstreamError::from_http_response(body);
+        fields.upstream_fields.status = Some(status.as_u16());
         let category = classify_upstream_failure(
             UpstreamFailureSource::HttpResponse,
             Some(status),
@@ -113,6 +115,7 @@ impl CodexUpstreamFailure {
         );
         Self {
             status: Some(status),
+            upstream_fields: fields.upstream_fields,
             code: fields.code.clone(),
             client_message: fields.client_message,
             client_code: fields.code,
@@ -141,6 +144,12 @@ impl CodexUpstreamFailure {
         send_phase: CodexUpstreamSendPhase,
     ) -> Self {
         let fields = ParsedUpstreamError {
+            upstream_fields: gateway_core::upstream::UpstreamFailureFields {
+                status: failure.explicit_status_code,
+                code: failure.upstream_code.clone(),
+                error_type: failure.upstream_type.clone(),
+                message: failure.upstream_message.clone(),
+            },
             code: failure.upstream_code.clone(),
             error_type: failure.upstream_type.clone(),
             message: failure.message.clone(),
@@ -160,6 +169,7 @@ impl CodexUpstreamFailure {
         );
         Self {
             status,
+            upstream_fields: fields.upstream_fields,
             code: fields.code.clone(),
             client_message: Some(fields.message),
             client_code: fields.code,
@@ -223,6 +233,7 @@ impl CodexUpstreamFailure {
 }
 
 struct ParsedUpstreamError {
+    upstream_fields: gateway_core::upstream::UpstreamFailureFields,
     code: Option<String>,
     error_type: Option<String>,
     message: String,
@@ -234,6 +245,12 @@ impl ParsedUpstreamError {
     fn from_http_response(body: &str) -> Self {
         let Ok(value) = serde_json::from_str::<Value>(body) else {
             return Self {
+                upstream_fields: gateway_core::upstream::UpstreamFailureFields {
+                    status: None,
+                    code: None,
+                    error_type: None,
+                    message: None,
+                },
                 code: None,
                 error_type: None,
                 message: body.to_owned(),
@@ -247,6 +264,20 @@ impl ParsedUpstreamError {
             .or_else(|| value.get("detail"))
             .unwrap_or(&value);
         let code_value = error.get("code").or_else(|| value.get("code"));
+        let upstream_fields = gateway_core::upstream::UpstreamFailureFields {
+            status: None,
+            code: code_value.and_then(Value::as_str).map(str::to_owned),
+            error_type: error
+                .get("type")
+                .or_else(|| value.get("type"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            message: error
+                .get("message")
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        };
         let error_type = error
             .get("type")
             .or_else(|| value.get("type"))
@@ -270,6 +301,7 @@ impl ParsedUpstreamError {
             .and_then(Value::as_i64)
             .filter(|seconds| DateTime::<Utc>::from_timestamp(*seconds, 0).is_some());
         Self {
+            upstream_fields,
             code,
             error_type,
             message,
@@ -450,15 +482,22 @@ fn classify_upstream_failure(
         };
     }
 
+    // 参数值不支持属于请求错误，不能因消息提及模型而推断账号无模型权限
     // 官方 Codex 将流内 invalid_prompt 归为请求错误，不依赖 HTTP 状态码
-    if matches!(source, UpstreamFailureSource::SseFailure) && code == "invalid_prompt" {
+    if code == "unsupported_value"
+        || (matches!(source, UpstreamFailureSource::SseFailure) && code == "invalid_prompt")
+    {
         return CodexFailureCategory::InvalidRequest;
     }
 
-    if [code.as_str(), message.as_str(), body.as_str()]
-        .into_iter()
-        .any(is_model_unsupported)
-    {
+    // 对齐官方 Codex 的模型拒绝合同，消息与正文不提供账号模型资格证据
+    if matches!(
+        (fields.code.as_deref(), status),
+        (
+            Some("model_not_found"),
+            None | Some(StatusCode::BAD_REQUEST | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND)
+        )
+    ) {
         return CodexFailureCategory::ModelUnsupported;
     }
     let identity_signals = [
@@ -560,16 +599,6 @@ fn normalized(value: Option<&str>) -> String {
 fn non_empty_owned(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_owned())
-}
-
-fn is_model_unsupported(value: &str) -> bool {
-    value.contains("model_not_supported")
-        || value.contains("model_not_available")
-        || (value.contains("model")
-            && (value.contains("not supported")
-                || value.contains("not available")
-                || value.contains("not_supported")
-                || value.contains("not_available")))
 }
 
 fn is_identity_verification_required(value: &str) -> bool {

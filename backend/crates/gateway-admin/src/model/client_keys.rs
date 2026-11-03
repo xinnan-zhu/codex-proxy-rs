@@ -110,6 +110,7 @@ pub struct ClientKeyListQuery {
 pub struct ClientKeyRecord {
     pub fast_mode_reset: Option<super::client_key_fast_reset::ClientKeyFastResetPlan>,
     pub model_fast_modes: gateway_core::account::ModelFastModes,
+    pub peer_sharing: gateway_core::policy::ClientPeerSharing,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -181,6 +182,7 @@ impl fmt::Debug for ClientKeySecret {
 pub struct CreateClientKey {
     pub reset_fast_mode_on_quota_reset: bool,
     pub model_fast_modes: gateway_core::account::ModelFastModes,
+    pub peer_sharing: gateway_core::policy::ClientPeerSharing,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub custom_key: Option<PlaintextClientApiKey>,
     pub name: String,
@@ -195,6 +197,7 @@ pub struct CreateClientKey {
 pub struct NewClientKey {
     pub fast_mode_reset: Option<super::client_key_fast_reset::ClientKeyFastResetPlan>,
     pub model_fast_modes: gateway_core::account::ModelFastModes,
+    pub peer_sharing: gateway_core::policy::ClientPeerSharing,
     pub request_profile_overrides: ProviderRequestProfileOverrides,
     pub id: ClientApiKeyId,
     pub name: String,
@@ -226,6 +229,7 @@ pub struct UpdateClientKey {
     pub fast_mode_reset_update:
         Option<Option<super::client_key_fast_reset::ClientKeyFastResetPlan>>,
     pub model_fast_modes: Option<gateway_core::account::ModelFastModes>,
+    pub peer_sharing: Option<gateway_core::policy::ClientPeerSharing>,
     pub request_profile_override_updates: ProviderRequestProfileOverrideUpdates,
     pub id: ClientApiKeyId,
     pub name: String,

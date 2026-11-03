@@ -16,12 +16,20 @@ export interface ApiKeyFastModel {
 export type ApiKeyRoutingScope = 'all' | 'groups'
 export type ApiKeyBudgetPeriod = 'daily' | 'weekly' | 'all'
 
+export interface ApiKeyPeerSharing {
+  enabled: boolean
+  sharePool: boolean
+  shareQuota: boolean
+  sharePlans: boolean
+}
+
 export interface ApiKey {
   resetFastModeOnQuotaReset: boolean
   fastModeResetsAt: string | null
   fastModeResetsAtDisplay: string | null
   fastModeResetCompleted: boolean
   modelFastModes: ModelFastModes
+  peerSharing: ApiKeyPeerSharing
   providerRequestProfileOverrides: ProviderRequestProfiles
   openaiClientProfileOverride: ClientProfileSelection | null
   xaiClientProfileOverride: XaiClientProfileSelection | null
@@ -86,6 +94,7 @@ interface ApiKeyListParams {
 export interface ApiKeyWriteParam {
   resetFastModeOnQuotaReset?: boolean
   modelFastModes?: ModelFastModes
+  peerSharing: ApiKeyPeerSharing
   name: string
   label: string | null
   groupIds: string[]

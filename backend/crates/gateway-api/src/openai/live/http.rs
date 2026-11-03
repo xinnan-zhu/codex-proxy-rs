@@ -70,7 +70,7 @@ pub(crate) async fn live_call(
                 return live_error_response(
                     LiveErrorShape::Live,
                     StatusCode::BAD_REQUEST,
-                    "Codex live call request has an invalid model",
+                    "Codex live call request has an invalid model.",
                     "invalid_request",
                 );
             }
@@ -183,7 +183,7 @@ async fn read_call_body(
                 Box::new(live_error_response(
                     LiveErrorShape::Live,
                     StatusCode::PAYLOAD_TOO_LARGE,
-                    "Codex live request body too large",
+                    "Codex live request body too large.",
                     "invalid_request",
                 ))
             })?;
@@ -193,7 +193,7 @@ async fn read_call_body(
         Box::new(live_error_response(
             LiveErrorShape::Live,
             StatusCode::BAD_REQUEST,
-            "Codex live multipart body is invalid",
+            "Codex live multipart body is invalid.",
             "invalid_request",
         ))
     })?;
@@ -204,7 +204,7 @@ async fn read_call_body(
             Box::new(live_error_response(
                 LiveErrorShape::Live,
                 StatusCode::BAD_REQUEST,
-                "Codex live multipart body is invalid",
+                "Codex live multipart body is invalid.",
                 "invalid_request",
             ))
         })?
@@ -217,7 +217,7 @@ async fn read_call_body(
                     Box::new(live_error_response(
                         LiveErrorShape::Live,
                         StatusCode::BAD_REQUEST,
-                        "Codex live multipart body is invalid",
+                        "Codex live multipart body is invalid.",
                         "invalid_request",
                     ))
                 })?;
@@ -228,7 +228,7 @@ async fn read_call_body(
                     Box::new(live_error_response(
                         LiveErrorShape::Live,
                         StatusCode::BAD_REQUEST,
-                        "Codex live multipart body is invalid",
+                        "Codex live multipart body is invalid.",
                         "invalid_request",
                     ))
                 })?;
@@ -236,7 +236,7 @@ async fn read_call_body(
                     Box::new(live_error_response(
                         LiveErrorShape::Live,
                         StatusCode::BAD_REQUEST,
-                        "Codex live session field must contain valid JSON",
+                        "Codex live session field must contain valid JSON.",
                         "invalid_request",
                     ))
                 })?;
@@ -250,7 +250,7 @@ async fn read_call_body(
         None => Err(Box::new(live_error_response(
             LiveErrorShape::Live,
             StatusCode::BAD_REQUEST,
-            "Codex live multipart body requires an sdp field",
+            "Codex live multipart body requires an sdp field.",
             "invalid_request",
         ))),
     }

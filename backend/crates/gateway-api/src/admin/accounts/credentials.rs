@@ -18,10 +18,11 @@ fn parse_provider(value: &str) -> Result<ProviderKind, WireValidationError> {
     ProviderKind::new(value.trim().to_owned()).map_err(|_| WireValidationError::new("provider"))
 }
 
-/// 导入统一设置，复用编辑账号的备注、调度和分组约束
+/// 导入设置复用编辑账号的名称、备注、调度和分组约束
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountImportSettingsRequest {
+    pub name: Option<String>,
     pub notes: Option<String>,
     /// 缺省不携带；提供时把本次导入账号的 Codex 客户端限制统一设为该值。
     #[serde(default)]
@@ -36,6 +37,9 @@ pub struct AccountImportSettingsRequest {
 
 impl AccountImportSettingsRequest {
     fn validate(&self) -> Result<(), WireValidationError> {
+        if let Some(name) = &self.name {
+            validate_account_name(name.trim())?;
+        }
         validate_account_notes(self.notes.as_deref())?;
         parse_concurrency_limit(self.concurrency_limit)?;
         parse_account_weight(self.weight)?;
@@ -47,6 +51,10 @@ impl AccountImportSettingsRequest {
         self,
     ) -> Result<gateway_admin::model::accounts::AccountImportSettings, WireValidationError> {
         Ok(gateway_admin::model::accounts::AccountImportSettings {
+            name: self
+                .name
+                .map(|name| name.trim().to_owned())
+                .filter(|name| !name.is_empty()),
             notes: self.notes,
             codex_only: self.codex_only,
             enabled: self.enabled,
@@ -120,7 +128,7 @@ pub struct StartAccountAuthorizationRequest {
 impl StartAccountAuthorizationRequest {
     pub fn validate(&self) -> Result<(), WireValidationError> {
         parse_provider(&self.provider)?;
-        require_text(&self.name, MAX_NAME_BYTES, "name")?;
+        validate_account_name(&self.name)?;
         if let Some(account_id) = self.account_id.as_deref() {
             require_account_id(account_id, "accountId")?;
         }
@@ -142,7 +150,7 @@ impl StartAccountAuthorizationRequest {
             provider,
             StartAuthorization {
                 context,
-                name: self.name,
+                name: self.name.trim().to_owned(),
                 reauthorization,
                 outbound_proxy: super::wire::proxy_selection(
                     self.outbound_proxy_id,
@@ -217,6 +225,7 @@ pub struct UpdateAccountRequest {
     pub outbound_proxy_id: Option<String>,
     pub outbound_proxy_url: Option<super::wire::AccountProxyUpdate>,
     pub account_id: String,
+    pub name: Option<String>,
     pub notes: Option<String>,
     /// 缺省不修改；`Some(v)` 把账号的 Codex 客户端限制设为 `v`。
     #[serde(default)]
@@ -232,6 +241,9 @@ pub struct UpdateAccountRequest {
 impl UpdateAccountRequest {
     pub fn validate(&self) -> Result<(), WireValidationError> {
         require_account_id(&self.account_id, "accountId")?;
+        if let Some(name) = &self.name {
+            validate_account_name(name)?;
+        }
         if let Some(connection) = &self.connection {
             connection.validate()?;
         }
@@ -255,6 +267,7 @@ impl UpdateAccountRequest {
                 self.outbound_proxy_url,
             )?,
             account_id: self.account_id,
+            name: self.name.map(|name| name.trim().to_owned()),
             notes: self.notes,
             codex_only: self.codex_only,
             enabled: self.enabled,
@@ -517,6 +530,13 @@ fn require_wire_id(value: &str, field: &'static str) -> Result<(), WireValidatio
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':'))
     {
         return Err(WireValidationError::new(field));
+    }
+    Ok(())
+}
+
+fn validate_account_name(value: &str) -> Result<(), WireValidationError> {
+    if value.len() > MAX_NAME_BYTES || value.chars().any(char::is_control) {
+        return Err(WireValidationError::new("name"));
     }
     Ok(())
 }

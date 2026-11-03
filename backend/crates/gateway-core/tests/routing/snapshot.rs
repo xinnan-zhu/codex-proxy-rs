@@ -183,6 +183,23 @@ fn same_name_native_and_adapted_sources_keep_account_capabilities_separate() {
     let scope = native.all_account_scope();
     let b_only = Arc::new(scope.restricted_to(&Default::default(), &[b.clone()].into()));
     assert!(native.public_models_for_scope(&b_only).is_empty());
+    assert!(native.allows_public_model_for_account(&id, &b_only, &b));
+    let c = ProviderAccountId::new("acct_c").unwrap();
+    assert!(!native.allows_public_model_for_account(&id, &scope, &c));
+    assert!(!native.allows_public_model_for_account(&id, &b_only, &c));
+    assert!(
+        native
+            .plan(
+                &id,
+                &super::operation(),
+                b_only.clone(),
+                &Default::default()
+            )
+            .unwrap()
+            .candidates()[0]
+            .account_scope()
+            .allows(&b)
+    );
     let snapshot = native.with_extensions(Some(ExtensionSetReference::new(
         ExtensionSetId::new("adapted".into()).unwrap(),
         Arc::new(ModelLease(vec![contribution.clone()])),
@@ -277,7 +294,10 @@ fn adapted_models_limit_visibility_and_routing_to_capable_authorized_accounts() 
     use gateway_core::{
         account::ProviderAccountId,
         operation::{Feature, GenerateRequest, Operation, ProtocolPayload},
-        routing::{ContributedModel, SupportLevel},
+        routing::{
+            ClientRoutingScope, ContributedModel, FrozenAccountScope, RuntimeAccount,
+            RuntimeAccountDirectory, SupportLevel,
+        },
     };
     let account = ProviderAccountId::new("acct_openai").unwrap();
     let provider = ProviderKind::new("openai").unwrap();
@@ -296,6 +316,16 @@ fn adapted_models_limit_visibility_and_routing_to_capable_authorized_accounts() 
     )));
     let scope = super::account_scope();
     assert!(snapshot.public_models_for_scope(&scope).contains(&id));
+    assert!(snapshot.allows_public_model_for_account(&id, &scope, &account));
+    let undeclared = ProviderAccountId::new("acct_undeclared").unwrap();
+    let all = FrozenAccountScope::new(
+        Arc::new(RuntimeAccountDirectory::new(BTreeMap::from([(
+            undeclared.clone(),
+            RuntimeAccount::new(ProviderKind::new("openai").unwrap(), Default::default()),
+        )]))),
+        ClientRoutingScope::all_accounts(),
+    );
+    assert!(!snapshot.allows_public_model_for_account(&id, &all, &undeclared));
     assert!(
         snapshot
             .public_model_profiles_for_scope(&scope)
@@ -700,12 +730,116 @@ impl ProviderCatalogPort for PublishingCatalog {
 
 #[test]
 fn compiler_should_reject_revision_changed_during_consistent_read() {
-    let facts = facts(1, 2);
-    let compiler = compiler(Arc::new(TestSnapshotStore::new(Ok(facts))));
+    let store = Arc::new(SequencedSnapshotStore {
+        facts: vec![facts(1, 2)],
+        loads: AtomicUsize::new(0),
+        current_revision: revision(2),
+    });
+    let compiler = compiler(store.clone());
 
     let error = block_on(compiler.compile()).expect_err("revision drift must fail closed");
 
     assert_eq!(error, RuntimeSnapshotCompileError::RevisionChanged);
+    assert_eq!(store.loads.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn compiler_reloads_complete_facts_after_revision_changes_during_read() {
+    let store = Arc::new(SequencedSnapshotStore {
+        facts: vec![facts(1, 2), facts(2, 2)],
+        loads: AtomicUsize::new(0),
+        current_revision: revision(2),
+    });
+
+    let snapshot = block_on(compiler(store.clone()).compile()).expect("latest consistent facts");
+
+    assert_eq!(snapshot.revision(), revision(2));
+    assert_eq!(store.loads.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn compiler_reloads_revision_changed_after_extension_preparation() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let extensions = Arc::new(CountingExtensionPreparation {
+        prepares: AtomicUsize::new(0),
+        drops: Arc::clone(&drops),
+    });
+    let compiler = RuntimeSnapshotCompiler::new(
+        Arc::new(SequencedSnapshotStore {
+            facts: vec![facts(1, 1), facts(2, 2)],
+            loads: AtomicUsize::new(0),
+            current_revision: revision(2),
+        }),
+        Arc::new(TestCatalog::Empty),
+    )
+    .with_extensions(extensions.clone());
+
+    let snapshot = block_on(compiler.compile()).expect("latest prepared snapshot");
+
+    assert_eq!(snapshot.revision(), revision(2));
+    assert_eq!(snapshot.extensions().unwrap().id().as_str(), "prepared-2");
+    assert_eq!(extensions.prepares.load(Ordering::SeqCst), 2);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    drop(snapshot);
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn compiler_rechecks_revision_when_extension_preparation_rejects_stale_facts() {
+    struct RacingPreparation {
+        store: Arc<TestSnapshotStore>,
+        changes: usize,
+        calls: AtomicUsize,
+    }
+
+    impl ExtensionPreparationPort for RacingPreparation {
+        fn prepare(
+            &self,
+            _: ConfigRevision,
+        ) -> BoxFuture<'_, Result<ExtensionSetReference, ExtensionPreparationError>> {
+            Box::pin(async move {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                if self.changes == 0 || call < self.changes {
+                    if self.changes != 0 {
+                        let next = u64::try_from(call).unwrap() + 2;
+                        *self.store.facts.lock().unwrap() = Ok(facts(next, next));
+                        *self.store.current_revision.lock().unwrap() = Ok(revision(next));
+                    }
+                    return Err(ExtensionPreparationError);
+                }
+                Ok(ExtensionSetReference::new(
+                    ExtensionSetId::new("ready".to_owned()).unwrap(),
+                    Arc::new(AliasLease(vec![])),
+                ))
+            })
+        }
+    }
+
+    for (changes, expected_calls) in [(0, 1), (1, 2), (4, 4)] {
+        let store = Arc::new(TestSnapshotStore::new(Ok(facts(1, 1))));
+        let extensions = Arc::new(RacingPreparation {
+            store: store.clone(),
+            changes,
+            calls: AtomicUsize::new(0),
+        });
+        let compiler = RuntimeSnapshotCompiler::new(store, Arc::new(TestCatalog::Empty))
+            .with_extensions(extensions.clone());
+
+        let result = block_on(compiler.compile());
+
+        match changes {
+            0 => assert_eq!(
+                result.unwrap_err(),
+                RuntimeSnapshotCompileError::ExtensionsUnavailable
+            ),
+            1 => assert_eq!(result.unwrap().revision(), revision(2)),
+            _ => assert_eq!(
+                result.unwrap_err(),
+                RuntimeSnapshotCompileError::RevisionChanged
+            ),
+        }
+        assert_eq!(extensions.calls.load(Ordering::SeqCst), expected_calls);
+    }
 }
 
 #[test]
@@ -1347,6 +1481,89 @@ fn compiler_should_reject_invalid_persisted_client_min_version() {
 
 fn facts(config_revision: u64, observed_current_revision: u64) -> SnapshotFacts {
     facts_with_min_versions(config_revision, observed_current_revision, None, None)
+}
+
+#[test]
+fn peer_policy_compilation_keeps_only_explicitly_shared_direct_accounts() {
+    use gateway_core::{
+        account::ProviderAccountId, policy::ClientPeerSharing, routing::AccountGroupId,
+    };
+    struct DirectCatalog;
+    impl ProviderCatalogPort for DirectCatalog {
+        fn is_direct_account(&self, provider: &ProviderKind, kind: &str) -> bool {
+            provider.as_str() == "alpha" && kind == "oauth"
+        }
+        fn catalog_generations(&self) -> BTreeMap<ProviderKind, ProviderCatalogGeneration> {
+            BTreeMap::from([(
+                ProviderKind::new("alpha").unwrap(),
+                ProviderCatalogGeneration::new(1),
+            )])
+        }
+        fn query_model_capabilities(
+            &self,
+            _: &ProviderKind,
+        ) -> BoxFuture<'_, Result<Vec<ProviderModelCapabilities>, ProviderCatalogUnavailable>>
+        {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
+    let group = AccountGroupId::new("grp_11111111111111111111111111111111").unwrap();
+    let direct = ProviderAccountId::new("acct_direct").unwrap();
+    let proxy = ProviderAccountId::new("acct_proxy").unwrap();
+    for (bound, enabled, expected) in [
+        (true, true, true),
+        (true, false, false),
+        (false, true, false),
+    ] {
+        let facts = SnapshotFacts::new(
+            revision(1),
+            revision(1),
+            SettingsValues::new(3, "smart", BTreeMap::new(), None, None),
+            vec![
+                SnapshotClientPolicyFacts::new(
+                    ClientApiKeyId::new("key_peer").unwrap(),
+                    PlaintextClientApiKey::new("sk_peer_test").unwrap(),
+                    if bound {
+                        vec![group.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                    RateLimits::unlimited(),
+                )
+                .with_peer_sharing(ClientPeerSharing {
+                    enabled: true,
+                    ..Default::default()
+                }),
+            ],
+            vec![SnapshotAccountGroupFacts::new(
+                group.clone(),
+                "共享组".into(),
+                enabled,
+            )],
+            vec![
+                SnapshotProviderAccountFacts::new(direct.clone(), "alpha")
+                    .with_authentication_kind("oauth".into()),
+                SnapshotProviderAccountFacts::new(proxy.clone(), "alpha")
+                    .with_authentication_kind("api_key".into()),
+            ],
+            vec![
+                SnapshotAccountGroupMemberFacts::new(group.clone(), direct.clone()),
+                SnapshotAccountGroupMemberFacts::new(group.clone(), proxy.clone()),
+            ],
+        );
+        let snapshot = block_on(
+            RuntimeSnapshotCompiler::new(
+                Arc::new(TestSnapshotStore::new(Ok(facts))),
+                Arc::new(DirectCatalog),
+            )
+            .compile(),
+        )
+        .unwrap();
+        let scope = snapshot.client_policies().next().unwrap().account_scope();
+        assert_eq!(scope.allows(&direct), expected);
+        assert!(!scope.allows(&proxy));
+        assert_eq!(scope.provider_kinds().is_empty(), !expected);
+    }
 }
 
 fn facts_with_min_versions(

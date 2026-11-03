@@ -1062,7 +1062,7 @@ where
         let Some(candidate) = self.plan.candidates().get(self.candidate_index).cloned() else {
             let error = GatewayError::new(
                 GatewayErrorKind::NoAvailableProvider,
-                "no upstream Provider is available",
+                "No upstream service is available.",
             );
             self.finish_failure(FailureFinalization {
                 outcome: ExecutionOutcome::Failed,
@@ -1153,6 +1153,17 @@ where
         }
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
+                .with_account_error_protection(
+                    (!self.account_selection.is_diagnostic()
+                        && self.plan.account_error_protection().policy().enabled)
+                        .then(|| self.engine.account_error_protection.as_ref())
+                        .flatten()
+                        .map(|store| super::account_protection::ProtectionContext {
+                            store: Arc::clone(store),
+                            policy: self.plan.account_error_protection(),
+                            revision: self.plan.account_error_protection_revision(),
+                        }),
+                )
                 .with_lease_metadata(Arc::clone(&self.lease_metadata))
                 .with_response_control(self.response_control.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
@@ -1358,7 +1369,7 @@ where
             self.record_provider_failure(candidate.provider().clone());
             let error = GatewayError::new(
                 GatewayErrorKind::Internal,
-                "provider metadata did not match the frozen candidate",
+                "Provider metadata did not match the frozen candidate.",
             );
             self.finish_failure(FailureFinalization {
                 outcome: ExecutionOutcome::Failed,
@@ -1392,7 +1403,7 @@ where
             drop(stream);
             let error = GatewayError::new(
                 GatewayErrorKind::Internal,
-                "provider selected an account outside the frozen client scope",
+                "Provider selected an account outside the frozen client scope.",
             );
             self.finish_failure(FailureFinalization {
                 outcome: ExecutionOutcome::Failed,
@@ -1415,7 +1426,7 @@ where
             drop(stream);
             let error = GatewayError::new(
                 GatewayErrorKind::Internal,
-                "provider did not use the required account",
+                "Provider did not use the required account.",
             );
             self.finish_failure(FailureFinalization {
                 outcome: ExecutionOutcome::Failed,
@@ -1441,7 +1452,7 @@ where
             drop(stream);
             let error = GatewayError::new(
                 GatewayErrorKind::Internal,
-                "native continuation binding did not match selected account",
+                "Native continuation binding did not match selected account.",
             );
             self.finish_failure(FailureFinalization {
                 outcome: ExecutionOutcome::Failed,
@@ -1670,6 +1681,10 @@ where
                 error.pre_delivery_retry(),
                 Some(crate::error::PreDeliveryRetry::SameAccountConnectionRetry { .. })
             );
+        // 服务器建议不可截短；超出请求冻结的上限后沿用安全换号或原错误出口
+        let retry_after_exceeds_limit = error
+            .retry_after()
+            .is_some_and(|delay| delay > self.plan.max_retry_after());
         // Provider 的有界同账号传输恢复是尽力重试策略，不要求把 Sent/Ambiguous
         // 改写成安全证明；外部副作用、取消、预算与下游提交仍由 Core 拦截
         let transport_recovery = match error.pre_delivery_retry() {
@@ -1692,7 +1707,8 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountTransportRetry {
                 retry_index,
                 delay,
-            }) if !execution_effect_observed
+            }) if !retry_after_exceeds_limit
+                && !execution_effect_observed
                 && !self.connection_budget.exhausted()
                 && !self.replay_barrier_reached
                 && !self.delivery_pending =>
@@ -1700,7 +1716,8 @@ where
                 Some((AttemptTransport::Retry(retry_index), delay))
             }
             Some(crate::error::PreDeliveryRetry::SameAccountTransportFallback)
-                if !execution_effect_observed
+                if !retry_after_exceeds_limit
+                    && !execution_effect_observed
                     && !self.connection_budget.exhausted()
                     && !self.replay_barrier_reached
                     && !self.delivery_pending =>
@@ -1746,7 +1763,7 @@ where
                 max_delay,
                 jitter,
                 ..
-            }) if ordinary_retry && !suppress_transient_retry => {
+            }) if ordinary_retry && !suppress_transient_retry && !retry_after_exceeds_limit => {
                 let retries = self
                     .transient_retry_counts
                     .entry(current.metadata.provider_account_id().clone())
@@ -1825,6 +1842,8 @@ where
             "connectionRotation": connection_rotation.is_some(),
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
+            "retryAfterExceeded": retry_after_exceeds_limit,
+            "maxRetryAfterSeconds": self.plan.max_retry_after().as_secs(),
             "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
             "connectionRetry": connection_retry_requested,
@@ -2394,11 +2413,11 @@ where
                 } else {
                     ExecutionOutcome::Failed
                 },
-                GatewayError::new(GatewayErrorKind::Timeout, "request deadline elapsed"),
+                GatewayError::new(GatewayErrorKind::Timeout, "Request deadline elapsed."),
             ),
             _ => (
                 ExecutionOutcome::Failed,
-                GatewayError::new(GatewayErrorKind::Internal, "request execution failed"),
+                GatewayError::new(GatewayErrorKind::Internal, "Request execution failed."),
             ),
         };
         let send_state = if self.attempts == 0 {

@@ -13,7 +13,7 @@ use serde::Serialize as _;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::transport::downstream::{is_non_codex_request_header, normalize_codex_request_body};
+use crate::compat::{is_non_codex_request_header, normalize_codex_request_body};
 use crate::transport::headers::is_managed_identity_header;
 use crate::transport::profile::CodexRequestLocation;
 use crate::transport::protocol::responses::{
@@ -469,19 +469,17 @@ pub(crate) fn scope_request_to_account(
     request: &mut CodexResponsesRequest,
     installation_id: &str,
     account_scope: RequestAccountScope,
+    verified_turn_state: Option<&str>,
 ) {
     let reset_account_state = !account_scope.can_reuse_account_state();
     let client_metadata_turn_state = metadata_string(request, "x-codex-turn-state");
-    let preserve_turn_state = !reset_account_state
-        && (request.turn_state.is_some() || client_metadata_turn_state.is_some());
-    let turn_state = preserve_turn_state
-        .then(|| request.turn_state.clone())
-        .flatten();
-    let client_metadata_turn_state = if preserve_turn_state {
-        client_metadata_turn_state
+    let turn_state = if reset_account_state {
+        verified_turn_state.map(ToOwned::to_owned)
     } else {
-        None
+        request.turn_state.clone()
     };
+    let client_metadata_turn_state = client_metadata_turn_state
+        .filter(|token| !reset_account_state || Some(token.as_str()) == verified_turn_state);
     let turn_metadata = request
         .turn_metadata
         .as_deref()

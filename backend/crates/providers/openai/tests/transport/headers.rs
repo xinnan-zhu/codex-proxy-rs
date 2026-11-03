@@ -172,6 +172,7 @@ async fn backend_websocket_should_forward_context_headers_and_preserve_payload_f
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 authorization: "Bearer access-token",
                 account_id: Some("chatgpt-account"),
@@ -225,6 +226,7 @@ async fn backend_websocket_should_forward_context_headers_and_preserve_payload_f
         ("x-codex-parent-thread-id", "parent-456"),
         ("x-openai-subagent", "future_codex_mode"),
         ("x-openai-memgen-request", "true"),
+        ("x-codex-installation-id", "install-123"),
         ("session-id", "cp_derived"),
     ] {
         let value = &headers.iter().find(|(header, _)| header == name).unwrap().1;
@@ -239,7 +241,6 @@ async fn backend_websocket_should_forward_context_headers_and_preserve_payload_f
         }
     }
     for forbidden in [
-        "x-codex-installation-id",
         "x-codex-turn-id",
         "x-openai-internal-codex-residency",
         "accept",
@@ -289,6 +290,7 @@ async fn backend_http_should_send_codex_context_without_browser_headers() {
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 authorization: "Bearer access-token",
                 account_id: Some("chatgpt-account"),
@@ -363,8 +365,11 @@ async fn backend_http_should_send_codex_context_without_browser_headers() {
     ] {
         assert!(header_names.iter().any(|name| name == required));
     }
+    assert_eq!(
+        read_header_value(&raw_request, "x-codex-installation-id"),
+        Some("install-1")
+    );
     for forbidden in [
-        "x-codex-installation-id",
         "x-codex-turn-id",
         "x-openai-internal-codex-residency",
         "sec-ch-ua",
@@ -416,6 +421,7 @@ async fn backend_http_should_ignore_unrepresentable_protocol_headers_without_blo
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 client_request_id: Some("opaque\nclient-request-id"),
                 session_id: Some("opaque\nsession"),

@@ -20,6 +20,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
     *fixture.client_key.lock().unwrap() = Some(ClientKeyRecord {
         fast_mode_reset: None,
         model_fast_modes: Default::default(),
+        peer_sharing: Default::default(),
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new("key-42").unwrap(),
         name: "Development".to_owned(),
@@ -93,6 +94,7 @@ pub(super) async fn fixture() -> AdminTestFixture {
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        provider_account_upstream_peer: None,
         error_code: None,
         error_message: None,
         client_status_code: None,
