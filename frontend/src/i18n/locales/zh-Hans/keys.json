@@ -94,7 +94,8 @@
       "resetFastOnQuota": "额度重置后恢复分组 Fast 设置",
       "resetFastOnQuotaHint": "范围内可用账号最早周/月重置时一次性清除单独启用，提前重置依赖新额度观测",
       "fastResetCompleted": "已恢复继承分组",
-      "fastResetScheduled": "计划于 {time} 前恢复继承分组"
+      "fastResetScheduled": "计划于 {time} 前恢复继承分组",
+      "retryFastModels": "重试"
     },
     "fields": {
       "copyFullKey": "复制完整密钥",

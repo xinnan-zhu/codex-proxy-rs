@@ -94,7 +94,8 @@
       "resetFastOnQuota": "額度重置後恢復分組 Fast 設定",
       "resetFastOnQuotaHint": "範圍內可用帳號最早週/月重置時一次性清除單獨啟用，提前重置依賴新額度觀測",
       "fastResetCompleted": "已恢復繼承分組",
-      "fastResetScheduled": "計劃於 {time} 前恢復繼承分組"
+      "fastResetScheduled": "計劃於 {time} 前恢復繼承分組",
+      "retryFastModels": "重試"
     },
     "fields": {
       "copyFullKey": "複製完整密鑰",

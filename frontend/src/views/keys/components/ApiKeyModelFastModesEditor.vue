@@ -103,7 +103,7 @@ watch(() => props.active, (active) => {
     <div v-if="error" class="flex flex-wrap items-center gap-2 text-sm text-z-text-secondary">
       <span>{{ error }}</span>
       <ZButton size="small" :disabled="disabled" @click="load">
-        {{ t('common.actions.retry') }}
+        {{ t('keys.editor.retryFastModels') }}
       </ZButton>
     </div>
     <ZScrollbar max-height="16rem">
