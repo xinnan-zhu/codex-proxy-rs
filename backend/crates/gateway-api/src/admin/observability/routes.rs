@@ -269,6 +269,7 @@ where
     .map_err(map_wire_error)?;
     let filter = domain::UsageFilter {
         provider_kind: non_empty(query.provider),
+        model: non_empty(query.model),
         ..Default::default()
     };
     let result = state
