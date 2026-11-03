@@ -94,7 +94,8 @@
       "resetFastOnQuota": "Restore group Fast settings at quota reset",
       "resetFastOnQuotaHint": "Clears separately enabled Fast once at the earliest weekly or monthly reset in this key’s available accounts, including early resets confirmed by new quota observations",
       "fastResetCompleted": "Restored to group settings",
-      "fastResetScheduled": "Scheduled to restore by {time}"
+      "fastResetScheduled": "Scheduled to restore by {time}",
+      "retryFastModels": "Retry"
     },
     "fields": {
       "copyFullKey": "Copy full key",

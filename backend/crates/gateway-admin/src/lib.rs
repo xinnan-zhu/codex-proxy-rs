@@ -2,7 +2,7 @@
 //!
 //! 本 crate 不包含 HTTP wire、数据库实现或具体 Provider 实现
 
-use std::{fmt, sync::Arc};
+use std::{fmt, path::Path, sync::Arc};
 
 use gateway_core::{
     engine::execution::ClientKeyVerifier, engine::probe::AccountProbe, runtime::SnapshotControl,
