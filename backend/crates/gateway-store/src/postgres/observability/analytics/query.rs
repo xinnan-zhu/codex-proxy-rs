@@ -397,6 +397,7 @@ impl<'a> AnalyticsSnapshot<'a> {
             UsageInsightMetric::Cost | UsageInsightMetric::Savings => &[
                 "request_count",
                 "success_count",
+                "billed_total_tokens",
                 "provider_reported_count",
                 "calculated_count",
                 "unavailable_count",
@@ -406,12 +407,14 @@ impl<'a> AnalyticsSnapshot<'a> {
                 "success_count",
                 "input_tokens",
                 "cached_input_tokens",
+                "billed_total_tokens",
                 "cache_hit_request_count",
                 "cache_eligible_request_count",
                 "provider_reported_count",
                 "calculated_count",
                 "unavailable_count",
             ],
+            UsageInsightMetric::Throughput => &["request_count", "estimated_throughput_count"],
             _ => &["request_count"],
         };
         let selection = ReadSelection {
