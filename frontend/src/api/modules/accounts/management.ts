@@ -68,6 +68,7 @@ interface AccountUpdateParam {
 
 interface AccountBatchUpdateParam {
   codexOnly?: boolean
+  autoUseQuotaCredits?: boolean
   outboundProxyUrl?: string
   outboundProxyId?: string
   accountIds: string[]

@@ -15,6 +15,7 @@ export interface ApiKeyFormValue {
   modelFastModes: ModelFastModes
   peerSharing: ApiKeyPeerSharing
   providerRequestProfileOverrides: ProviderRequestProfiles
+  installationSeed: string
   customKey: string
   name: string
   label: string
@@ -44,13 +45,24 @@ export function useApiKeyEditor(options: {
 
   function openEdit(key: ApiKey) {
     editingKey.value = key
+    const profiles = cloneDeep(key.providerRequestProfileOverrides)
+    const openai = profiles.openai
+    const identity = (openai?.inherit as Record<string, unknown> | undefined) ?? openai
+    const installationSeed = typeof identity?.installationSeed === 'string'
+      ? identity.installationSeed
+      : ''
+    if (openai?.inherit)
+      delete profiles.openai
+    else if (openai)
+      delete openai.installationSeed
     form.value = {
       modelFastModes: cloneDeep(key.modelFastModes),
       resetFastModeOnQuotaReset: key.resetFastModeOnQuotaReset,
       fastModeResetsAtDisplay: key.fastModeResetsAtDisplay,
       fastModeResetCompleted: key.fastModeResetCompleted,
       peerSharing: { ...key.peerSharing },
-      providerRequestProfileOverrides: cloneDeep(key.providerRequestProfileOverrides),
+      providerRequestProfileOverrides: profiles,
+      installationSeed,
       customKey: '',
       name: key.name,
       label: key.label ?? '',
@@ -97,6 +109,16 @@ export function useApiKeyEditor(options: {
           dailyLimitUsd: form.value.dailyLimitUsd.trim() || '0',
           weeklyLimitUsd: form.value.weeklyLimitUsd.trim() || '0',
         }
+        const profiles = cloneDeep(form.value.providerRequestProfileOverrides)
+        const installationSeed = form.value.installationSeed
+        if (installationSeed) {
+          // 仅设置种子时仍继承全局 UA，不在 Key 中复制当前全局值
+          profiles.openai = profiles.openai
+            ? { ...profiles.openai, installationSeed }
+            : {
+                inherit: { installationSeed },
+              }
+        }
         const current = editingKey.value
         let created: { key: string, name: string } | undefined
         if (current) {
@@ -111,7 +133,7 @@ export function useApiKeyEditor(options: {
               : payload.modelFastModes,
             providerRequestProfileOverrides: profileOverrideUpdates(
               current.providerRequestProfileOverrides,
-              form.value.providerRequestProfileOverrides,
+              profiles,
             ),
           })
         }
@@ -119,7 +141,7 @@ export function useApiKeyEditor(options: {
           const result = await createApiKey({
             resetFastModeOnQuotaReset: form.value.resetFastModeOnQuotaReset,
             ...payload,
-            providerRequestProfileOverrides: cloneDeep(form.value.providerRequestProfileOverrides),
+            providerRequestProfileOverrides: profiles,
             customKey: form.value.customKey || undefined,
           })
           created = { key: result.plaintextKey, name: payload.name }
@@ -134,9 +156,6 @@ export function useApiKeyEditor(options: {
         }
         else if (created) {
           options.onCreated(created.key, created.name)
-          ZNotification.success({
-            message: t('keys.editor.created'),
-          })
         }
       },
       {
@@ -176,6 +195,7 @@ function emptyForm(): ApiKeyFormValue {
       sharePlans: false,
     },
     providerRequestProfileOverrides: {},
+    installationSeed: '',
     customKey: '',
     name: '',
     label: '',

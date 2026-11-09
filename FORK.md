@@ -2,7 +2,7 @@
 
 本仓库是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人维护 fork，不是官方仓库。
 
-- 当前基线：官方 `main` **v3.39.1**（含账号额度布局与 OAuth 通知修正）
+- 当前基线：官方 `main` **v3.44.0**
 - 远程：本地 `fork` 为本仓库，`origin` 为官方仓库，`prfork` 为独立 PR 仓库
 
 官方功能、部署方式和客户端接入仍以官方 README / 文档为准。这里只记录本 fork **多出来的**、以及**明确不再保留**的差异。

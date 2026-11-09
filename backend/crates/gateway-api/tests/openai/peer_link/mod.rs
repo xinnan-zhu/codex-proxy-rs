@@ -69,6 +69,10 @@ async fn fixture(sharing: ClientPeerSharing, plaintext: &str) -> (AdminTestFixtu
         .await
         .unwrap()
         .record;
+    key.limits = RateLimits {
+        max_concurrency: 5,
+        requests_per_minute: 60,
+    };
     key.peer_sharing = sharing;
     key.groups = vec![group.clone()];
     key.name = "private-key-sentinel".into();
@@ -94,6 +98,7 @@ async fn fixture(sharing: ClientPeerSharing, plaintext: &str) -> (AdminTestFixtu
         projection: resolve_account_status(&facts, now.into()),
         account: AccountRecord {
             codex_only: false,
+            auto_use_quota_credits: false,
             id: "acct_private_sentinel".into(),
             provider_kind: provider,
             groups: vec![group.clone()],
@@ -244,7 +249,11 @@ async fn exports_scoped_observations_even_when_the_key_budget_is_exhausted_witho
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["object"], "cpr.peer");
-    assert_eq!(body["schema_version"], 2);
+    assert_eq!(body["schema_version"], 3);
+    assert_eq!(
+        body["key_limits"],
+        json!({"max_concurrency":5,"requests_per_minute":60})
+    );
     assert_eq!(body["usage"]["data"]["windows"][0]["remaining"], "0");
     assert_eq!(body["usage"]["data"]["allowed"], false);
     assert_eq!(body["usage"]["data"]["windows"][0]["limit_reached"], true);
@@ -359,7 +368,10 @@ async fn plan_only_summary_limits_exported_data_and_preserves_unknown_on_quota_r
         body["pool"]["plans"],
         json!([{ "name": "Free", "count": 1 }])
     );
-    assert_eq!(body["capabilities"], json!(["key_usage", "pool_summary"]));
+    assert_eq!(
+        body["capabilities"],
+        json!(["key_usage", "key_limits", "pool_summary"])
+    );
     assert!(body.get("quota").is_none());
 
     *fixture.provider_quota.lock().unwrap() = None;
