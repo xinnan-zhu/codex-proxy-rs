@@ -11,7 +11,7 @@ use gateway_admin::{
         settings::{AdminApiKey, AdminApiKeyMutation, ReplaceRuntimeSettings, RuntimeSettings},
         system::{
             SystemOperationAccepted, SystemOperationState, SystemOperationStatus,
-            SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
+            SystemUpdateCheck, SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
         },
     },
     ports::{
@@ -326,7 +326,7 @@ async fn system_update_proxy_should_persist_and_route_release_checks() {
     *operations.proxy_endpoint.lock().expect("proxy") = None;
     services
         .system()
-        .update_detail(true, None)
+        .update_detail(SystemUpdateCheck::Refresh, None)
         .await
         .expect("update detail");
     assert_eq!(
@@ -379,7 +379,7 @@ async fn system_update_disabled_proxy_uses_direct_and_rejects_new_selection() {
 
     services
         .system()
-        .update_detail(true, None)
+        .update_detail(SystemUpdateCheck::Refresh, None)
         .await
         .expect("check directly");
     assert_eq!(
