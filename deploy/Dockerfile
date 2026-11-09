@@ -38,9 +38,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp "${CARGO_TARGET_DIR}/release/codex-proxy-rs" /tmp/codex-proxy-rs
 # 系统更新按安装文件核对运行状态，缺少封口插件清单会被判为安装不完整；
 # 清单版本与提交必须和二进制一致，未注入真实提交的本地构建不生成清单。
-RUN install -d /tmp/official-plugins \
+RUN set -e; install -d /tmp/official-plugins \
     && if printf '%s' "${CPR_GIT_SHA}" | grep -Eq '^[0-9a-f]{40}$'; then \
         version="$(/tmp/codex-proxy-rs --version)"; \
+        test -n "${version}"; \
         { printf '{"gateway_git_sha":"%s","gateway_version":"%s","plugin_host":' "${CPR_GIT_SHA}" "${version}"; \
           cat crates/gateway-plugin/runtime/plugin-host-compatibility.json; \
           printf ',"plugins":[],"schema_version":1,"sealed":true}\n'; \

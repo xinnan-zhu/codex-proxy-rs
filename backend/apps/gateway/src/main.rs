@@ -44,10 +44,7 @@ fn run() -> Result<ExitCode, Box<dyn Error + Send + Sync>> {
         }
         Some("--version" | "-V") => {
             reject_extra_arguments(arguments)?;
-            println!(
-                "{}",
-                option_env!("CPR_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
-            );
+            println!("{}", gateway_host::build_version());
             Ok(ExitCode::SUCCESS)
         }
         Some("plugin") => {

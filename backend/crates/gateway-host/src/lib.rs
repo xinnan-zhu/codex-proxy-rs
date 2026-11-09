@@ -30,6 +30,12 @@ use gateway_core::task::{WorkerContribution, WorkerLeaderLeasePort};
 
 pub use config::{HostConfig, LoadableConfig, load_config};
 
+/// 返回宿主编译时确定的版本，与运行状态和官方插件发行身份一致。
+#[must_use]
+pub const fn build_version() -> &'static str {
+    env!("CPR_VERSION")
+}
+
 /// Host 配置加载与各能力配置校验共用的脱敏错误
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -150,7 +156,7 @@ impl HostBundle {
         &self,
     ) -> gateway_admin::model::plugins::official::OfficialPluginReleaseIdentity {
         gateway_admin::model::plugins::official::OfficialPluginReleaseIdentity {
-            gateway_version: env!("CPR_VERSION").to_owned(),
+            gateway_version: build_version().to_owned(),
             gateway_git_sha: env!("CPR_GIT_SHA").to_owned(),
         }
     }

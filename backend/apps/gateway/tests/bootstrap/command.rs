@@ -15,7 +15,12 @@ fn basic_cli_options_do_not_load_configuration_and_reject_unexpected_arguments()
             .output()
             .unwrap();
         assert!(output.status.success(), "{flag}");
-        assert!(!output.stdout.is_empty());
+        if matches!(flag, "--version" | "-V") {
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert_eq!(stdout.trim(), gateway_host::build_version());
+        } else {
+            assert!(!output.stdout.is_empty());
+        }
         assert!(output.stderr.is_empty());
     }
     for args in [
