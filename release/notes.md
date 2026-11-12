@@ -1,24 +1,24 @@
-# v3.44.0
+# v3.45.2
 
-同步上游 v3.40 至 v3.44 的更新。本 fork 继续提供按 Key 和模型控制 Fast、额度重置后自动恢复继承、xAI 额度刷新、费用效率与速率估算，以及系统更新代理。
+同步上游 v3.45.0 至 v3.45.2。保留分支按 Key 和模型设置 Fast、额度重置后恢复继承、xAI 额度刷新与推理强度记录、费用效率与速率估算，以及系统更新代理。
 
-## 调度与账号
+## 接入与账号调度
 
-- Key 和账号的排队超时可分别设置，账号队列已满或超时时可选择换号。优化 Codex 会话亲和与账号容量判断，服务退出时释放并发占用。
-- Codex 账号可单独选择是否自动消耗额度点数，默认关闭。修正生图额度的归类，避免常规模型请求的额度被计到生图额度。
-- 改进 OAuth 重新授权后的账号身份同步。连接测试区分发送前失败和上游响应，并显示可识别的代理连接及隧道错误。
-- API Key 的 Codex 安装身份改用种子派生。旧安装 ID 会在升级时迁移为种子，实际发往上游的安装 ID 可能变化。
+- 新增 Anthropic Messages 接入及输入 Token 计数。API Key 账号可选 Messages 上游，与 Responses、Chat Completions 客户端互通。
+- OpenAI OAuth 账号可设定通用额度窗口的使用率上限；达到上限后暂停分配新请求，在途请求继续。可配置周额度偏低时提前使用重置卡。
+- Codex 配置模板默认开启模型发现和实验性的异步上下文压缩。模型目录按密钥可用账号合并；Responses API Key 上游按 Codex 版本协商目录，级联 CPR 时保留上游声明的推理档位。
+- 轮询仅在成功分配账号后推进。收到 `NO_MORE_RETRY` 时停止重试当前账号。原生 Responses 保留显式 `auto/default` 档位，并在出站时省略不兼容的输出 Token 上限。
 
-## 请求记录与管理端
+## 记录、互联与安全
 
-- 使用统计分别展示取消与未完成请求，错误详情补充上游错误和 WebSocket 关闭信息。
-- 更新主题与侧栏，默认和柔光材质可独立设置圆角与组件尺寸。
-- 系统更新按已发布的通道索引查询版本，下载更新包前先获取校验值。已选择的代理继续用于查询和下载。
-- 插件 SDK 支持读取已保存的代理，并按代理 ID 指定 HTTP 请求出口。
+- 使用记录区分明确失败与结果未知；错误详情区分 HTTP 响应和 WebSocket 错误，并标记尝试记录可能缺失的情况。Messages 请求记录显式指定的推理强度。
+- CPR 互联可共享所选分组中的 API Key 账号，并阻止请求回到已经过的节点。路由路径头仅发送给已识别的 CPR 节点。
+- 更新 SQLite 和 OpenSSL 依赖，修复已知安全问题。
 
 ## 升级说明
 
-- 首次启动会自动执行数据库迁移。原有排队时限会复制到 Key 和账号两层，排队失败时自动换号默认关闭。
-- 本 fork 提供 Linux amd64 更新包和 [GHCR 镜像](https://github.com/xinnan-zhu/codex-proxy-rs/pkgs/container/codex-proxy-rs)。
+- 从本分支 v3.44.0 升级会自动执行数据库迁移。旧定时预热计划会清空并关闭，已选模型保留；继续使用时请按部署时区填写五段 Cron 表达式并重新启用。
+- 使用 CPR 互联时，请检查共享分组中的账号，并让节点间的反向代理保留 `X-CPR-Route`。
+- 提供 Linux amd64 在线更新包和 [GHCR 镜像](https://github.com/xinnan-zhu/codex-proxy-rs/pkgs/container/codex-proxy-rs)。
 
-[上游变更对比](https://github.com/zyycn/codex-proxy-rs/compare/v3.39.1...v3.44.0)
+[上游变更对比](https://github.com/zyycn/codex-proxy-rs/compare/v3.44.0...v3.45.2)

@@ -851,6 +851,23 @@ impl ClientKeyStore for PgAdminClientKeyStore {
         Ok(revision)
     }
 
+    async fn client_key_budget_window(
+        &self,
+        id: &ClientApiKeyId,
+        period: gateway_admin::model::client_keys::ClientKeyBudgetWindowPeriod,
+    ) -> AdminStoreResult<gateway_admin::model::client_keys::ClientKeyBudgetWindow> {
+        super::client_budget_windows::get(&self.keys.pool, id, period).await
+    }
+
+    async fn set_client_key_budget_window(
+        &self,
+        command: gateway_admin::model::client_keys::SetClientKeyBudgetWindow,
+        origin: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
+        context: &MutationContext,
+    ) -> AdminStoreResult<u64> {
+        super::client_budget_windows::set(&self.keys.pool, command, origin, context).await
+    }
+
     async fn update_client_key_budget_limits(
         &self,
         command: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,

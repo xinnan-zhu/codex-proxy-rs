@@ -173,9 +173,7 @@ function updatePeerSharing(key: keyof ApiKeyPeerSharing, value: boolean) {
 
         <ZFormItem :label="t('settings.clientProfile.installationSeed')" :error="installationSeedError">
           <template #label-extra>
-            <span class="-my-2 inline-flex">
-              <HelpPopover :label="t('settings.clientProfile.installationSeed')" :content="t('settings.clientProfile.installationSeedHelp')" />
-            </span>
+            <HelpPopover :label="t('settings.clientProfile.installationSeed')" :content="t('settings.clientProfile.installationSeedHelp')" />
           </template>
           <template #extra>
             <ZIconButton

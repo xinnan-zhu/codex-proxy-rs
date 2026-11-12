@@ -1088,17 +1088,15 @@ pub struct ProviderRequest {
     candidate: ProviderCandidate,
 }
 
-/// Provider 对公共观测表可解释的请求语义；未知字段保持空值
+/// Provider 私有状态与独立端点的观测补充，通用请求语义由协议层提取
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProviderRequestObservation {
     /// 独立 Provider 端点声明的请求模型，仅用于观测，不参与文本模型目录路由
     pub requested_model: Option<PublicModelId>,
-    /// Provider 从客户端请求与续接配置中解析的推理强度
-    pub reasoning_effort: Option<String>,
-    pub reasoning_preset: Option<String>,
-    pub request_kind: Option<String>,
-    pub subagent_kind: Option<String>,
-    pub compact: bool,
+    /// 已核实归属的上一响应配置；当前请求是否继承由协议层判断
+    pub previous_reasoning_effort_override: Option<String>,
+    /// 显式档位及已核实的继承档位都缺失时的观测标签，不改写出站请求
+    pub default_reasoning_effort: Option<&'static str>,
     pub continuation: ContinuationRequestObservation,
 }
 
@@ -1223,6 +1221,7 @@ pub trait Provider: Send + Sync {
         _scope: &crate::account::scope::FrozenAccountScope,
         _protocol: &str,
         _client_version: &str,
+        _peer_route: Option<&http::HeaderValue>,
     ) -> Result<
         Option<Vec<crate::routing::ProviderModelDescriptor>>,
         crate::routing::ProviderCatalogUnavailable,

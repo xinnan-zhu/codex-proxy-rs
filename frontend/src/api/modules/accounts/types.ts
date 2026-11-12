@@ -2,7 +2,7 @@ import type { RelativeTimeView } from '../../types/time'
 import type { AccountGroupRef } from '../groups'
 
 export type AccountStatus
-  = 'normal' | 'quota_exhausted' | 'rate_limited' | 'disabled' | 'error'
+  = 'normal' | 'quota_paused' | 'quota_exhausted' | 'rate_limited' | 'disabled' | 'error'
 
 export type AccountErrorReason
   = 'account_unverified'
@@ -15,6 +15,7 @@ export interface AccountQuotaWindow {
   estimatedQuotaUsd: number | null
   estimatedQuotaUsdDisplay: string
   resetAt: string | null
+  accountWide: boolean
   sourceAccountId?: string | null
   amount?: { usedDisplay: string, remainingDisplay: string, totalDisplay: string } | null
   observedAtDisplay?: string | null
@@ -54,6 +55,7 @@ export interface AccountQuota {
   rateLimitedUntil: string | null
   rateLimitRecoveryDisplay: string | null
   rateLimitReason: 'upstream_rate_limit' | 'error_protection' | null
+  pausedWindows: string[]
   protectionRules: AccountProtectionRule[]
   recoveryProbeRequired: boolean
   windows: AccountQuotaWindow[]
@@ -142,6 +144,7 @@ export interface AccountModelAccess {
 
 export interface Account {
   codexOnly: boolean
+  quotaLimits: Record<string, number>
   autoUseQuotaCredits: boolean
   upstream: AccountUpstream | null
   capabilities: AccountCapabilities
@@ -204,6 +207,7 @@ export interface AccountUpstream {
 }
 
 export interface AccountCapabilities {
+  quotaLimitsSupported: boolean
   quotaCredits: boolean
   quota: boolean
   quotaRefresh: boolean

@@ -2026,59 +2026,11 @@ async fn request_observation_identifies_unspecified_xai_reasoning_without_rewrit
 
     let observation = provider.request_observation(&operation, &client_key_id);
 
-    assert_eq!(observation.reasoning_effort.as_deref(), Some("default"));
+    assert_eq!(observation.default_reasoning_effort, Some("default"));
     let Operation::Generate(request) = &operation else {
         panic!("generate operation");
     };
     assert_eq!(request.protocol_payload().body(), &body);
-}
-
-#[tokio::test]
-async fn request_observation_preserves_raw_xai_reasoning_effort() {
-    let provider = provider(StubSelector::success(), StubInferenceTransport::success()).await;
-
-    let client_key_id =
-        gateway_core::policy::ClientApiKeyId::new("key_xai_observation").expect("client key");
-    let observation = provider.request_observation(
-        &operation_with_reasoning_effort("future-value"),
-        &client_key_id,
-    );
-
-    assert_eq!(
-        observation.reasoning_effort.as_deref(),
-        Some("future-value")
-    );
-}
-
-#[tokio::test]
-async fn request_observation_preserves_codex_semantics_for_xai() {
-    let provider = provider(StubSelector::success(), StubInferenceTransport::success()).await;
-    let payload = ProtocolPayload::json_object(
-        "openai",
-        object(json!({
-            "model": "client-model",
-            "reasoning": {"effort": "xhigh"},
-            "input": [
-                {"type": "message", "role": "user", "content": "history"},
-                {"type": "compaction_trigger"}
-            ]
-        })),
-    )
-    .expect("OpenAI payload")
-    .with_context(Map::from_iter([(
-        "turn_metadata".to_owned(),
-        json!("{\"request_kind\":\"compaction\",\"subagent_kind\":\"compact\"}"),
-    )]));
-    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(payload));
-
-    let client_key_id =
-        gateway_core::policy::ClientApiKeyId::new("key_xai_observation").expect("client key");
-    let observation = provider.request_observation(&operation, &client_key_id);
-
-    assert_eq!(observation.reasoning_effort.as_deref(), Some("xhigh"));
-    assert_eq!(observation.request_kind.as_deref(), Some("compaction"));
-    assert_eq!(observation.subagent_kind.as_deref(), Some("compact"));
-    assert!(observation.compact);
 }
 
 fn operation_with_state(body: serde_json::Value, state: ProviderSessionState) -> Operation {

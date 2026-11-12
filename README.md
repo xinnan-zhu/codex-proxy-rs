@@ -18,10 +18,10 @@
 
 > [!IMPORTANT]
 > 这是 [zyycn/codex-proxy-rs](https://github.com/zyycn/codex-proxy-rs) 的个人 fork，不是官方仓库。当前已同步官方 **v3.13.1**。
-> 相对官方多了：账号「仅限 Codex 官方客户端」、请求 Turn State 字节统计、使用记录「智商」列。完整说明见 [FORK.md](FORK.md)。
+> 相对官方多了：账号「仅限 Codex 官方客户端」、按 Key 和模型设置 Fast、xAI 额度刷新，以及费用效率与速率估算。完整说明见 [FORK.md](FORK.md)。
 
 > [!NOTE]
-> 本项目提供 Responses API 和 Chat Completions API；Chat Completions 请求通过 Responses 链路执行，支持范围见 [API 参考](docs/api.md#chat-completions-请求)
+> 生成请求支持 [OpenAI Responses](docs/api.md#responses-请求与传输)、[Chat Completions](docs/api.md#chat-completions-请求) 和 [Anthropic Messages](docs/api.md#messages-请求) 三种协议
 
 ## 快速预览
 
@@ -104,12 +104,12 @@ API Key 持有者可在登录页切换身份，查看自己的用量与额度，
 
 完整步骤、生图配置与排障见[客户端配置](deploy/README.md#客户端配置)
 
-**其他 Responses / Chat Completions API 客户端**：填写以下信息：
+**其他 API 客户端**：API Key 填写管理端创建的客户端密钥。按客户端自动追加的请求路径填写 Base URL；远程接入时将本机地址换成服务器的 HTTPS 地址
 
-| 配置 | 值 |
+| 客户端自动追加的路径 | Base URL（本机部署） |
 | --- | --- |
-| Base URL | `http://127.0.0.1:8080/v1`；远程接入使用服务器的 HTTPS 地址 |
-| API Key | 管理端创建的客户端密钥 |
+| OpenAI Responses：`/responses`；Chat Completions：`/chat/completions` | `http://127.0.0.1:8080/v1` |
+| Anthropic Messages：`/v1/messages` | `http://127.0.0.1:8080` |
 
 查询该密钥可见的模型目录：
 

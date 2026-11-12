@@ -16,10 +16,12 @@ use crate::{
     model::{
         AdminError, MutationContext,
         client_keys::{
-            ClientKeyBudgetMutationOrigin, ClientKeyCursorValue, ClientKeyListQuery,
-            ClientKeyMutation, ClientKeyPage, ClientKeyRecord, ClientKeySecret, ClientKeySortField,
-            CreateClientKey, CreatedClientKey, DeleteClientKey, NewClientKey, ResetClientKeyBudget,
-            SetClientKeyEnabled, UpdateClientKey, UpdateClientKeyBudgetLimits,
+            ClientKeyBudgetMutationOrigin, ClientKeyBudgetWindow, ClientKeyBudgetWindowPeriod,
+            ClientKeyCursorValue, ClientKeyListQuery, ClientKeyMutation, ClientKeyPage,
+            ClientKeyRecord, ClientKeySecret, ClientKeySortField, CreateClientKey,
+            CreatedClientKey, DeleteClientKey, NewClientKey, ResetClientKeyBudget,
+            SetClientKeyBudgetWindow, SetClientKeyEnabled, UpdateClientKey,
+            UpdateClientKeyBudgetLimits,
         },
     },
     ports::store::{AdminStoreError, AdminStoreErrorKind, ClientKeyStore},
@@ -32,6 +34,18 @@ use super::{map_store_error, publish_committed};
 pub trait ClientKeyService: Send + Sync {
     fn fast_models(&self)
     -> Result<Vec<crate::model::client_keys::ClientKeyFastModel>, AdminError>;
+
+    async fn budget_window(
+        &self,
+        id: &ClientApiKeyId,
+        period: ClientKeyBudgetWindowPeriod,
+    ) -> Result<ClientKeyBudgetWindow, AdminError>;
+    async fn set_budget_window(
+        &self,
+        context: &MutationContext,
+        command: SetClientKeyBudgetWindow,
+        origin: ClientKeyBudgetMutationOrigin,
+    ) -> Result<u64, AdminError>;
 
     async fn get(&self, id: &ClientApiKeyId) -> Result<ClientKeyRecord, AdminError>;
     async fn list(&self, query: ClientKeyListQuery) -> Result<ClientKeyPage, AdminError>;
@@ -130,6 +144,35 @@ impl ClientKeyService for DefaultClientKeyService {
                     .any(|tier| tier.id() == "priority"),
             })
             .collect())
+    }
+
+    async fn budget_window(
+        &self,
+        id: &ClientApiKeyId,
+        period: ClientKeyBudgetWindowPeriod,
+    ) -> Result<ClientKeyBudgetWindow, AdminError> {
+        self.store
+            .client_key_budget_window(id, period)
+            .await
+            .map_err(|error| map_store_error(error, "client API key"))
+    }
+
+    async fn set_budget_window(
+        &self,
+        context: &MutationContext,
+        command: SetClientKeyBudgetWindow,
+        origin: ClientKeyBudgetMutationOrigin,
+    ) -> Result<u64, AdminError> {
+        if command
+            .window
+            .is_some_and(|window| window.starts_at >= window.ends_at)
+        {
+            return Err(AdminError::invalid("预算窗口结束时间必须晚于开始时间"));
+        }
+        self.store
+            .set_client_key_budget_window(command, origin, context)
+            .await
+            .map_err(|error| map_store_error(error, "client API key"))
     }
 
     async fn get(&self, id: &ClientApiKeyId) -> Result<ClientKeyRecord, AdminError> {
