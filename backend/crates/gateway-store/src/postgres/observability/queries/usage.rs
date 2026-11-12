@@ -137,10 +137,6 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             case when saved_upstream.body ->> 'type' = 'websocket.close'
               and jsonb_typeof(saved_upstream.body -> 'code') = 'number'
               then saved_upstream.body ->> 'code'
-              when jsonb_typeof(saved_upstream.body) = 'array' then
-                (select case when jsonb_array_length(codes) = 1 then codes ->> 0 end
-                 from jsonb_path_query_array(saved_upstream.body,
-                   '$ ? (@.type == \"websocket.close\").code ? (@.type() == \"number\")') as codes)
             end as websocket_close_code,
             mr.continuation_unavailable_reason, mr.upstream_connection_exit_reason,
             (mr.recovery_request_id is not null and mr.recovered_at is not null) as recovered,
