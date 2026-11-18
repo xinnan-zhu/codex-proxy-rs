@@ -4,6 +4,7 @@ use gateway_core::metering::{CalculatedCost, Usage};
 
 use super::*;
 use crate::credential::CodexSelectionModel;
+use crate::transport::CodexTransportDecision;
 use gateway_core::operation::RawJsonPayload;
 
 impl CodexProvider {
@@ -720,6 +721,7 @@ pub(super) fn cold_json_response_stream(request: ColdJsonResponse) -> EventStrea
                 &active_account,
                 &response.rate_limit_headers,
                 image_endpoint,
+                true,
             )
             .await;
             if !response.set_cookie_headers.is_empty()
@@ -905,7 +907,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 }
                 apply_failure(&failure_context, &active_account, &failure)
                 .await;
-                Err(quota_continuation_replay_error(
+                Err(continuation_recovery_error(
                     failure.error,
                     &request,
                     ReplayBoundary::BeforeSemanticOutput,
@@ -925,6 +927,8 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             return;
         }
         if let Some(capture) = session_capture.as_mut() {
+            capture.oversized_http = response.transport_metrics.decision
+                == Some(CodexTransportDecision::Http2WebSocketMessageTooLarge);
             capture.continuation_scope = Some(if capture.response_store {
                 OpenAiContinuationScope::Persisted
             } else if response.transport == CodexBackendTransport::WebSocket
@@ -1020,6 +1024,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         &quota,
                         &active_account,
                         passive_quota_observation.rate_limits(),
+                        decoder.semantic_output_seen(),
                     )
                     .await;
                 }
@@ -1104,12 +1109,13 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                             &quota,
                             &active_account,
                             passive_quota_observation.rate_limits(),
+                            decoder.semantic_output_seen(),
                         )
                         .await;
                     }
                     apply_failure(&failure_context, &active_account, &failure)
                     .await;
-                    Err(quota_continuation_replay_error(
+                    Err(continuation_recovery_error(
                         failure.error,
                         &request,
                         ReplayBoundary::from_semantic_output(client_events.replay_closed()),
@@ -1208,6 +1214,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     &quota,
                     &active_account,
                     passive_quota_observation.rate_limits(),
+                    completed && terminal_failure.is_none() || decoder.semantic_output_seen(),
                 )
                 .await;
                 trace.record("provider.quota_sync", json!({
@@ -1264,7 +1271,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         .error
                         .with_atomic_client_events(events);
                 }
-                Err(quota_continuation_replay_error(
+                Err(continuation_recovery_error(
                     failure.error,
                     &request,
                     ReplayBoundary::from_semantic_output(failure_after_commit),
@@ -1328,11 +1335,16 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             passive_quota_observation.observe(&updates);
             observation_state.merge_rate_limit_headers(&rate_limit_update_headers(&updates))
         };
+        let completed = events
+            .iter()
+            .flat_map(ProviderEvent::canonical_facts)
+            .any(|event| matches!(event, GatewayEvent::Completed(_)));
         if allows_account_state_mutation {
             synchronize_passive_quota(
                 &quota,
                 &active_account,
                 passive_quota_observation.rate_limits(),
+                completed && terminal_failure.is_none() || decoder.semantic_output_seen(),
             )
             .await;
         }
@@ -1348,10 +1360,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         .await
         .unwrap_or(false);
         attach_openai_session_update(&mut events, &mut session_capture);
-        let completed = events
-            .iter()
-            .flat_map(ProviderEvent::canonical_facts)
-            .any(|event| matches!(event, GatewayEvent::Completed(_)));
         let terminal_changed = completed
             && observation_state.mark_completed(terminal_response_is_incomplete(&events));
         if response_transport == CodexBackendTransport::WebSocket
@@ -1393,7 +1401,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     .error
                     .with_atomic_client_events(events);
             }
-            Err(quota_continuation_replay_error(
+            Err(continuation_recovery_error(
                 failure.error,
                 &request,
                 ReplayBoundary::from_semantic_output(failure_after_commit),

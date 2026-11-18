@@ -72,7 +72,7 @@ struct CodexQuotaRefreshAttempt {
     wall_at: SystemTime,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct CodexQuotaSchedulingEntry {
     version: u64,
     revision: CredentialRevision,
@@ -211,7 +211,7 @@ impl CodexQuotaSchedulingProjection {
             .filter(|entry| {
                 entry.revision == account.revision() && Instant::now() < entry.expires_at
             })
-            .and_then(|entry| entry.signals)
+            .and_then(|entry| entry.signals.clone())
     }
 
     pub(super) fn reserve_periodic_refreshes(
@@ -352,7 +352,7 @@ fn quota_refresh_candidate(
             .filter(|window| {
                 window.is_account_wide()
                     && account
-                        .quota_limits()
+                        .quota_settings()
                         .reached(window.key(), window.used_percent())
             })
             .filter_map(CodexQuotaWindow::reset_at)

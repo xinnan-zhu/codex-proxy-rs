@@ -102,15 +102,15 @@
     "downloadProxy": {
       "label": "下載代理",
       "help": "檢查更新與下載更新包使用的出口",
-      "direct": "直連",
-      "noProxy": "不使用代理",
+      "direct": "部署預設出口",
+      "noProxy": "沿用部署環境的代理設定",
       "disabled": "（已禁用）",
       "failed": "（測試失敗）",
       "untested": "（未測試）",
-      "currentlyDirect": "當前直連",
+      "currentlyDirect": "目前使用部署預設出口",
       "selected": "已選代理",
       "savedProxy": "更新將通過所選代理下載",
-      "savedDirect": "更新將直連下載",
+      "savedDirect": "系統更新將使用部署預設出口",
       "saveFailed": "保存下載代理失敗"
     }
   }

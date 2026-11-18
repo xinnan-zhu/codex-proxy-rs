@@ -28,17 +28,45 @@ pub struct StoredAccountCatalog {
     pub document: bytes::Bytes,
 }
 
-/// 批量选号的存储优化：只有账号自己的当前版本、有效时间和目录摘要都匹配才可跳过
+/// 批量选号只按账号当前凭据和套餐的目录摘要排除候选
 pub struct AccountCatalogOmissions {
     pub documents: Vec<[u8; 32]>,
     pub exceptions: Vec<ProviderAccountId>,
-    pub observed_after: std::time::SystemTime,
     pub as_of: std::time::SystemTime,
+}
+
+/// Provider 自行解释预热进度；版本只用于并发领取和观测合并
+#[derive(Clone, Default)]
+pub struct QuotaWarmupState {
+    pub version: u64,
+    pub data: serde_json::Map<String, serde_json::Value>,
+}
+
+pub struct QuotaWarmupStateUpdate<'a> {
+    pub account: &'a ProviderAccount,
+    pub expected_version: u64,
+    pub expected_quota_observed_at: Option<std::time::SystemTime>,
+    pub data: serde_json::Map<String, serde_json::Value>,
 }
 
 /// `provider_accounts` 的数据库中立端口
 #[async_trait]
 pub trait ProviderAccountStore: Send + Sync {
+    async fn load_quota_warmup_state(
+        &self,
+        _account: &ProviderAccount,
+    ) -> Result<Option<QuotaWarmupState>, StoreError> {
+        Err(StoreError::new(crate::error::StoreErrorKind::InvalidData))
+    }
+
+    /// 配置、凭据或进度变化均使领取失败，取消或崩溃后不能重放已领取的请求
+    async fn compare_and_swap_quota_warmup_state(
+        &self,
+        _update: QuotaWarmupStateUpdate<'_>,
+    ) -> Result<bool, StoreError> {
+        Err(StoreError::new(crate::error::StoreErrorKind::InvalidData))
+    }
+
     async fn load_account_catalogs(
         &self,
         provider: &ProviderKind,

@@ -102,15 +102,15 @@
     "downloadProxy": {
       "label": "Download proxy",
       "help": "Connection used to check and download updates",
-      "direct": "Direct",
-      "noProxy": "No proxy",
+      "direct": "Deployment default",
+      "noProxy": "Use the deployment proxy settings",
       "disabled": " (disabled)",
       "failed": " (test failed)",
       "untested": " (untested)",
-      "currentlyDirect": "Currently direct",
+      "currentlyDirect": "Using deployment default",
       "selected": "Selected proxy",
       "savedProxy": "Updates will download through the selected proxy",
-      "savedDirect": "Updates will download directly",
+      "savedDirect": "Updates will use the deployment default connection",
       "saveFailed": "Failed to save the download proxy"
     }
   }

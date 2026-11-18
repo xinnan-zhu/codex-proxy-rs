@@ -1,24 +1,32 @@
-# v3.45.2
+# v3.52.0
 
-同步上游 v3.45.0 至 v3.45.2。保留分支按 Key 和模型设置 Fast、额度重置后恢复继承、xAI 额度刷新与推理强度记录、费用效率与速率估算，以及系统更新代理。
+同步上游 v3.46.0 至 v3.52.0，保留按 Key 和模型设置 Fast、额度重置后恢复继承、xAI 额度刷新与推理强度记录、费用效率、速率估算和系统更新代理
 
-## 接入与账号调度
+## 新增功能
 
-- 新增 Anthropic Messages 接入及输入 Token 计数。API Key 账号可选 Messages 上游，与 Responses、Chat Completions 客户端互通。
-- OpenAI OAuth 账号可设定通用额度窗口的使用率上限；达到上限后暂停分配新请求，在途请求继续。可配置周额度偏低时提前使用重置卡。
-- Codex 配置模板默认开启模型发现和实验性的异步上下文压缩。模型目录按密钥可用账号合并；Responses API Key 上游按 Codex 版本协商目录，级联 CPR 时保留上游声明的推理档位。
-- 轮询仅在成功分配账号后推进。收到 `NO_MORE_RETRY` 时停止重试当前账号。原生 Responses 保留显式 `auto/default` 档位，并在出站时省略不兼容的输出 Token 上限。
+- 请求记录支持按历史账号名称或邮箱筛选，区分 Fast 与 Ultrafast 标识，内置 GPT-6.2 Astra 和 Sol 价目，Ultrafast 暂按常规价估算
+- 额度调度支持独立配置 5 小时、周、月重置窗口系数，智能调度与额度调度分别保存偏好
+- OpenAI 通用额度桶可配置重置后预热，默认关闭；定时预热支持多条 Cron 规则
+- 请求历史保留期可设置为超过 31 天的正整数，保留已有设置
+- 管理端支持安装为 PWA 独立窗口应用，源码构建可配置 URL 子路径前缀
+- 插件可查询已保留的历史额度观测，调度插件可识别账号的会话绑定与选号关系
 
-## 记录、互联与安全
+## 问题修复
 
-- 使用记录区分明确失败与结果未知；错误详情区分 HTTP 响应和 WebSocket 错误，并标记尝试记录可能缺失的情况。Messages 请求记录显式指定的推理强度。
-- CPR 互联可共享所选分组中的 API Key 账号，并阻止请求回到已经过的节点。路由路径头仅发送给已识别的 CPR 节点。
-- 更新 SQLite 和 OpenSSL 依赖，修复已知安全问题。
+- 改进 WebSocket 大请求、背压与建连失败恢复，同一请求跳过已确认不可达的代理入口
+- 修正原生续接的容量拒绝恢复、Claude Messages 会话亲和及无状态码的流内请求错误分类
+- 目录刷新、预热和连接测试使用全局客户端画像，自动画像每小时检查版本，保留模型排除规则
+- 修复只读目录更新或回滚的权限处理，以及管理端主题和 PWA 标题栏显示
+- 更新 Quinn、rustix 等依赖，修复已知安全问题
 
-## 升级说明
+## 升级须知
 
-- 从本分支 v3.44.0 升级会自动执行数据库迁移。旧定时预热计划会清空并关闭，已选模型保留；继续使用时请按部署时区填写五段 Cron 表达式并重新启用。
-- 使用 CPR 互联时，请检查共享分组中的账号，并让节点间的反向代理保留 `X-CPR-Route`。
-- 提供 Linux amd64 在线更新包和 [GHCR 镜像](https://github.com/xinnan-zhu/codex-proxy-rs/pkgs/container/codex-proxy-rs)。
+- 出站请求未显式选择代理时，按部署的 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 和 NO_PROXY 设置选择出口；系统更新单独选择的代理继续优先使用
+- 额度重置窗口系数默认全为 0；依赖重置时间评分的智能调度请至少设置一个正系数
+- 管理 API 调用方须将请求记录参数 accountName 改为 accountSearch，将账号 quotaLimits 改为 quotaSettings，并为运行设置更新补充 quotaResetWindowWeights
+- 调度插件 scheduler 能力升级至 v4，使用 v3 的插件须适配后使用
+- 请使用 PostgreSQL 16 或更高版本，默认 Compose 使用 PostgreSQL 18；数据库迁移保留已有额度上限，额度桶预热默认关闭
+- Responses 的部分会话与线程标识映射会变化，账号隔离保留；URL 子路径在构建时确定，使用此前缀需重新构建并配置反向代理
+- 提供 Linux amd64 更新包和 [GHCR 镜像](https://github.com/xinnan-zhu/codex-proxy-rs/pkgs/container/codex-proxy-rs)
 
-[上游变更对比](https://github.com/zyycn/codex-proxy-rs/compare/v3.44.0...v3.45.2)
+[上游变更对比](https://github.com/zyycn/codex-proxy-rs/compare/v3.45.2...v3.52.0)

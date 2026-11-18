@@ -20,10 +20,11 @@
 | --- | --- | --- |
 | `deploy/config.yaml` | 监听、数据库/Redis 连接、部署凭据、时区、日志与可选内存分配策略等启动配置 | 从模板创建，已有部署合并修改，不覆盖原文件 |
 | `deploy/compose.yaml` | 镜像、容器网络、端口、挂载、PostgreSQL 启动参数与资源限制 | 调整 Compose 并重建受影响容器 |
+| `frontend/.env` | 前端部署前缀 | 通过 `.env.local` 覆盖后重新构建，详见 [URL 子路径部署](#url-子路径部署) |
 | PostgreSQL | 账号、Key、运行设置、上游身份、插件配置等业务数据 | 管理端或管理 API |
 | 浏览器本地 | 主题和界面偏好 | 当前浏览器的主题设置 |
 
-项目不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布；
+后端不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布；
 可选的内存分配策略由 `config.yaml` 的 `services.app-runtime` 桥接到应用容器。
 配置加载会忽略未知字段，并在启动控制台提示字段名；不输出对应值。缺少必填字段时会指出缺项并停止启动，
 已知字段的类型和取值仍需合法；可选字段省略时使用默认值
@@ -122,6 +123,9 @@ store:
 应用默认上限为 20，允许的最小值为 2；降低上限可以限制实际数据库连接数，但也会增加请求、后台写入与管理查询之间的等待。
 如果出现连接获取超时，应结合数据库负载调大池容量，不要仅延长等待时间
 
+统计 Worker 重算分组时，若临时文件写入较多且数据库有内存余量，可在 `store.pool` 下设置 `analytics_projection_work_mem_mb: 8`（单位 MB）。
+默认省略，沿用 PostgreSQL 的 `work_mem`；显式设置仅影响增量投影和历史回填所在的事务，队列确认、整桶重建和在线查询继续沿用原值
+
 将 `deploy/compose.yaml` 中 `services.postgres.command` 替换为以下列表，保留 UTC 参数：
 
 ```yaml
@@ -218,6 +222,8 @@ docker compose -f deploy/compose.yaml stats --no-stream
 容器硬内存上限不能代替这些预算，过紧会导致 OOM；需要回退时恢复调整前的参数，按同样流程重建对应容器
 
 ## 部署结构
+
+PostgreSQL 最低版本为 16，默认 Compose 使用 PostgreSQL 18
 
 ```mermaid
 flowchart LR
@@ -316,7 +322,7 @@ store:
 ## Windows 二进制部署
 
 发行包提供 Windows x64（`windows_amd64`）和 ARM64（`windows_arm64`）版本，按运行机器的 CPU 架构选择。
-需先准备可访问的 PostgreSQL 和 Redis，创建数据库及用户；使用数据库备份功能时，还需将匹配服务端版本的 `pg_dump` 加入 `PATH`
+需先按[数据库版本要求](#部署结构)准备 PostgreSQL，创建数据库及用户，并确保 Redis 可访问。使用数据库备份功能时，还需将匹配服务端版本的 `pg_dump` 加入 `PATH`
 
 从 [Release 附件](https://github.com/zyycn/codex-proxy-rs/releases) 下载对应的
 `codex-proxy-rs_<version>_windows_<arch>.tar.gz`，解压后保留 `codex-proxy-rs.exe`、`web/dist`、`deploy` 和 `plugins/official` 的目录关系。
@@ -382,6 +388,14 @@ HTTP 在数据库迁移和初始化完成后才监听。迁移期间启动日志
 不要把未脱敏的 `docker compose config` 或 `docker inspect` 输出上传到工单；它们会包含
 PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 
+### 安装管理端应用
+
+使用 Chrome、Edge 等支持 PWA 的浏览器访问管理端，可通过地址栏或浏览器菜单安装应用，安装后以独立窗口打开站点首页，沿用现有登录流程
+
+首次在 Chrome 中安装时，系统标题栏可能显示应用名称。可用窗口右上角的标题栏按钮隐藏名称，隐藏后仍可拖动顶部空白区域移动窗口
+
+安装入口要求 HTTPS，或本机的 `http://localhost`、`http://127.0.0.1`；普通 HTTP 局域网地址不满足条件。入口是否显示还取决于浏览器、访问交互及是否已安装。应用需要联网访问网关，不提供离线使用
+
 ### 启动后的运行设置
 
 在管理端修改以下设置，保存后对新请求生效，重启不会覆盖已保存的选择：
@@ -433,9 +447,21 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 “修改未添加项”只带回明确未添加的条目；连接测试失败的代理已经保存，可在列表中重新测试。
 请求中断或结果无法确认时暂停后续提交，添加结果待确认的条目可能已保存，应先刷新列表核对，不能直接重复添加
 
-创建或编辑账号时，在“出站隧道”选择直连或已保存的代理，点击右侧的“测试出口”图标。
+“部署默认出口”表示跟随网关进程的环境。账号上游请求、插件受管网络和网关下载优先使用业务指定的代理，只有未指定时才读取 `HTTP_PROXY`（HTTP/WS）或 `HTTPS_PROXY`（HTTPS/WSS）。缺少对应协议的代理时使用 `ALL_PROXY`；命中 `NO_PROXY` 或没有适用的代理时直连。环境变量支持小写，大写优先。选中的代理连接失败会报错，不会回退直连。
+
+使用 Docker Compose 时，把环境变量加到 `codex-proxy-rs` 服务已有的 `environment` 下，修改后重新创建该容器。无需修改 CPR 的 `config.yaml` 或 Docker daemon 的代理设置。例如，让网关通过代理访问外部 HTTPS 服务，同时直连公司内网域名：
+
+```yaml
+services:
+  codex-proxy-rs:
+    environment:
+      HTTPS_PROXY: "http://proxy.example:3128"
+      NO_PROXY: "localhost,127.0.0.1,::1,.corp.example"
+```
+
+创建或编辑账号时，在“出站隧道”选择部署默认出口或已保存的代理，点击右侧的“测试出口”图标。
 耗时显示在对应选项右侧，悬浮可查看 IPv4 / IPv6，测试失败通过通知提示。
-禁用代理的账号使用服务器直连出口。出口测试不保存账号设置，也不验证账号权限或额度；账号可用性使用账号连接测试
+禁用代理的账号使用部署默认出口。出口测试不保存账号设置，也不验证账号权限或额度；账号可用性使用账号连接测试
 
 在代理列表点击关联账号数量，再点击“分配账号”，搜索并跨页勾选账号后点击右上角的“分配”，一次最多 1000 个。
 已使用此代理的账号不可重复选择；所选账号原有代理会被替换，凭据、分组与调度设置保留。禁用代理须先启用
@@ -520,6 +546,55 @@ Ping/Pong 不延长空闲期限；默认每 5 秒扫描，通常在空闲 300～
 `downstream.body.closed` 和反向代理日志判断断开位置，不能仅凭此消息认定是 JSON 格式错误。
 SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待完整 SSE 事件的超时；
 若报错为 `idle timeout waiting for SSE`，再检查客户端的 `stream_idle_timeout_ms`
+
+### URL 子路径部署
+
+源码构建可通过 `CPR_WEB_BASE_PATH` 指定前端部署前缀，默认值为 `/`。
+管理端请求和生成的客户端地址沿用同一前缀，前缀以 `/` 开头和结尾，例如部署到 `https://example.com/proxy/`：
+
+```bash
+CPR_IMAGE=codex-proxy-rs:subpath CPR_WEB_BASE_PATH=/proxy/ \
+  docker compose -f deploy/compose.yaml build codex-proxy-rs
+CPR_IMAGE=codex-proxy-rs:subpath \
+  docker compose -f deploy/compose.yaml up -d --no-build --wait codex-proxy-rs
+```
+
+直接构建前端时，默认值来自所有模式共用的 `frontend/.env`。
+在不纳入 Git 的 `frontend/.env.local` 中配置以下内容，再执行 `pnpm --dir frontend build`：
+
+```dotenv
+CPR_WEB_BASE_PATH=/proxy/
+```
+
+进程环境中的同名变量优先于 env 文件，Docker 构建使用上方 Compose 构建参数。
+路径在构建时确定，修改运行时环境变量或只转发路径不会改变已发布镜像中的前端资源。
+
+后端仍按根路径提供服务，反向代理需要剥除请求前缀，并为登录和刷新 Cookie 的 `Path`、
+站内根相对 `Location` 补回前缀，保证 Realtime 客户端沿返回地址连接和挂断。
+以下 Caddy 示例适用于 Caddy 在宿主机、应用使用默认本机端口的部署：
+
+```caddyfile
+example.com {
+    redir /proxy /proxy/ 308
+
+    handle_path /proxy/* {
+        reverse_proxy 127.0.0.1:8080 {
+            header_down Set-Cookie "(?i)(;[[:space:]]*Path=)/([^;]*)" "${1}/proxy/${2}"
+            # 仅改写站内根相对路径，保留外部 URL
+            header_down Location "^/([^/].*)?$" "/proxy/${1}"
+            flush_interval -1
+        }
+    }
+}
+```
+
+Caddy 与应用同在容器网络时，将回源地址改为 `codex-proxy-rs:8080`。
+合并到已有站点时，将子路径处理放在兜底路由之前，保留浏览器的 `Origin` 和鉴权头。
+管理入口为 `/proxy/`，模型客户端使用 `/proxy/v1`。
+
+系统在线更新会替换前端资源。子路径部署在 `config.yaml` 的 `host` 下配置
+`system_update.update_repository: null`，通过重新构建镜像升级。
+验收时检查子页面刷新、登录续期、头像和插件资源、SSE 与 WebSocket，并保留默认根路径部署的验证。
 
 ## 客户端配置
 
@@ -798,7 +873,7 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
 
 ### 插件取文与 DNS
 
-插件受管 HTTP 由实际运行网关的主机或容器解析 DNS，再通过直连或账号代理访问目标。插件拥有完整网络访问能力，宿主不按插件身份限制私网、回环或保留地址
+插件受管 HTTP 由实际运行网关的主机或容器解析 DNS，再通过所选代理或部署默认出口访问目标。插件拥有完整网络访问能力，宿主不按插件身份限制私网、回环或保留地址
 
 域名解析失败时先核对网关运行环境的 DNS。Clash / Mihomo 的 Fake-IP 地址需要相应代理接管；无法连通时可让目标域名返回真实地址，并检查所选代理。代理失败不会自动回退直连
 
@@ -891,7 +966,7 @@ exp 不进入正式版、alpha、beta 或 rc，普通实例也不能选择 Exp�
 其他通道的版本及发布说明，手动检查显示“当前没有可用更新”。检查失败单独报告，不能当作没有更新
 
 alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Latest 或镜像 `latest`。
-升级前核对目标版本的数据库要求；可连续升级的发行线与约束见[迁移冻结规则](../backend/migrations/README.md#冻结规则)
+升级前确认 PostgreSQL 满足目标版本的[部署要求](#部署结构)。可连续升级的发行线与约束见[迁移冻结规则](../backend/migrations/README.md#冻结规则)
 
 ### 管理端在线更新
 
@@ -1003,7 +1078,7 @@ OpenAI 主动额度重置卡及消费结果由上游持有，不属于本地备�
 - 插件包体、固定来源、下载凭据、制品接受事实、实例配置、版本配置快照、敏感配置、功能范围绑定和私有状态都保存在
   PostgreSQL，随数据库一起备份。插件通过宿主回调读写的内置平台账号保存在同库的通用账号表。
   来源使用的出站代理及其认证也须随库恢复，不能只备份 `plugin_*` 表；来源代理与账号代理独立选择，
-  不依赖进程代理环境，故障时不会自动回退直连。
+  未指定时使用部署默认出口，故障时不会自动回退直连。
   包体单个上限为 32 MiB，需要计入数据库及备份容量；解压运行目录和 Redis 协调状态是可重建数据，
   不作为插件安装或制品接受事实。恢复时保留制品接受状态、实例配置、账号引用和状态代次的一致性；插件降级仍须
   通过状态兼容校验，不通过手工替换缓存目录回滚

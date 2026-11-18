@@ -206,7 +206,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
     ) -> gateway_admin::model::accounts::ProviderAccountCapabilities {
         let oauth = authentication_kind == crate::credential::CODEX_AUTHENTICATION_KIND_OAUTH;
         gateway_admin::model::accounts::ProviderAccountCapabilities {
-            quota_limits_supported: oauth,
+            quota_settings_supported: oauth,
             quota_credits: oauth,
             quota: oauth,
             quota_refresh: oauth,
@@ -760,7 +760,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
         Ok(project_quota(
             snapshot,
             account.quota().is_exhausted(),
-            account.quota_limits(),
+            account.quota_settings(),
         ))
     }
 
@@ -797,35 +797,31 @@ impl ProviderAdmin for OpenAiAdminProvider {
         }
     }
 
+    fn quota_history_parser(
+        &self,
+    ) -> Option<gateway_admin::model::quota_history::QuotaHistoryParser> {
+        Some(quota::history_reading)
+    }
+
     fn quota_forecast_observation(
         &self,
         document: &ProviderDocument,
         window: &ProviderQuotaWindow,
     ) -> Option<QuotaForecastObservation> {
-        use gateway_protocol::openai::events::parse_rate_limit_headers;
-
         if window.local_usage_attribution != QuotaLocalUsageAttribution::AccountWide {
             return None;
         }
-        let value = document
-            .expose_to_provider()
-            .expose_to_provider()
-            .get("rateLimitHeaders")?;
-        let headers: Vec<(String, String)> = serde_json::from_value(value.clone()).ok()?;
-        let parsed = parse_rate_limit_headers(&headers)?;
-        let limit = parsed.limits.get(window.limit_id.as_deref()?)?;
-        let observed = match window.role? {
-            ProviderQuotaWindowRole::Primary => limit.primary?,
-            ProviderQuotaWindowRole::Secondary => limit.secondary?,
-            ProviderQuotaWindowRole::Monthly => return None,
-        };
-        if observed.window_minutes?.checked_mul(60)? != window.window_seconds? {
+        let (observed, plan_type) = quota::history_window(document, &window.key)?;
+        if Some(observed.source()) != window.limit_id.as_deref()
+            || Some(quota_role(observed.role())) != window.role
+            || observed.window_seconds()? != window.window_seconds?
+        {
             return None;
         }
         Some(QuotaForecastObservation {
-            used_percent: observed.used_percent,
-            reset_at: DateTime::<Utc>::from_timestamp(observed.reset_at?, 0)?,
-            plan_type: parsed.plan_type,
+            used_percent: observed.used_percent()?,
+            reset_at: observed.reset_at()?,
+            plan_type,
         })
     }
 
@@ -1244,7 +1240,7 @@ fn empty_quota() -> ProviderQuota {
 fn project_quota(
     snapshot: Option<CodexAccountQuotaSnapshot>,
     limit_reached: bool,
-    limits: &gateway_core::account::AccountQuotaLimits,
+    limits: &gateway_core::account::AccountQuotaSettings,
 ) -> ProviderQuota {
     let mut quota = snapshot
         .map(|s| project_quota_snapshot(s, limits))
@@ -1255,7 +1251,7 @@ fn project_quota(
 
 fn project_quota_snapshot(
     snapshot: CodexAccountQuotaSnapshot,
-    limits: &gateway_core::account::AccountQuotaLimits,
+    limits: &gateway_core::account::AccountQuotaSettings,
 ) -> ProviderQuota {
     let mut provider_data = Map::new();
     provider_data.insert(
@@ -1957,6 +1953,11 @@ fn map_quota_error(error: CodexCredentialQuotaError) -> ProviderAdminError {
     use CodexCredentialQuotaError as Error;
     use ProviderAdminErrorKind as Kind;
     let (kind, public_message, upstream_message) = match error {
+        Error::Profile(source) => {
+            return provider_admin_error(Kind::Unavailable)
+                .with_public_message("OpenAI 账号预热客户端身份不可用")
+                .with_source(source);
+        }
         Error::InvalidCredentialData => (
             Kind::Invalid,
             "OpenAI 额度查询凭据无效，请检查账号授权",
@@ -2131,6 +2132,11 @@ fn map_catalog_error(error: CodexCredentialCatalogError) -> ProviderAdminError {
             "OpenAI 模型查询失败，请检查出站连接与上游服务",
         ),
         Error::Cache => (Kind::Unavailable, "OpenAI 模型目录缓存暂不可用"),
+        Error::Profile(source) => {
+            return provider_admin_error(Kind::Unavailable)
+                .with_public_message("OpenAI 模型目录客户端身份不可用")
+                .with_source(source);
+        }
     };
     provider_admin_error(kind).with_public_message(message)
 }

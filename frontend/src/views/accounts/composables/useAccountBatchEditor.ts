@@ -91,7 +91,7 @@ export function useAccountBatchEditor(options: {
         modelAccess: modelAccess.value,
         outboundProxyId: proxyMode.value === 'preserve'
           ? undefined
-          : proxyMode.value === 'direct'
+          : proxyMode.value === 'deployment'
             ? ''
             : proxyId.value.trim(),
         enabled: schedulingEnabled.value,

@@ -135,13 +135,7 @@ pub fn validate_download_url(raw: &str, api_base: &str) -> Result<(), OperationE
 pub(super) fn client_builder(
     proxy: Option<&OutboundProxy>,
 ) -> Result<reqwest::ClientBuilder, OperationError> {
-    let builder = reqwest::Client::builder();
-    let Some(proxy) = proxy else {
-        return Ok(builder);
-    };
-    let proxy = reqwest::Proxy::all(proxy.expose_url())
-        .map_err(|_| invalid("system update proxy is invalid"))?;
-    Ok(builder.proxy(proxy))
+    gateway_egress::http_client(proxy).map_err(|_| invalid("更新或部署代理配置不合法"))
 }
 
 pub(crate) fn download_client(

@@ -845,6 +845,17 @@ impl AccountStore for FakeAccountStore {
             .clone())
     }
 
+    async fn quota_documents(
+        &self,
+        _: &gateway_core::account::ProviderAccountId,
+        _: &gateway_core::routing::ProviderKind,
+        _: chrono::DateTime<chrono::Utc>,
+        _: gateway_admin::model::observability::TimeRange,
+        _: Option<&gateway_admin::model::quota_history::QuotaHistoryCursor>,
+    ) -> AdminStoreResult<gateway_admin::model::quota_history::QuotaDocumentPage> {
+        unreachable!("测试不读取历史额度文档")
+    }
+
     async fn load_quota_forecast_history(
         &self,
         window: &AccountUsageWindowQuery,
@@ -1180,6 +1191,7 @@ impl SettingsStore for StaticSettingsStore {
                 openai_session_affinity_ttl_hours: 24,
                 responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
                 smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+                quota_reset_window_weights: gateway_core::account::ResetWindowWeights::default(),
                 min_codex_desktop_version: None,
                 min_codex_cli_version: None,
                 usage_retention_days: 30,
@@ -1915,7 +1927,7 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         .batch_update(
             &context("batch-update-request"),
             BatchUpdateAccounts {
-                quota_limits: None,
+                quota_settings: None,
                 auto_use_quota_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
@@ -3415,7 +3427,7 @@ pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
         quota_paused: false,
-        quota_limits: Default::default(),
+        quota_settings: Default::default(),
         auto_use_quota_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,

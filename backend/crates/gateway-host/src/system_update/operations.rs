@@ -199,7 +199,7 @@ impl ProcessSystemOperations {
             Some(operation_id),
             Some("release"),
             proxy.as_ref().map_or_else(
-                || "正在获取最新 Release 信息（直连）".to_owned(),
+                || "正在获取最新 Release 信息（部署默认出口）".to_owned(),
                 |proxy| format!("正在获取最新 Release 信息（代理 {}）", proxy.endpoint()),
             ),
         );

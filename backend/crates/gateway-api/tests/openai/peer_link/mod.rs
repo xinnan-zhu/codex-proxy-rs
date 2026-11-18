@@ -100,7 +100,7 @@ async fn fixture(sharing: ClientPeerSharing, plaintext: &str) -> (AdminTestFixtu
         account: AccountRecord {
             codex_only: false,
             quota_paused: false,
-            quota_limits: Default::default(),
+            quota_settings: Default::default(),
             auto_use_quota_credits: false,
             id: "acct_private_sentinel".into(),
             provider_kind: provider,
